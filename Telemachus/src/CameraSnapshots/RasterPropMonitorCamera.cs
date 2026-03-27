@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -81,6 +81,23 @@ namespace Telemachus.CameraSnapshots
                 }
 
                 return rpmTranslateCamera;
+            }
+        }
+
+        protected UnityEngine.Transform rpmActualCamera;
+        public UnityEngine.Transform actualCamera
+        {
+            get
+            {
+                if (rpmActualCamera == null && rpmCameraModule != null)
+                {
+                    var field = rpmCameraModule.GetType().GetField("actualCamera", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    if (field != null)
+                    {
+                        rpmActualCamera = (UnityEngine.Transform)field.GetValue(rpmCameraModule);
+                    }
+                }
+                return rpmActualCamera;
             }
         }
 

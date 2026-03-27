@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 using System;
 using System.Collections.Generic;
@@ -43,6 +43,16 @@ namespace Telemachus.CameraSnapshots
         protected const float aspect = 1.0f;
         public int cameraResolution = 300;
 
+        protected bool skipFarCamera
+        {
+            get
+            {
+                // Copied from RasterPropMonitor: disables nearClipPlane math on KSP 1.9+
+                return SystemInfo.graphicsDeviceVersion.StartsWith("Direct3D") &&
+                       (Versioning.fetch.versionMinor >= 9 || Versioning.fetch.versionMajor > 1);
+            }
+        }
+
         protected void OnEnable()
         {
             Camera.onPostRender += disableCameraIfInList;
@@ -75,7 +85,8 @@ namespace Telemachus.CameraSnapshots
             yield return new WaitForEndOfFrame();
             //PluginLogger.debug(cameraManagerName() + ": OUT OF FRAME");
 
-            foreach (Camera camera in cameraDuplicates.Values)
+            var sortedCameras = cameraDuplicates.Values.OrderBy(c => c.depth).ToList();
+            foreach (Camera camera in sortedCameras)
             {
                 //camera.targetTexture = rt;
                 camera.Render();
@@ -91,9 +102,9 @@ namespace Telemachus.CameraSnapshots
             //imageStopWatch.Reset();
             //renderCount++;
 
-            //wait a second before releasing the mutex to improve performance
+            //wait a small delay before releasing the mutex to improve performance while keeping framerate acceptable
             //PluginLogger.debug("RENDER DELAY:" + (1.0f + (.3f * renderOffsetFactor)));
-            yield return new WaitForSeconds(1.0f + (.3f * renderOffsetFactor));
+            yield return new WaitForSeconds(0.1f + (0.05f * renderOffsetFactor));
             mutex = false;
         }
 
@@ -104,6 +115,17 @@ namespace Telemachus.CameraSnapshots
             texture2D.ReadPixels(new Rect(0, 0, overviewTexture.width, overviewTexture.height), 0, 0);
             texture2D.Apply();
             return texture2D;
+        }
+
+        protected virtual bool ShouldSkipCamera(Camera camera)
+        {
+            if (skippedCameras.Contains(camera.name)) return true;
+            
+            // Critical filter: do not duplicate cameras created by other mods (like RPM)
+            // that render to their own Textures. This prevents infinite camera recursion!
+            if (camera.targetTexture != null) return true;
+
+            return false;
         }
 
         public void duplicateAnyNewCameras()
@@ -117,9 +139,7 @@ namespace Telemachus.CameraSnapshots
 
             foreach (Camera camera in Camera.allCameras)
             {
-
-                // Don't duplicate any cameras we're going to skip
-                if (skippedCameras.IndexOf(camera.name) != -1)
+                if (ShouldSkipCamera(camera))
                 {
                     continue;
                 }
@@ -136,9 +156,9 @@ namespace Telemachus.CameraSnapshots
                     cameraDuplicate.aspect = aspect;
 
                     cameraDuplicate.targetTexture = this.overviewTexture;
-                    // Adjust near clip for scene cameras (not galaxy/scaled space)
-                    if (camera.name != "GalaxyCamera" && camera.name != "Camera ScaledSpace"
-                        && !camera.name.StartsWith("Camera VE"))
+                    // Adjust near clip only for small parts/FX cameras like RPM does,
+                    // but ONLY on KSP < 1.9 where this fix was needed to avoid Z-fighting.
+                    if (!skipFarCamera && (camera.name == "Camera 00" || camera.name == "FXCamera"))
                     {
                         cameraDuplicate.nearClipPlane = cameraDuplicate.farClipPlane / 8192.0f;
                     }

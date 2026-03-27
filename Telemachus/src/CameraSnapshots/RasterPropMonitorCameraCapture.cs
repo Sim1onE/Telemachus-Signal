@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -26,6 +26,15 @@ namespace Telemachus.CameraSnapshots
             }
         }
 
+        protected override bool ShouldSkipCamera(Camera camera)
+        {
+            if (base.ShouldSkipCamera(camera)) return true;
+            // InternalCamera is the IVA cockpit. If we move its duplicate to the exterior of the ship,
+            // it draws a tiny distant floating IVA box over the terrain.
+            if (camera.name == "InternalCamera") return true;
+            return false;
+        }
+
         public override string cameraManagerName()
         {
             return buildCameraManagerName(rpmCamera.cameraName);
@@ -46,17 +55,31 @@ namespace Telemachus.CameraSnapshots
         public override void additionalCameraUpdates(Camera dupliateCam, Camera gameCamera)
         {
             base.additionalCameraUpdates(dupliateCam, gameCamera);
-            if (!cameraSkipRegex.IsMatch(gameCamera.name))
+            Transform actualCamTransform = rpmCamera.actualCamera;
+
+            if (actualCamTransform != null)
             {
-                dupliateCam.transform.position = rpmCamera.part.transform.position;
+                if (!cameraSkipRegex.IsMatch(gameCamera.name))
+                {
+                    dupliateCam.transform.position = actualCamTransform.position;
+                }
+                dupliateCam.transform.rotation = actualCamTransform.rotation;
             }
+            else
+            {
+                if (!cameraSkipRegex.IsMatch(gameCamera.name))
+                {
+                    dupliateCam.transform.position = rpmCamera.part.transform.position;
+                }
 
-            // Just in case to support JSITransparentPod.
-            //cam.cullingMask &= ~(1 << 16 | 1 << 20);
+                // Just in case to support JSITransparentPod.
+                //cam.cullingMask &= ~(1 << 16 | 1 << 20);
 
-            dupliateCam.transform.rotation = rpmCamera.part.transform.rotation;
-            dupliateCam.transform.Rotate(rpmCamera.rotateCamera);
-            dupliateCam.transform.position += rpmCamera.translateCamera;
+                dupliateCam.transform.rotation = rpmCamera.part.transform.rotation;
+                dupliateCam.transform.Rotate(rpmCamera.rotateCamera);
+                // dupliateCam.transform.position += rpmCamera.translateCamera;
+                dupliateCam.transform.Translate(rpmCamera.translateCamera, Space.Self);
+            }
         }
 
         /*public override void additionalCameraUpdates(Camera cam)

@@ -75,7 +75,9 @@ if (Test-Path $kspDir) {
         Remove-Item "$kspDir/GameData/Telemachus" -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path "$kspDir/GameData/Telemachus/Plugins/PluginData/Telemachus/test" | Out-Null
-    Copy-Item "$root/WebPages/WebPagesTest/src/*" "$kspDir/GameData/Telemachus/Plugins/PluginData/Telemachus/test" -Recurse -Force
+    if (Test-Path "$root/WebPages/WebPagesTest/src") {
+        Copy-Item "$root/WebPages/WebPagesTest/src/*" "$kspDir/GameData/Telemachus/Plugins/PluginData/Telemachus/test" -Recurse -Force
+    }
     Copy-Item "$root/publish/GameData/*" "$kspDir/GameData/" -Recurse -Force
 }
 
