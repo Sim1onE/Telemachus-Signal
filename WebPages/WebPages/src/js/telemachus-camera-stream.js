@@ -233,16 +233,21 @@ class TelemachusCameraStream {
                 if (this.isCanvas) {
                     // Draw to canvas
                     if (frameToDraw.bitmap) {
-                        this.displayElement.width = frameToDraw.bitmap.width;
-                        this.displayElement.height = frameToDraw.bitmap.height;
+                        // Only resize canvas if dimensions actually changed to avoid flickering
+                        if (this.displayElement.width !== frameToDraw.bitmap.width || this.displayElement.height !== frameToDraw.bitmap.height) {
+                            this.displayElement.width = frameToDraw.bitmap.width;
+                            this.displayElement.height = frameToDraw.bitmap.height;
+                        }
                         this.ctx.drawImage(frameToDraw.bitmap, 0, 0);
                         frameToDraw.bitmap.close();
                     } else {
                         // Fallback for non-bitmap frames
                         const img = new Image();
                         img.onload = () => {
-                            this.displayElement.width = img.width;
-                            this.displayElement.height = img.height;
+                            if (this.displayElement.width !== img.width || this.displayElement.height !== img.height) {
+                                this.displayElement.width = img.width;
+                                this.displayElement.height = img.height;
+                            }
                             this.ctx.drawImage(img, 0, 0);
                             URL.revokeObjectURL(frameToDraw.url);
                         };

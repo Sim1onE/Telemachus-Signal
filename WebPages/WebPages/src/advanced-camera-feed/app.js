@@ -184,6 +184,11 @@ class AdvancedCameraFeed {
         this.metaName.innerText = `SENSOR: ${cam.name.toUpperCase()}`;
 
         // Initialize and start the stream
+        if (this.cameraStream) {
+            console.log("Stopping previous stream...");
+            this.cameraStream.stop();
+        }
+
         // Construct the stream URL from the metadata URL
         const streamUrl = `${this.baseUrl}/telemachus/cameras/stream/${cam.name}`;
         this.cameraStream = new TelemachusCameraStream(streamUrl, this.cameraFeed, this);
