@@ -36,6 +36,22 @@ namespace Telemachus.Debug
         {
             GUILayout.BeginVertical();
 
+            // Fetch real values from FlightGlobals/CommNet
+            double realDelay = 0;
+            double realSignal = 0;
+            if (FlightGlobals.ActiveVessel != null && FlightGlobals.ActiveVessel.Connection != null)
+            {
+                realDelay = FlightGlobals.ActiveVessel.Connection.SignalDelay;
+                realSignal = FlightGlobals.ActiveVessel.Connection.SignalStrength;
+            }
+
+            GUILayout.Label(string.Format("<color=cyan>KSP Real Signal: {0:P0}</color>", realSignal));
+            GUILayout.Label(string.Format("<color=cyan>KSP Real Delay: {0:F2}s</color>", realDelay));
+
+            GUILayout.Space(5);
+            GUILayout.Box("", GUILayout.Height(2)); // Separator
+            GUILayout.Space(5);
+
             // --- SIGNAL SECTION ---
             GUILayout.Label("SIGNAL STRENGTH (Link Quality)");
             sigOverrideEnabled = GUILayout.Toggle(sigOverrideEnabled, "Override Strength");
