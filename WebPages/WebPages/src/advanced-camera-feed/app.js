@@ -208,12 +208,8 @@ class AdvancedCameraFeed {
     syncFromStream(ut, warp, delay, fov, signal) {
         // Only update if we see a significant jump or a warp change
         const currentPredicted = this.get('t.universalTime');
-        const jump = Math.abs(ut - currentPredicted);
-        
-        // If we jump more than 0.5s or if warp changed, resync the local clocks
-        if (jump > 0.5 || warp !== this.telemetryData.warp || delay !== this.telemetryData.delay) {
-            this.lastRemoteUt = ut;
-            this.lastUtPollTime = performance.now();
+        // If warp or delay changed, update telemetry data immediately
+        if (warp !== this.telemetryData.warp || delay !== this.telemetryData.delay) {
             if (warp !== undefined) this.telemetryData.warp = warp;
             if (delay !== undefined) this.telemetryData.delay = delay;
         }
@@ -297,7 +293,20 @@ class AdvancedCameraFeed {
             if (now - this.lastFrameTime > 2500) {
                 this.updateStatus('error', 'NO SIGNAL');
             }
-        }, 1000);
+
+            // High-frequency UI update for MET clock smoothness
+            this.updateTelemetryUI();
+        }, 100); // 10Hz UI refresh for clock smoothness
+    }
+
+    updateTelemetryUI() {
+        const ut = this.get('t.universalTime');
+        if (ut && this.telMet && this.telemetryData.met) {
+            // Calculate current MET based on UT drift from the first poll
+            const metOffset = ut - (this.telemetryData.ut || ut);
+            const currentMet = this.telemetryData.met + metOffset;
+            this.telMet.innerText = `T+ ${this.formatMET(currentMet)}`;
+        }
     }
 
     forceImmediateUpdate() {
@@ -393,6 +402,7 @@ class AdvancedCameraFeed {
                 // Merge telemetry data instead of overwriting everything
                 this.telemetryData = { ...this.telemetryData, ...data };
 
+                // Display data update
                 if (data.alt) {
                     const altKm = (data.alt / 1000).toFixed(2);
                     this.telAlt.innerText = `${altKm} KM`;
@@ -400,9 +410,9 @@ class AdvancedCameraFeed {
                 if (data.vel) {
                     this.telVel.innerText = `${Math.round(data.vel)} M/S`;
                 }
-                if (data.met) {
-                    this.telMet.innerText = `T+ ${this.formatMET(data.met)}`;
-                }
+
+                // Note: telMet is now updated in a high-frequency loop elsewhere (updateTelemetryUI)
+                // for absolute smoothness.
 
 
             } catch (err) {

@@ -195,12 +195,15 @@ class TelemachusCameraStream {
             const delayedTimecode = universalTime - delay;
 
             let frameToDraw = null;
-            while (this.frameBuffer.length > 0 && this.frameBuffer[0].ut <= delayedTimecode) {
-                if (frameToDraw) {
-                    // Dispose of skipped frame
-                    if (frameToDraw.url) URL.revokeObjectURL(frameToDraw.url);
-                    if (frameToDraw.bitmap && frameToDraw.bitmap.close) frameToDraw.bitmap.close();
+            if (this.frameBuffer.length > 0 && this.frameBuffer[0].ut <= delayedTimecode) {
+                // If we have massive physical lag, only skip if the frame is > 2s old compared to our delayed target
+                // This prevents the buffer from emptying too aggressively when we are simulation delay
+                if (this.frameBuffer.length > 2000 || (this.frameBuffer.length > 1 && this.frameBuffer[0].ut < delayedTimecode - 2.0)) {
+                    const skip = this.frameBuffer.shift();
+                    if (skip.url) URL.revokeObjectURL(skip.url);
+                    if (skip.bitmap && skip.bitmap.close) skip.bitmap.close();
                 }
+                
                 frameToDraw = this.frameBuffer.shift();
             }
 
@@ -246,11 +249,8 @@ class TelemachusCameraStream {
                 }
             }
             
-            if (this.frameBuffer.length > 100) {
-                const drop = this.frameBuffer.shift();
-                if (drop.url) URL.revokeObjectURL(drop.url);
-                if (drop.bitmap && drop.bitmap.close) drop.bitmap.close();
-            }
+            // Buffer safety cleanup removed to allow deep space delays (60s+). 
+            // The 2000 frame limit in the playback loop handles extreme cases.
         }
 
         requestAnimationFrame(() => this.playbackLoop());
