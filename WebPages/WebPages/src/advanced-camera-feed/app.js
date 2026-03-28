@@ -30,6 +30,12 @@ class AdvancedCameraFeed {
         this.telAlt = document.getElementById('tel-alt');
         this.telVel = document.getElementById('tel-vel');
         this.telMet = document.getElementById('tel-met');
+        this.statusOverlay = document.getElementById('viewport-overlay');
+        this.statusText = document.getElementById('status-text');
+        this.statusSpinner = document.getElementById('status-spinner');
+
+        this.lastFrameTime = 0;
+        this.signalWatchdog = null;
 
         this.init();
     }
@@ -43,7 +49,12 @@ class AdvancedCameraFeed {
         // Select first camera if available
         if (this.cameras.length > 0) {
             this.selectCamera(this.cameras[0]);
+        } else {
+            this.updateStatus('error', 'NO CAMERAS DETECTED');
         }
+
+        // Start signal watchdog
+        this.startSignalWatchdog();
     }
 
     bindEvents() {
@@ -140,6 +151,7 @@ class AdvancedCameraFeed {
         }
 
         this.selectedCamera = cam;
+        this.updateStatus('loading', `CONNECTING: ${cam.name}...`);
         this.currentFov = null; // Reset zoom state when switching
 
         // Update UI limits
@@ -207,6 +219,44 @@ class AdvancedCameraFeed {
         if (fov !== null && fov > 0 && this.metaFov) {
             this.metaFov.innerText = `FOV: ${fov.toFixed(1)}°`;
         }
+
+        // Signal received: Hide overlay
+        this.lastFrameTime = Date.now();
+        if (this.statusOverlay.style.display !== 'none') {
+            this.updateStatus('online');
+        }
+    }
+
+    updateStatus(type, message) {
+        if (!this.statusOverlay) return;
+
+        if (type === 'online') {
+            this.statusOverlay.style.display = 'none';
+            return;
+        }
+
+        this.statusOverlay.style.display = 'flex';
+        this.statusText.innerText = (message || '').toUpperCase();
+        
+        if (type === 'loading') {
+            this.statusSpinner.style.display = 'block';
+            this.statusText.classList.remove('error');
+        } else if (type === 'error') {
+            this.statusSpinner.style.display = 'none';
+            this.statusText.classList.add('error');
+        }
+    }
+
+    startSignalWatchdog() {
+        if (this.signalWatchdog) clearInterval(this.signalWatchdog);
+        this.signalWatchdog = setInterval(() => {
+            if (!this.selectedCamera) return;
+            
+            const now = Date.now();
+            if (now - this.lastFrameTime > 2500) {
+                this.updateStatus('error', 'NO SIGNAL');
+            }
+        }, 1000);
     }
 
     forceImmediateUpdate() {
