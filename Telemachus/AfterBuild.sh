@@ -62,13 +62,52 @@ else
   echo "Warning: TelemetrySchema.g.cs not found in obj/"
 fi
 
-# Copy to local KSP install (local dev only — skipped in CI)
-kspDir="$ProjectDir/../ksp-telemachus-dev"
-if [ -d "$kspDir" ]; then
-  rm -rf "$kspDir/GameData/Telemachus"
-  mkdir -p "$kspDir/GameData/Telemachus/Plugins/PluginData/Telemachus/test"
-  cp -ra "$ProjectDir/../WebPages/WebPagesTest/src/." "$kspDir/GameData/Telemachus/Plugins/PluginData/Telemachus/test"
-  cp -ra "$ProjectDir/../publish/GameData/."          "$kspDir/GameData/"
-fi
+  # Copy to local KSP install (local dev only — skipped in CI)
+  kspDir="$ProjectDir/../ksp-telemachus-dev"
+  if [ -d "$kspDir" ]; then
+    rm -rf "$kspDir/GameData/Telemachus"
+    
+    # Copy everything from publish to GameData, excluding the core web assets folder
+    if command -v rsync >/dev/null 2>&1; then
+      rsync -a --exclude='Telemachus/Plugins/PluginData/Telemachus' "$ProjectDir/../publish/GameData/" "$kspDir/GameData/"
+    else
+      # Fallback to manual folder copying if rsync is not available
+      mkdir -p "$kspDir/GameData/Telemachus"
+      cp -ra "$ProjectDir/../publish/GameData/Telemachus/Plugins" "$kspDir/GameData/Telemachus/"
+      cp -ra "$ProjectDir/../publish/GameData/Telemachus/Parts"   "$kspDir/GameData/Telemachus/"
+      if [ -f "$ProjectDir/../publish/GameData/Telemachus/TelemachusReborn.version" ]; then
+        cp "$ProjectDir/../publish/GameData/Telemachus/TelemachusReborn.version" "$kspDir/GameData/Telemachus/"
+      fi
+    fi
+
+    devPluginData="$kspDir/GameData/Telemachus/Plugins/PluginData/Telemachus"
+    mkdir -p "$devPluginData"
+
+    # Create symbolic links for all items in src (standard Unix approach)
+    srcPath="$ProjectDir/../WebPages/WebPages/src"
+    if [ -d "$srcPath" ]; then
+      echo "Creating symbolic links from $srcPath to $devPluginData..."
+      for item in "$srcPath"/*; do
+        bname=$(basename "$item")
+        ln -s "$item" "$devPluginData/$bname"
+      done
+    fi
+
+    # Specifically copy houston and mkon from publish (since they were excluded from the main sync)
+    publishPluginData="$ProjectDir/../publish/GameData/Telemachus/Plugins/PluginData/Telemachus"
+    if [ -d "$publishPluginData/houston" ]; then
+      cp -ra "$publishPluginData/houston" "$devPluginData/"
+    fi
+    if [ -d "$publishPluginData/mkon" ]; then
+      cp -ra "$publishPluginData/mkon" "$devPluginData/"
+    fi
+
+    # Handle test pages if they exist
+    testSrcPath="$ProjectDir/../WebPages/WebPagesTest/src"
+    if [ -d "$testSrcPath" ]; then
+      mkdir -p "$devPluginData/test"
+      cp -ra "$testSrcPath/." "$devPluginData/test/"
+    fi
+  fi
 
 ls "$ProjectDir/../publish/GameData/Telemachus/Plugins/PluginData/Telemachus/"

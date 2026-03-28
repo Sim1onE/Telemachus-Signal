@@ -1,0 +1,82 @@
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telemachus | Advanced Camera Feed</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <header>
+        <div class="system-title">
+            <h1>Advanced Camera Feed</h1>
+        </div>
+        <div class="telemetry-bar">
+            <div class="telemetry-item">
+                <span class="telemetry-label">ALT</span>
+                <span id="tel-alt" class="telemetry-value">0.08 KM</span>
+            </div>
+            <div class="telemetry-item">
+                <span class="telemetry-label">VEL</span>
+                <span id="tel-vel" class="telemetry-value">175 M/S</span>
+            </div>
+            <div class="telemetry-item">
+                <span class="telemetry-label">MET</span>
+                <span id="tel-met" class="telemetry-value">T+ 0D 00:00:00</span>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h3>Available Sensors</h3>
+            </div>
+            <ul id="camera-list" class="camera-list">
+                <li class="camera-item active"><span>RPMCamera-ExtCam4</span> <small
+                        style="opacity: 0.5;">RasterPropMonitor</small></li>
+                <li class="camera-item "><span>RPMCamera-ExtCam1</span> <small
+                        style="opacity: 0.5;">RasterPropMonitor</small></li>
+                <li class="camera-item "><span>RPMCamera-ExtCam2</span> <small
+                        style="opacity: 0.5;">RasterPropMonitor</small></li>
+                <li class="camera-item "><span>RPMCamera-ExtCam3</span> <small
+                        style="opacity: 0.5;">RasterPropMonitor</small></li>
+                <li class="camera-item "><span>TelemachusFlightCamera</span> <small
+                        style="opacity: 0.5;">FlightCamera</small></li>
+                <li class="camera-item "><span>vesselview</span> <small style="opacity: 0.5;">VesselView</small></li>
+            </ul>
+        </aside>
+
+        <section class="viewport-container">
+            <div class="signal-metadata">
+                <div id="metadata-camera-name">SENSOR: RPMCAMERA-EXTCAM4</div>
+                <div id="metadata-resolution" style="font-size: 0.8rem; opacity: 0.7;">RES: 300x300</div>
+                <div id="metadata-fov" style="font-size: 0.8rem; opacity: 0.7;">FOV: 64°</div>
+            </div>
+
+            <img id="camera-feed"
+                src="http://localhost:8085/telemachus/cameras/RPMCamera-ExtCam4?cb=1774664579556&amp;fov=-1"
+                alt="Video Stream">
+
+            <div class="crt-overlay"></div>
+            <div class="crt-vignette"></div>
+
+            <div class="controls-panel">
+                <div class="fov-control">
+                    <span class="telemetry-label">Zoom</span>
+                    <input type="range" id="fov-slider" min="1" max="120" value="60">
+                    <input type="text" id="fov-input" class="fov-value-display" value="60">
+                    <span class="telemetry-label">DEG</span>
+                </div>
+                <button id="reset-zoom-btn" class="action-btn" style="border-color: #ff4c4c; color: #ff4c4c;">Reset</button>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+
+
+</body>
+
+</html>

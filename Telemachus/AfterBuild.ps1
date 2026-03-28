@@ -74,11 +74,57 @@ if (Test-Path $kspDir) {
     if (Test-Path "$kspDir/GameData/Telemachus") {
         Remove-Item "$kspDir/GameData/Telemachus" -Recurse -Force
     }
-    New-Item -ItemType Directory -Force -Path "$kspDir/GameData/Telemachus/Plugins/PluginData/Telemachus/test" | Out-Null
-    if (Test-Path "$root/WebPages/WebPagesTest/src") {
-        Copy-Item "$root/WebPages/WebPagesTest/src/*" "$kspDir/GameData/Telemachus/Plugins/PluginData/Telemachus/test" -Recurse -Force
+
+    # Robocopy copies everything EXCEPT the web assets folder that we want to link
+    # /E = Copy subdirectories, including empty ones.
+    # /XD = Exclude Directories
+    $publishGameData = "$root/publish/GameData"
+    $devGameData = "$kspDir/GameData"
+    # Robocopy /XD works best with absolute paths or exact folder names
+    $excludePath = Join-Path $publish "Plugins/PluginData/Telemachus"
+    Write-Host "Copying from $publishGameData to $devGameData (excluding $excludePath)..."
+    
+    # Robocopy exit codes 0-3 are success. We ignore them to avoid false positives in ErrorActionPreference
+    $robocopyArgs = @($publishGameData, $devGameData, "/E", "/XD", $excludePath, "/NFL", "/NDL", "/NJH", "/NJS", "/nc", "/ns", "/np")
+    & robocopy $robocopyArgs
+    if ($LASTEXITCODE -ge 8) { throw "Robocopy failed with exit code $LASTEXITCODE" }
+    
+    # Create the excluded directory
+    $devPluginData = "$kspDir/GameData/Telemachus/Plugins/PluginData/Telemachus"
+    New-Item -ItemType Directory -Force -Path $devPluginData | Out-Null
+
+    # Create Junctions for directories and Hard Links for files from src
+    $srcPath = "$root/WebPages/WebPages/src"
+    if (Test-Path $srcPath) {
+        Write-Host "Creating live links from $srcPath to $devPluginData..."
+        Get-ChildItem -Path $srcPath | ForEach-Object {
+            $target = Join-Path $devPluginData $_.Name
+            # Ensure target doesn't exist before creating link
+            if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+            
+            if ($_.PSIsContainer) {
+                # Directory -> Junction
+                New-Item -ItemType Junction -Path $target -Value $_.FullName | Out-Null
+            } else {
+                # File -> HardLink
+                New-Item -ItemType HardLink -Path $target -Value $_.FullName | Out-Null
+            }
+        }
     }
-    Copy-Item "$root/publish/GameData/*" "$kspDir/GameData/" -Recurse -Force
+
+    # Specifically copy houston and mkon from publish (since they were excluded by robocopy)
+    if (Test-Path "$pluginData/houston") {
+        Copy-Item "$pluginData/houston" $devPluginData -Recurse -Force
+    }
+    if (Test-Path "$pluginData/mkon") {
+        Copy-Item "$pluginData/mkon"    $devPluginData -Recurse -Force
+    }
+
+    # Handle test pages if they exist
+    if (Test-Path "$root/WebPages/WebPagesTest/src") {
+        New-Item -ItemType Directory -Force -Path "$devPluginData/test" | Out-Null
+        Copy-Item "$root/WebPages/WebPagesTest/src/*" "$devPluginData/test" -Recurse -Force
+    }
 }
 
 Get-ChildItem $pluginData
