@@ -119,6 +119,11 @@ class AdvancedCameraFeed {
             const data = await response.json();
             this.cameras = data;
             this.renderCameraList();
+
+            // Auto-select first camera if nothing is selected yet and cameras are available
+            if (!this.selectedCamera && this.cameras.length > 0) {
+                this.selectCamera(this.cameras[0]);
+            }
         } catch (err) {
             console.error('Failed to fetch camera list:', err);
         }
