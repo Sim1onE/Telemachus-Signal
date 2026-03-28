@@ -34,6 +34,8 @@ class AdvancedCameraFeed {
         this.statusText = document.getElementById('status-text');
         this.statusSpinner = document.getElementById('status-spinner');
 
+        this.telDelay = document.getElementById('tel-delay');
+
         this.telSignal = document.getElementById('tel-signal');
         this.signalBars = document.querySelector('.signal-bars');
         this.glitchOverlay = document.getElementById('glitch-overlay');
@@ -98,7 +100,7 @@ class AdvancedCameraFeed {
                 const min = parseFloat(this.fovSlider.min);
                 const max = parseFloat(this.fovSlider.max);
                 const step = 5;
-                
+
                 let def = this.selectedCamera.currentFov || 60;
                 // Snap default to grid
                 def = Math.round(def / step) * step;
@@ -164,7 +166,7 @@ class AdvancedCameraFeed {
         const current = cam.currentFov || 60;
 
         this.currentFov = current; // Sincronizza lo stato logico con quello reale del sensore
-        
+
         this.fovSlider.min = min;
         this.fovSlider.max = max;
         // Set slider position using inverted mapping
@@ -201,10 +203,8 @@ class AdvancedCameraFeed {
             return this.lastRemoteUt + (elapsedSeconds * warpRate);
         }
         if (key === 'comm.signalDelay') {
-            // Favor the ultra-low-latency network header from the stream if available
-            if (this.cameraStream && this.cameraStream.latestNetworkDelay !== undefined) {
-                return this.cameraStream.latestNetworkDelay;
-            }
+            // UI Realism: Use the 1Hz telemetry poll delay for display.
+            // Note: The Video Engine uses its own 'latestNetworkDelay' internally.
             return this.telemetryData.delay || 0;
         }
         return this.telemetryData[key];
@@ -214,7 +214,7 @@ class AdvancedCameraFeed {
     syncFromStream(ut, warp, delay, fov, signal) {
         // Only update if we see a significant jump or a warp change
         if (warp !== undefined) this.telemetryData.warp = warp;
-        
+
         // Metadata UI updates (FOV, Signal) remain instant
         if (fov !== null && fov > 0 && this.metaFov) {
             this.metaFov.innerText = `FOV: ${fov.toFixed(1)}°`;
@@ -232,7 +232,7 @@ class AdvancedCameraFeed {
 
     updateSignalUI(signal) {
         if (this.telSignal) this.telSignal.innerText = `${signal}%`;
-        
+
         // Update bars
         const numBars = Math.ceil(signal / 25);
         for (let i = 1; i <= 4; i++) {
@@ -273,7 +273,7 @@ class AdvancedCameraFeed {
 
         this.statusOverlay.style.display = 'flex';
         this.statusText.innerText = (message || '').toUpperCase();
-        
+
         if (type === 'loading') {
             this.statusSpinner.style.display = 'block';
             this.statusText.classList.remove('error');
@@ -287,10 +287,15 @@ class AdvancedCameraFeed {
         if (this.signalWatchdog) clearInterval(this.signalWatchdog);
         this.signalWatchdog = setInterval(() => {
             if (!this.selectedCamera) return;
-            
+
             const now = Date.now();
             if (now - this.lastFrameTime > 2500) {
-                this.updateStatus('error', 'NO SIGNAL');
+                // Se non disegnamo frame, controlliamo se il buffer ha dati (sta caricando o è in delay)
+                if (this.cameraStream && this.cameraStream.frameBuffer.length > 5) {
+                    this.updateStatus('loading', 'BUFFERING/SYNCING...');
+                } else {
+                    this.updateStatus('error', 'NO SIGNAL');
+                }
             }
 
             // High-frequency UI update for MET clock smoothness
@@ -300,6 +305,12 @@ class AdvancedCameraFeed {
 
     updateTelemetryUI() {
         const ut = this.get('t.universalTime');
+        const delay = this.get('comm.signalDelay');
+
+        // Update Delay UI
+        if (this.telDelay) {
+            this.telDelay.innerText = `${delay.toFixed(1)}S`;
+        }
         if (ut && this.telMet && this.telemetryData.met) {
             // Calculate current MET based on UT drift from the first poll
             const metOffset = ut - (this.telemetryData.ut || ut);
@@ -332,40 +343,40 @@ class AdvancedCameraFeed {
 
         this.fovAbortController = new AbortController();
         this.lastFovUpdateTick = now;
-        
+
         const payload = { fov: this.currentFov };
-        
-        fetch(this.selectedCamera.url, { 
-            method: 'POST', 
+
+        fetch(this.selectedCamera.url, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
             signal: this.fovAbortController.signal
         })
-        .then(() => {
-            this.fovAbortController = null;
-        })
-        .catch(err => {
-            if (err.name === 'AbortError') return; // Expected
-            console.error("Failed to sync FOV via POST:", err);
-            this.fovAbortController = null;
-        });
+            .then(() => {
+                this.fovAbortController = null;
+            })
+            .catch(err => {
+                if (err.name === 'AbortError') return; // Expected
+                console.error("Failed to sync FOV via POST:", err);
+                this.fovAbortController = null;
+            });
     }
 
     generateRuler(min, max) {
         if (!this.rulerScale) return;
-        
+
         this.rulerScale.innerHTML = '';
         const step = 5;
-        
+
         // Collect all values to mark: min, max, and multiples of 5 in between
         let values = [min];
-        
+
         // Find first multiple of 5 > min
         let firstStep = Math.ceil((min + 0.1) / step) * step;
         for (let v = firstStep; v < max; v += step) {
             values.push(v);
         }
-        
+
         // Only push max if it's not already added (e.g. max is multiple of 5)
         if (max > values[values.length - 1]) {
             values.push(max);
@@ -390,7 +401,7 @@ class AdvancedCameraFeed {
             try {
                 const response = await fetch(`${this.baseUrl}/telemachus/datalink?alt=v.altitude&vel=v.orbitalVelocity&met=v.missionTime&ut=t.universalTime&delay=comm.signalDelay&warp=t.currentRate`);
                 const data = await response.json();
-                
+
                 // Anti-Time-Travel: only update if data is more recent than what we have
                 // This prevents the 1Hz telemetry from overriding the 30Hz video sync
                 if (data.ut > this.lastRemoteUt) {

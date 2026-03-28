@@ -107,8 +107,11 @@ namespace Telemachus
             ds.vessel.Connection != null && ds.vessel.Connection.IsConnected;
 
         [TelemetryAPI("comm.signalStrength", "CommNet Signal Strength (0-1)", Category = "comms", ReturnType = "double")]
-        object CommSignalStrength(DataSources ds) =>
-            ds.vessel.Connection != null ? ds.vessel.Connection.SignalStrength : 0d;
+        object CommSignalStrength(DataSources ds) {
+            if (Telemachus.CameraSnapshots.CameraCapture.DebugSignalOverride >= 0f)
+                return (double)Telemachus.CameraSnapshots.CameraCapture.DebugSignalOverride;
+            return ds.vessel.Connection != null ? ds.vessel.Connection.SignalStrength : 0d;
+        }
 
         [TelemetryAPI("comm.controlState", "CommNet Control State (0=none, 1=partial, 2=full)", Category = "comms", ReturnType = "int")]
         object CommControlState(DataSources ds)
@@ -126,8 +129,11 @@ namespace Telemachus
             ds.vessel.Connection?.ControlState.ToString() ?? "None";
 
         [TelemetryAPI("comm.signalDelay", "CommNet Signal Delay (seconds)", Units = APIEntry.UnitType.TIME, Category = "comms", ReturnType = "double")]
-        object CommSignalDelay(DataSources ds) =>
-            ds.vessel.Connection != null ? ds.vessel.Connection.SignalDelay : 0d;
+        object CommSignalDelay(DataSources ds) {
+            if (Telemachus.CameraSnapshots.CameraCapture.DebugDelayOverride >= 0f)
+                return (double)Telemachus.CameraSnapshots.CameraCapture.DebugDelayOverride;
+            return ds.vessel.Connection != null ? ds.vessel.Connection.SignalDelay : 0d;
+        }
 
         protected override int pausedHandler() => 0;
     }
