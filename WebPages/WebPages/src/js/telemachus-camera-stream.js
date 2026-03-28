@@ -136,6 +136,8 @@ class TelemachusCameraStream {
                         this.chunkParser.kspDelay = parseFloat(line.split(':')[1].trim());
                     } else if (lowerLine.startsWith('x-ksp-fov:')) {
                         this.chunkParser.kspFOV = parseFloat(line.split(':')[1].trim());
+                    } else if (lowerLine.startsWith('x-ksp-signal-quality:')) {
+                        this.chunkParser.kspSignal = parseFloat(line.split(':')[1].trim());
                     }
                 });
 
@@ -159,7 +161,8 @@ class TelemachusCameraStream {
                             ut: this.chunkParser.kspUT,
                             warp: this.chunkParser.kspWarp || 1,
                             delay: this.chunkParser.kspDelay || 0,
-                            fov: this.chunkParser.kspFOV || null
+                            fov: this.chunkParser.kspFOV || null,
+                            signal: this.chunkParser.kspSignal || 100
                         });
                     } else {
                         const url = URL.createObjectURL(blob);
@@ -168,7 +171,8 @@ class TelemachusCameraStream {
                             ut: this.chunkParser.kspUT,
                             warp: this.chunkParser.kspWarp || 1,
                             delay: this.chunkParser.kspDelay || 0,
-                            fov: this.chunkParser.kspFOV || null
+                            fov: this.chunkParser.kspFOV || null,
+                            signal: this.chunkParser.kspSignal || 100
                         });
                     }
 
@@ -203,7 +207,13 @@ class TelemachusCameraStream {
             if (frameToDraw) {
                 // Instantly update the master clock/warp if the stream provides it
                 if (frameToDraw.ut && this.datalink.syncFromStream) {
-                    this.datalink.syncFromStream(frameToDraw.ut, frameToDraw.warp, frameToDraw.delay, frameToDraw.fov);
+                    this.datalink.syncFromStream(
+                        frameToDraw.ut, 
+                        frameToDraw.warp, 
+                        frameToDraw.delay, 
+                        frameToDraw.fov,
+                        frameToDraw.signal
+                    );
                 }
 
                 if (this.isCanvas) {

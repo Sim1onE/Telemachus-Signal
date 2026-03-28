@@ -16,11 +16,16 @@ namespace Telemachus.CameraSnapshots
         public int lastRequestTick = Environment.TickCount - 6000; // Force immediate render on first check
         private Texture2D persistentTexture = null;
         private float nextRenderTime = 0f;
+        public static float DebugSignalOverride = -1f;
+
+        public double SignalStrength => currentSignalStrength;
 
         protected double currentSignalStrength
         {
             get
             {
+                if (DebugSignalOverride >= 0f) return DebugSignalOverride;
+
                 if (FlightGlobals.ActiveVessel?.Connection != null)
                 {
                     return FlightGlobals.ActiveVessel.Connection.SignalStrength;
@@ -141,6 +146,24 @@ namespace Telemachus.CameraSnapshots
                 }
             }
 
+            // --- DEEP SPACE DEGRADATION LOGIC ---
+            // Calculate target resolution based on signal strength
+            int targetRes = cameraResolution;
+            if (signal < 0.08) targetRes /= 4;       // Critical Signal: Mosaic mode
+            else if (signal < 0.25) targetRes /= 2;  // Low Signal: Grainy mode
+
+            // Re-initialize texture if resolution changed due to signal flux
+            if (overviewTexture == null || overviewTexture.width != targetRes)
+            {
+                if (overviewTexture != null) overviewTexture.Release();
+                overviewTexture = new RenderTexture(targetRes, targetRes, 24);
+                
+                // Update all duplicate cameras to use the new texture
+                foreach (var cam in cameraDuplicates.Values) {
+                    cam.targetTexture = overviewTexture;
+                }
+            }
+
             // Render immediately in LateUpdate (no WaitForEndOfFrame)
             var sortedCameras = cameraDuplicates.Values.OrderBy(c => c.depth).ToList();
             foreach (Camera camera in sortedCameras)
@@ -150,12 +173,16 @@ namespace Telemachus.CameraSnapshots
 
             Texture2D texture = getTexture2DFromRenderTexture();
             
-            int jpgQuality = (int)Mathf.Lerp(10f, 80f, (float)signal);
+            // Adjust JPEG quality based on signal (very low for bad signal)
+            int jpgQuality = (int)Mathf.Lerp(2f, 85f, (float)signal);
             this.imageBytes = texture.EncodeToJPG(jpgQuality);
             this.didRender = true;
 
-            // Calculate next render slot
-            float baseWait = Mathf.Lerp(2.0f, 0.033f, (float)signal);
+            // Calculate next render slot (Framerate Reduction)
+            // Signal 1.0 -> 30 FPS (0.033s)
+            // Signal 0.3 -> 5 FPS (0.2s)
+            // Signal 0.05 -> 0.5 FPS (2.0s)
+            float baseWait = Mathf.Lerp(2.0f, 0.033f, (float)Mathf.Pow((float)signal, 0.7f)); // Non-linear curve for "dramatic" drop
             float offset = (delta < 2000) ? 0f : (0.05f * renderOffsetFactor);
             
             nextRenderTime = Time.unscaledTime + baseWait + offset;

@@ -29,6 +29,12 @@
     <Reference Include="UnityEngine.ImageConversionModule" Private="false">
       <HintPath>..\references\UnityEngine.ImageConversionModule.dll</HintPath>
     </Reference>
+    <Reference Include="UnityEngine.IMGUIModule" Private="false">
+      <HintPath>..\references\UnityEngine.IMGUIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule" Private="false">
+      <HintPath>..\references\UnityEngine.InputLegacyModule.dll</HintPath>
+    </Reference>
     <Reference Include="Assembly-CSharp" Private="false">
       <HintPath>..\references\Assembly-CSharp.dll</HintPath>
     </Reference>

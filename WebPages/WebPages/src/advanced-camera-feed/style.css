@@ -57,6 +57,39 @@ header {
     align-items: flex-end;
 }
 
+.telemetry-item.signal-monitor {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.signal-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 18px;
+}
+
+.signal-bars .bar {
+    width: 4px;
+    background: var(--accent-color);
+    opacity: 0.2;
+    border-radius: 1px;
+}
+
+.signal-bars .bar.active {
+    opacity: 1;
+    box-shadow: 0 0 5px var(--accent-glow);
+}
+
+.signal-bars #signal-bar-1 { height: 6px; }
+.signal-bars #signal-bar-2 { height: 10px; }
+.signal-bars #signal-bar-3 { height: 14px; }
+.signal-bars #signal-bar-4 { height: 18px; }
+
+.signal-bars.low .bar.active { background: #ffcc00; }
+.signal-bars.critical .bar.active { background: #ff4c4c; animation: blink 0.5s infinite; }
+
 .telemetry-label {
     font-size: 0.7rem;
     color: var(--text-secondary);
@@ -225,6 +258,40 @@ main {
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+
+/* Glitch & Interference Overlay */
+.glitch-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 15;
+    pointer-events: none;
+    opacity: 0;
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(255, 255, 255, 0.05),
+        rgba(255, 255, 255, 0.05) 1px,
+        transparent 1px,
+        transparent 2px
+    );
+    transition: opacity 0.3s;
+}
+
+.glitch-overlay.active {
+    opacity: 1;
+    animation: static-noise 0.2s infinite;
+}
+
+@keyframes static-noise {
+    0% { transform: translate(0,0) scale(1); }
+    20% { transform: translate(-5px, 5px) scale(1.02); filter: hue-rotate(90deg); }
+    40% { transform: translate(5px, -5px) scale(0.98); }
+    60% { transform: translate(-2px, -2px) scale(1.01); filter: contrast(150%); }
+    80% { transform: translate(2px, 2px) scale(1.05); }
+    100% { transform: translate(0,0) scale(1); }
 }
 
 @keyframes flicker {

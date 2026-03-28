@@ -25,6 +25,16 @@
                 <span class="telemetry-label">MET</span>
                 <span id="tel-met" class="telemetry-value">T+ 0D 00:00:00</span>
             </div>
+            <div class="telemetry-item signal-monitor">
+                <span class="telemetry-label">LINK</span>
+                <div class="signal-bars">
+                    <div id="signal-bar-1" class="bar"></div>
+                    <div id="signal-bar-2" class="bar"></div>
+                    <div id="signal-bar-3" class="bar"></div>
+                    <div id="signal-bar-4" class="bar"></div>
+                </div>
+                <span id="tel-signal" class="telemetry-value">100%</span>
+            </div>
         </div>
     </header>
 
@@ -57,6 +67,8 @@
 
             <!-- Use a canvas for high-performance rendering without blob URL spam -->
             <canvas id="camera-feed" class="camera-viewport"></canvas>
+
+            <div id="glitch-overlay" class="glitch-overlay"></div>
 
             <div id="viewport-overlay" class="viewport-overlay">
                 <div id="status-spinner" class="spinner"></div>

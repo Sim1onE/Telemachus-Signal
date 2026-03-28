@@ -34,6 +34,10 @@ class AdvancedCameraFeed {
         this.statusText = document.getElementById('status-text');
         this.statusSpinner = document.getElementById('status-spinner');
 
+        this.telSignal = document.getElementById('tel-signal');
+        this.signalBars = document.querySelector('.signal-bars');
+        this.glitchOverlay = document.getElementById('glitch-overlay');
+
         this.lastFrameTime = 0;
         this.signalWatchdog = null;
 
@@ -201,7 +205,7 @@ class AdvancedCameraFeed {
     }
 
     // Precise sync callback from the video stream metadata
-    syncFromStream(ut, warp, delay, fov) {
+    syncFromStream(ut, warp, delay, fov, signal) {
         // Only update if we see a significant jump or a warp change
         const currentPredicted = this.get('t.universalTime');
         const jump = Math.abs(ut - currentPredicted);
@@ -215,15 +219,52 @@ class AdvancedCameraFeed {
         }
 
         // Update FOV metadata with real-time value from stream (includes decimals for "wow" effect)
-        // Update FOV metadata with real-time value from stream (includes decimals for "wow" effect)
         if (fov !== null && fov > 0 && this.metaFov) {
             this.metaFov.innerText = `FOV: ${fov.toFixed(1)}°`;
+        }
+
+        // Update Signal UI
+        if (signal !== undefined) {
+            this.updateSignalUI(signal);
         }
 
         // Signal received: Hide overlay
         this.lastFrameTime = Date.now();
         if (this.statusOverlay.style.display !== 'none') {
             this.updateStatus('online');
+        }
+    }
+
+    updateSignalUI(signal) {
+        if (this.telSignal) this.telSignal.innerText = `${signal}%`;
+        
+        // Update bars
+        const numBars = Math.ceil(signal / 25);
+        for (let i = 1; i <= 4; i++) {
+            const bar = document.getElementById(`signal-bar-${i}`);
+            if (bar) {
+                if (i <= numBars) bar.classList.add('active');
+                else bar.classList.remove('active');
+            }
+        }
+
+        // Update bar colors and glitch
+        if (this.signalBars) {
+            this.signalBars.classList.toggle('low', signal < 40 && signal >= 15);
+            this.signalBars.classList.toggle('critical', signal < 15);
+        }
+
+        if (this.glitchOverlay) {
+            // Activate glitch if signal is very low
+            this.glitchOverlay.classList.toggle('active', signal < 15);
+        }
+
+        // Update resolution metadata based on scaling
+        if (this.metaRes) {
+            let res = 300;
+            if (signal < 8) res = 75;
+            else if (signal < 25) res = 150;
+            this.metaRes.innerText = `RES: ${res}x${res}px`;
         }
     }
 

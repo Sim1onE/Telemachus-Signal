@@ -183,6 +183,7 @@ namespace Telemachus
                                             "X-KSP-Delay: " + currentDelay.ToString("F3", CultureInfo.InvariantCulture) + "\r\n" +
                                             "X-KSP-Warp: " + currentWarp.ToString("F1", CultureInfo.InvariantCulture) + "\r\n" +
                                             "X-KSP-FOV: " + camera.interpolatedFOV.ToString("F1", CultureInfo.InvariantCulture) + "\r\n" +
+                                            "X-KSP-Signal-Quality: " + (camera.SignalStrength * 100.0).ToString("F0", CultureInfo.InvariantCulture) + "\r\n" +
                                             "Content-Length: " + img.Length + "\r\n\r\n";
 
                             byte[] headerBytes = Encoding.UTF8.GetBytes(header);
