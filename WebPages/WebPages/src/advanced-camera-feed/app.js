@@ -8,6 +8,10 @@ class AdvancedCameraFeed {
         this.telemetryData = {};
         this.lastUtPollTime = null;
         this.lastRemoteUt = 0;
+        this.lastFovUpdateTick = 0;
+        this.fovUpdateTimeout = null;
+        this.isUpdatingFov = false;
+        this.fovAbortController = null;
 
         // UI Elements
         this.cameraList = document.getElementById('camera-list');
@@ -20,6 +24,7 @@ class AdvancedCameraFeed {
         this.metaName = document.getElementById('metadata-camera-name');
         this.metaRes = document.getElementById('metadata-resolution');
         this.metaFov = document.getElementById('metadata-fov');
+        this.rulerScale = document.getElementById('ruler-scale');
 
         // Telemetry elements
         this.telAlt = document.getElementById('tel-alt');
@@ -59,8 +64,14 @@ class AdvancedCameraFeed {
             if (!isNaN(val)) {
                 const min = parseFloat(this.fovSlider.min);
                 const max = parseFloat(this.fovSlider.max);
+                const step = 5;
+
+                // Snap to 5 degree increments
+                val = Math.round(val / step) * step;
+                val = Math.max(min, Math.min(max, val));
 
                 this.currentFov = val;
+                this.fovInput.value = val;
                 // Update slider using inverse mapping
                 this.fovSlider.value = (max + min) - val;
                 this.forceImmediateUpdate();
@@ -69,9 +80,13 @@ class AdvancedCameraFeed {
 
         this.resetZoomBtn.addEventListener('click', () => {
             if (this.selectedCamera) {
-                const def = this.selectedCamera.fovDefault || 60;
                 const min = parseFloat(this.fovSlider.min);
                 const max = parseFloat(this.fovSlider.max);
+                const step = 5;
+                
+                let def = this.selectedCamera.currentFov || 60;
+                // Snap default to grid
+                def = Math.round(def / step) * step;
 
                 this.currentFov = def;
                 this.fovSlider.value = (max + min) - def; // Inverted mapping
@@ -106,9 +121,22 @@ class AdvancedCameraFeed {
         });
     }
 
-    selectCamera(cam) {
+    async selectCamera(cam) {
         if (this.cameraStream) {
             this.cameraStream.stop();
+        }
+
+        // Fresh Fetch: Get the absolute latest metadata for THIS specific camera
+        // before initializing the slider to prevent any "fov jump" due to stale data.
+        try {
+            const response = await fetch(`${this.baseUrl}/telemachus/cameras`);
+            const allCameras = await response.json();
+            const freshCam = allCameras.find(c => c.name === cam.name);
+            if (freshCam) {
+                cam = freshCam; // Use updated metadata (especially currentFov)
+            }
+        } catch (err) {
+            console.warn("Failed to perform fresh metadata fetch, falling back to cached state.", err);
         }
 
         this.selectedCamera = cam;
@@ -117,13 +145,18 @@ class AdvancedCameraFeed {
         // Update UI limits
         const min = cam.fovMin || 1;
         const max = cam.fovMax || 120;
-        const def = cam.fovDefault || 60;
+        const current = cam.currentFov || 60;
 
+        this.currentFov = current; // Sincronizza lo stato logico con quello reale del sensore
+        
         this.fovSlider.min = min;
         this.fovSlider.max = max;
         // Set slider position using inverted mapping
-        this.fovSlider.value = (max + min) - def;
-        this.fovInput.value = def;
+        this.fovSlider.value = (max + min) - current;
+        this.fovInput.value = Math.round(current);
+
+        // Regerate the ruler markers based on sensor limits
+        this.generateRuler(min, max);
 
         this.metaName.innerText = `SENSOR: ${cam.name.toUpperCase()}`;
 
@@ -156,7 +189,7 @@ class AdvancedCameraFeed {
     }
 
     // Precise sync callback from the video stream metadata
-    syncFromStream(ut, warp, delay) {
+    syncFromStream(ut, warp, delay, fov) {
         // Only update if we see a significant jump or a warp change
         const currentPredicted = this.get('t.universalTime');
         const jump = Math.abs(ut - currentPredicted);
@@ -168,16 +201,89 @@ class AdvancedCameraFeed {
             if (warp !== undefined) this.telemetryData.warp = warp;
             if (delay !== undefined) this.telemetryData.delay = delay;
         }
+
+        // Update FOV metadata with real-time value from stream (includes decimals for "wow" effect)
+        // Update FOV metadata with real-time value from stream (includes decimals for "wow" effect)
+        if (fov !== null && fov > 0 && this.metaFov) {
+            this.metaFov.innerText = `FOV: ${fov.toFixed(1)}°`;
+        }
     }
 
     forceImmediateUpdate() {
         if (!this.selectedCamera) return;
-        // In the new stream architecture, we send a lightweight HEAD or GET request
-        // to the regular camera endpoint just to push the new FOV to the server.
-        // The active MJPEG stream will then automatically reflect the new FOV.
-        const fovParam = (this.currentFov !== null) ? `?fov=${this.currentFov}` : "";
-        fetch(`${this.selectedCamera.url}${fovParam}`, { method: 'GET', cache: 'no-cache' })
-            .catch(err => console.error("Failed to sync FOV to server:", err));
+
+        const now = performance.now();
+        const minInterval = 33; // 30 FPS ceiling
+
+        // If we are moving too fast, schedule a single update for the "cooldown"
+        if (now - this.lastFovUpdateTick < minInterval) {
+            if (!this.fovUpdateTimeout) {
+                this.fovUpdateTimeout = setTimeout(() => {
+                    this.fovUpdateTimeout = null;
+                    this.forceImmediateUpdate();
+                }, minInterval);
+            }
+            return;
+        }
+
+        // Abort the previous request if it's still hanging in the network queue
+        if (this.fovAbortController) {
+            this.fovAbortController.abort();
+        }
+
+        this.fovAbortController = new AbortController();
+        this.lastFovUpdateTick = now;
+        
+        const payload = { fov: this.currentFov };
+        
+        fetch(this.selectedCamera.url, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: this.fovAbortController.signal
+        })
+        .then(() => {
+            this.fovAbortController = null;
+        })
+        .catch(err => {
+            if (err.name === 'AbortError') return; // Expected
+            console.error("Failed to sync FOV via POST:", err);
+            this.fovAbortController = null;
+        });
+    }
+
+    generateRuler(min, max) {
+        if (!this.rulerScale) return;
+        
+        this.rulerScale.innerHTML = '';
+        const step = 5;
+        
+        // Collect all values to mark: min, max, and multiples of 5 in between
+        let values = [min];
+        
+        // Find first multiple of 5 > min
+        let firstStep = Math.ceil((min + 0.1) / step) * step;
+        for (let v = firstStep; v < max; v += step) {
+            values.push(v);
+        }
+        
+        // Only push max if it's not already added (e.g. max is multiple of 5)
+        if (max > values[values.length - 1]) {
+            values.push(max);
+        }
+
+        values.forEach(val => {
+            const span = document.createElement('span');
+            // Calculate exact percentage position on the track
+            const percent = ((val - min) / (max - min)) * 100;
+            span.style.left = `${percent}%`;
+
+            // Check if it's a "major" tick (every 15 degrees)
+            if (val % 15 === 0) {
+                span.classList.add('major');
+            }
+            this.rulerScale.appendChild(span);
+        });
     }
 
     async startTelemetryLoop() {
@@ -207,8 +313,7 @@ class AdvancedCameraFeed {
                     this.telMet.innerText = `T+ ${this.formatMET(data.met)}`;
                 }
 
-                // Update FOV metadata based on UI input (since stream doesn't push this back)
-                this.metaFov.innerText = `FOV: ${this.fovInput.value}°`;
+
             } catch (err) {
                 // Silently fail telemetry if not in flight
             }

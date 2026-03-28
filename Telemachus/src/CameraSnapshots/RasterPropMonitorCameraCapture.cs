@@ -65,15 +65,7 @@ namespace Telemachus.CameraSnapshots
         public override float maxFOV => GetFieldFloat("cameraFoVMax", "cameraFoVMax", base.maxFOV);
         public override float defaultFOV => GetFieldFloat("cameraFoV", "cameraFoVMax", base.defaultFOV);
 
-        protected override float GetFOV(Camera gameCamera)
-        {
-            if (customFOV > 0)
-            {
-                return customFOV; // Driven by Houston API
-            }
 
-            return defaultFOV;
-        }
 
         public override string cameraManagerName()
         {

@@ -40,6 +40,7 @@ namespace Telemachus.CameraSnapshots
         }
 
         public float customFOV = -1f;
+        public float interpolatedFOV = -1f;
 
         public virtual float minFOV => 1f;
         public virtual float maxFOV => 120f;
@@ -261,12 +262,23 @@ namespace Telemachus.CameraSnapshots
 
         protected virtual float GetFOV(Camera gameCamera)
         {
-            if (customFOV > 0)
+            if (customFOV > 0 && !float.IsNaN(customFOV))
             {
-                return customFOV; // Driven by Houston API
+                // Init if needed (should be already synced, but safety first)
+                if (interpolatedFOV <= 0 || float.IsNaN(interpolatedFOV)) 
+                    interpolatedFOV = gameCamera.fieldOfView;
+
+                // Move towards target smoothly at 40 deg/sec
+                interpolatedFOV = Mathf.MoveTowards(interpolatedFOV, customFOV, Time.unscaledDeltaTime * 40.0f);
+                interpolatedFOV = Mathf.Clamp(interpolatedFOV, 1f, 175f);
+                return interpolatedFOV;
             }
 
-            return fovAngle;
+            // Continuously track the module's default FOV when not under Houston control
+            // This ensures zero-jump transition when zooming starts.
+            interpolatedFOV = defaultFOV; 
+            if (float.IsNaN(interpolatedFOV) || interpolatedFOV <= 0) interpolatedFOV = 60f; // Ultimate fallback
+            return interpolatedFOV;
         }
 
         protected virtual float GetAspect(Camera gameCamera)

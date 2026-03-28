@@ -207,13 +207,53 @@ main {
     gap: 15px;
 }
 
+.slider-wrapper {
+    position: relative;
+    width: 200px;
+    height: 30px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.ruler-scale {
+    position: absolute;
+    top: 5px;
+    width: 184px; /* Track width (200) - Thumb width (16) */
+    height: 10px;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.ruler-scale span {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    width: 1px;
+    height: 5px;
+    background: var(--accent-color);
+    opacity: 0.15;
+    transition: var(--transition);
+}
+
+/* Major ticks every 15 degrees (dynamic class) */
+.ruler-scale span.major {
+    height: 10px;
+    opacity: 0.4;
+    width: 2px;
+}
+
 input[type=range] {
     appearance: none;
     -webkit-appearance: none;
-    width: 180px;
-    background: #333;
-    height: 4px;
-    border-radius: 2px;
+    width: 200px;
+    background: rgba(255, 255, 255, 0.1);
+    height: 2px;
+    border-radius: 1px;
+    position: relative;
+    z-index: 2;
+    cursor: pointer;
 }
 
 input[type=range]::-webkit-slider-thumb {
@@ -223,7 +263,8 @@ input[type=range]::-webkit-slider-thumb {
     border-radius: 50%;
     background: var(--accent-color);
     cursor: pointer;
-    box-shadow: 0 0 8px var(--accent-color);
+    box-shadow: 0 0 15px var(--accent-color);
+    border: 2px solid #000;
 }
 
 .fov-value-display {

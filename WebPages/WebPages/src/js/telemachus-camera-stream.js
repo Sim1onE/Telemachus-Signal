@@ -99,13 +99,27 @@ class TelemachusCameraStream {
         
         while (this.chunkParser.buffer.length > 0) {
             if (this.chunkParser.searchingHeader) {
+                // Safety: if buffer grows too huge without header, flush it (5MB limit is massive safety)
+                if (this.chunkParser.buffer.length > 5000000) {
+                    this.chunkParser.buffer = new Uint8Array(0);
+                    return;
+                }
+
+                // Decode only the first 1KB of the buffer to find the header. 
+                // This protects the binary image data from string corruption.
+                const headerSearchSlice = this.chunkParser.buffer.slice(0, 1024);
+                const headerSearchStr = decoder.decode(headerSearchSlice);
                 const headerEndStr = "\r\n\r\n";
-                const strBuffer = decoder.decode(this.chunkParser.buffer);
-                const headerEndIdx = strBuffer.indexOf(headerEndStr);
+                const headerEndIdxStr = headerSearchStr.indexOf(headerEndStr);
 
-                if (headerEndIdx === -1) return;
+                if (headerEndIdxStr === -1) return;
 
-                const headerStr = strBuffer.substring(0, headerEndIdx);
+                // We found the header end in the string. 
+                // Now find the exact byte length by encoding back the substring.
+                const headerStr = headerSearchStr.substring(0, headerEndIdxStr);
+                const headerBytes = encoder.encode(headerStr);
+                const headerByteLenTotal = headerBytes.length + 4; // header + \r\n\r\n
+
                 const lines = headerStr.split('\r\n');
                 let contentLength = 0;
                 let kspUT = 0;
@@ -120,6 +134,8 @@ class TelemachusCameraStream {
                         this.chunkParser.kspWarp = parseFloat(line.split(':')[1].trim());
                     } else if (lowerLine.startsWith('x-ksp-delay:')) {
                         this.chunkParser.kspDelay = parseFloat(line.split(':')[1].trim());
+                    } else if (lowerLine.startsWith('x-ksp-fov:')) {
+                        this.chunkParser.kspFOV = parseFloat(line.split(':')[1].trim());
                     }
                 });
 
@@ -127,8 +143,8 @@ class TelemachusCameraStream {
                 this.chunkParser.kspUT = kspUT;
                 this.chunkParser.searchingHeader = false;
 
-                const headerByteLen = encoder.encode(headerStr).length + 4; 
-                this.chunkParser.buffer = this.chunkParser.buffer.slice(headerByteLen);
+                // Move buffer past exactly the header bytes found
+                this.chunkParser.buffer = this.chunkParser.buffer.slice(headerByteLenTotal);
             } else {
                 if (this.chunkParser.contentLength > 0 && this.chunkParser.buffer.length >= this.chunkParser.contentLength) {
                     const imgBytes = this.chunkParser.buffer.slice(0, this.chunkParser.contentLength);
@@ -142,7 +158,8 @@ class TelemachusCameraStream {
                             bitmap: bitmap, 
                             ut: this.chunkParser.kspUT,
                             warp: this.chunkParser.kspWarp || 1,
-                            delay: this.chunkParser.kspDelay || 0
+                            delay: this.chunkParser.kspDelay || 0,
+                            fov: this.chunkParser.kspFOV || null
                         });
                     } else {
                         const url = URL.createObjectURL(blob);
@@ -150,7 +167,8 @@ class TelemachusCameraStream {
                             url: url, 
                             ut: this.chunkParser.kspUT,
                             warp: this.chunkParser.kspWarp || 1,
-                            delay: this.chunkParser.kspDelay || 0
+                            delay: this.chunkParser.kspDelay || 0,
+                            fov: this.chunkParser.kspFOV || null
                         });
                     }
 
@@ -185,7 +203,7 @@ class TelemachusCameraStream {
             if (frameToDraw) {
                 // Instantly update the master clock/warp if the stream provides it
                 if (frameToDraw.ut && this.datalink.syncFromStream) {
-                    this.datalink.syncFromStream(frameToDraw.ut, frameToDraw.warp, frameToDraw.delay);
+                    this.datalink.syncFromStream(frameToDraw.ut, frameToDraw.warp, frameToDraw.delay, frameToDraw.fov);
                 }
 
                 if (this.isCanvas) {

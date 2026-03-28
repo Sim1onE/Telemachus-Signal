@@ -78,7 +78,7 @@ namespace Telemachus
                 jsonData["url"] = cameraURL(request, cameraKVP.Value);
                 jsonData["fovMin"] = cameraKVP.Value.minFOV;
                 jsonData["fovMax"] = cameraKVP.Value.maxFOV;
-                jsonData["fovDefault"] = cameraKVP.Value.defaultFOV;
+                jsonData["currentFov"] = cameraKVP.Value.interpolatedFOV;
 
                 jsonObject.Add(jsonData);
             }
@@ -112,6 +112,31 @@ namespace Telemachus
 
             CameraCapture camera = CameraCaptureManager.classedInstance.cameras[cameraName];
 
+            // Handle RESTful command updates (POST)
+            if (request.HttpMethod == "POST")
+            {
+                try {
+                    using (var reader = new System.IO.StreamReader(request.InputStream))
+                    {
+                        string body = reader.ReadToEnd();
+                        var json = Telemachus.Json.DecodeObject(body) as Dictionary<string, object>;
+                        if (json != null && json.ContainsKey("fov"))
+                        {
+                            float fovVal = Convert.ToSingle(json["fov"]);
+                            if (fovVal < 0) camera.customFOV = -1f;
+                            else camera.customFOV = Mathf.Clamp(fovVal, camera.minFOV, camera.maxFOV);
+                        }
+                    }
+                    response.StatusCode = 204; // No Content
+                    return true;
+                } catch (Exception ex) {
+                    PluginLogger.print("Error processing POST: " + ex.Message);
+                    response.StatusCode = 400;
+                    return true;
+                }
+            }
+
+            // --- Legacy GET parameter handling ---
             string fovQuery = request.QueryString["fov"];
             if (fovQuery == null && request.Url.Query.Contains("fov="))
             {
@@ -122,16 +147,10 @@ namespace Telemachus
                 fovQuery = amp > -1 ? q.Substring(idx, amp - idx) : q.Substring(idx);
             }
 
-            if (fovQuery != null && float.TryParse(fovQuery, NumberStyles.Any, CultureInfo.InvariantCulture, out float fovVal))
+            if (fovQuery != null && float.TryParse(fovQuery, NumberStyles.Any, CultureInfo.InvariantCulture, out float fovValLegacy))
             {
-                if (fovVal < 0)
-                {
-                    camera.customFOV = -1f; // Explicit reset
-                }
-                else
-                {
-                    camera.customFOV = Mathf.Clamp(fovVal, camera.minFOV, camera.maxFOV);
-                }
+                if (fovValLegacy < 0) camera.customFOV = -1f;
+                else camera.customFOV = Mathf.Clamp(fovValLegacy, camera.minFOV, camera.maxFOV);
             }
 
             // Update last request tick to keep renderer active
@@ -159,11 +178,12 @@ namespace Telemachus
                             double currentWarp = TimeWarp.CurrentRate;
 
                             string header = "--myboundary\r\n" +
-                                          "Content-Type: image/jpeg\r\n" +
-                                          $"X-KSP-UT: {currentUT.ToString("F3", CultureInfo.InvariantCulture)}\r\n" +
-                                          $"X-KSP-Delay: {currentDelay.ToString("F3", CultureInfo.InvariantCulture)}\r\n" +
-                                          $"X-KSP-Warp: {currentWarp.ToString("F1", CultureInfo.InvariantCulture)}\r\n" +
-                                          $"Content-Length: {img.Length}\r\n\r\n";
+                                            "Content-Type: image/jpeg\r\n" +
+                                            "X-KSP-UT: " + currentUT.ToString("F3", CultureInfo.InvariantCulture) + "\r\n" +
+                                            "X-KSP-Delay: " + currentDelay.ToString("F3", CultureInfo.InvariantCulture) + "\r\n" +
+                                            "X-KSP-Warp: " + currentWarp.ToString("F1", CultureInfo.InvariantCulture) + "\r\n" +
+                                            "X-KSP-FOV: " + camera.interpolatedFOV.ToString("F1", CultureInfo.InvariantCulture) + "\r\n" +
+                                            "Content-Length: " + img.Length + "\r\n\r\n";
 
                             byte[] headerBytes = Encoding.UTF8.GetBytes(header);
                             response.OutputStream.Write(headerBytes, 0, headerBytes.Length);
