@@ -24,6 +24,12 @@ namespace Telemachus.CameraSnapshots
             return "NA";
         }
 
+        public float customFOV = -1f;
+
+        public virtual float minFOV => 1f;
+        public virtual float maxFOV => 120f;
+        public virtual float defaultFOV => fovAngle;
+
         protected Dictionary<string, Camera> cameraDuplicates = new();
         protected List<string> activeCameras = new();
         protected static readonly string[] skippedCameras = { "UIMainCamera", "UIVectorCamera", "velocity camera" };
@@ -120,7 +126,7 @@ namespace Telemachus.CameraSnapshots
         protected virtual bool ShouldSkipCamera(Camera camera)
         {
             if (skippedCameras.Contains(camera.name)) return true;
-            
+
             // Critical filter: do not duplicate cameras created by other mods (like RPM)
             // that render to their own Textures. This prevents infinite camera recursion!
             if (camera.targetTexture != null) return true;
@@ -152,8 +158,8 @@ namespace Telemachus.CameraSnapshots
                     Camera cameraDuplicate = cameraDuplicateGameObject.AddComponent<Camera>();
                     cameraDuplicates[camera.name] = cameraDuplicate;
                     cameraDuplicate.CopyFrom(camera);
-                    cameraDuplicate.fieldOfView = fovAngle;
-                    cameraDuplicate.aspect = aspect;
+                    cameraDuplicate.fieldOfView = GetFOV(camera);
+                    cameraDuplicate.aspect = GetAspect(camera);
 
                     cameraDuplicate.targetTexture = this.overviewTexture;
                     // Adjust near clip only for small parts/FX cameras like RPM does,
@@ -198,6 +204,21 @@ namespace Telemachus.CameraSnapshots
         }
 
 
+        protected virtual float GetFOV(Camera gameCamera)
+        {
+            if (customFOV > 0)
+            {
+                return customFOV; // Driven by Houston API
+            }
+
+            return fovAngle;
+        }
+
+        protected virtual float GetAspect(Camera gameCamera)
+        {
+            return aspect;
+        }
+
         public virtual void repositionCamera()
         {
             foreach (KeyValuePair<string, Camera> KVP in cameraDuplicates)
@@ -207,6 +228,8 @@ namespace Telemachus.CameraSnapshots
 
                 cameraDuplicate.transform.position = gameCamera.transform.position;
                 cameraDuplicate.transform.rotation = gameCamera.transform.rotation;
+                cameraDuplicate.fieldOfView = GetFOV(gameCamera);
+                cameraDuplicate.aspect = GetAspect(gameCamera);
 
                 additionalCameraUpdates(cameraDuplicate, gameCamera);
             }

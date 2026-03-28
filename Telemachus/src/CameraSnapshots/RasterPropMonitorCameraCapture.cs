@@ -35,6 +35,46 @@ namespace Telemachus.CameraSnapshots
             return false;
         }
 
+        private float GetFieldFloat(string hullcamField, string rpmField, float fallback)
+        {
+            if (rpmCamera != null)
+            {
+                // Native Hullcam VDS FOV check!
+                foreach (PartModule module in rpmCamera.part.Modules)
+                {
+                    if (module.moduleName == "MuMechModuleHullCamera" || module.moduleName == "HullCamera")
+                    {
+                        var field = module.Fields[hullcamField];
+                        if (field != null && field.GetValue(module) != null)
+                        {
+                            return (float)field.GetValue(module);
+                        }
+                    }
+                }
+
+                object fovObj = rpmCamera.getRPMField(rpmField);
+                if (fovObj != null)
+                {
+                    return (float)fovObj; // Default RPM FOV
+                }
+            }
+            return fallback;
+        }
+
+        public override float minFOV => GetFieldFloat("cameraFoVMin", "cameraFoVMin", base.minFOV);
+        public override float maxFOV => GetFieldFloat("cameraFoVMax", "cameraFoVMax", base.maxFOV);
+        public override float defaultFOV => GetFieldFloat("cameraFoV", "cameraFoVMax", base.defaultFOV);
+
+        protected override float GetFOV(Camera gameCamera)
+        {
+            if (customFOV > 0)
+            {
+                return customFOV; // Driven by Houston API
+            }
+
+            return defaultFOV;
+        }
+
         public override string cameraManagerName()
         {
             return buildCameraManagerName(rpmCamera.cameraName);

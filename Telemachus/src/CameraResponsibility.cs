@@ -1,4 +1,4 @@
-﻿//Author: Richard Bunt
+//Author: Richard Bunt
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -11,6 +11,8 @@ using UnityEngine;
 using System.Collections;
 using Telemachus.CameraSnapshots;
 using System.Text.RegularExpressions;
+using System.Globalization;
+using System.Collections.Specialized;
 
 namespace Telemachus
 {
@@ -74,6 +76,9 @@ namespace Telemachus
                 jsonData["name"] = cameraKVP.Value.cameraManagerName();
                 jsonData["type"] = cameraKVP.Value.cameraType();
                 jsonData["url"] = cameraURL(request, cameraKVP.Value);
+                jsonData["fovMin"] = cameraKVP.Value.minFOV;
+                jsonData["fovMax"] = cameraKVP.Value.maxFOV;
+                jsonData["fovDefault"] = cameraKVP.Value.defaultFOV;
 
                 jsonObject.Add(jsonData);
             }
@@ -98,11 +103,37 @@ namespace Telemachus
             }
 
             CameraCapture camera = CameraCaptureManager.classedInstance.cameras[cameraName];
+
+            string fovQuery = request.QueryString["fov"];
+            if (fovQuery == null && request.Url.Query.Contains("fov=")) 
+            {
+                 // Fallback physical extraction just in case
+                 string q = request.Url.Query;
+                 int idx = q.IndexOf("fov=") + 4;
+                 int amp = q.IndexOf("&", idx);
+                 fovQuery = amp > -1 ? q.Substring(idx, amp - idx) : q.Substring(idx);
+            }
+
+            if (fovQuery != null && float.TryParse(fovQuery, NumberStyles.Any, CultureInfo.InvariantCulture, out float fovVal))
+            {
+                if (fovVal < 0)
+                {
+                    camera.customFOV = -1f; // Explicit reset
+                }
+                else
+                {
+                    camera.customFOV = Mathf.Clamp(fovVal, camera.minFOV, camera.maxFOV);
+                }
+            }
+
             //PluginLogger.debug("RENDERING SAVED CAMERA: "+ camera.cameraManagerName());
             if (camera.didRender)
             {
                 response.ContentEncoding = Encoding.UTF8;
                 response.ContentType = "image/jpeg";
+                response.AddHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+                response.AddHeader("Pragma", "no-cache");
+                response.AddHeader("Expires", "0");
                 response.WriteContent(camera.imageBytes);
                 dataRates.SendDataToClient(camera.imageBytes.Length);
             }
