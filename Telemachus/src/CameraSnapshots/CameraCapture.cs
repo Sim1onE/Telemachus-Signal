@@ -13,6 +13,21 @@ namespace Telemachus.CameraSnapshots
         public byte[] imageBytes = null;
         public volatile bool mutex = false;
         public int renderOffsetFactor = 0;
+        public int lastRequestTick = Environment.TickCount - 6000; // Force immediate render on first check
+        private Texture2D persistentTexture = null;
+        private float nextRenderTime = 0f;
+
+        protected double currentSignalStrength
+        {
+            get
+            {
+                if (FlightGlobals.ActiveVessel?.Connection != null)
+                {
+                    return FlightGlobals.ActiveVessel.Connection.SignalStrength;
+                }
+                return 0.0; // Default to no signal if null
+            }
+        }
 
         public virtual string cameraManagerName()
         {
@@ -64,6 +79,16 @@ namespace Telemachus.CameraSnapshots
             Camera.onPostRender += disableCameraIfInList;
         }
 
+        protected void OnDisable()
+        {
+            Camera.onPostRender -= disableCameraIfInList;
+        }
+
+        protected void OnDestroy()
+        {
+            if (persistentTexture != null) Destroy(persistentTexture);
+        }
+
         private void disableCameraIfInList(Camera cam)
         {
             if (cameraDuplicates.ContainsValue(cam))
@@ -75,9 +100,11 @@ namespace Telemachus.CameraSnapshots
 
         protected virtual void LateUpdate()
         {
-            //PluginLogger.debug("LATE UPDATE FOR FLIGHT CAMERA");
             if (CameraManager.Instance != null && HighLogic.LoadedSceneIsFlight && !mutex)
             {
+                // Strict Real-time timing check
+                if (Time.unscaledTime < nextRenderTime) return;
+
                 mutex = true;
                 duplicateAnyNewCameras();
                 repositionCamera();
@@ -87,40 +114,68 @@ namespace Telemachus.CameraSnapshots
 
         public IEnumerator newRender()
         {
-            //PluginLogger.debug(cameraManagerName() + ": WAITING FOR END OF FRAME");
-            yield return new WaitForEndOfFrame();
-            //PluginLogger.debug(cameraManagerName() + ": OUT OF FRAME");
+            int delta = Environment.TickCount - lastRequestTick;
+            if (delta > 5000 || delta < 0) 
+            {
+                nextRenderTime = Time.unscaledTime + 1.0f;
+                mutex = false;
+                yield break;
+            }
 
+            double signal = currentSignalStrength;
+
+            if (signal < 0.01)
+            {
+                // In TimeWarp (especially "on-rails" > x1), CommNet might drop to 0 or null.
+                // We assume 1.0 if warping to maintain the frame rate.
+                if (TimeWarp.CurrentRate > 1.0f)
+                {
+                    signal = 1.0;
+                }
+                else
+                {
+                    nextRenderTime = Time.unscaledTime + 1.0f;
+                    mutex = false;
+                    yield break;
+                }
+            }
+
+            // Render immediately in LateUpdate (no WaitForEndOfFrame)
             var sortedCameras = cameraDuplicates.Values.OrderBy(c => c.depth).ToList();
             foreach (Camera camera in sortedCameras)
             {
-                //camera.targetTexture = rt;
                 camera.Render();
             }
 
-            //imageStopWatch.Start();
             Texture2D texture = getTexture2DFromRenderTexture();
-            this.imageBytes = texture.EncodeToJPG();
+            
+            int jpgQuality = (int)Mathf.Lerp(10f, 80f, (float)signal);
+            this.imageBytes = texture.EncodeToJPG(jpgQuality);
             this.didRender = true;
-            Destroy(texture);
-            //imageStopWatch.Stop();
-            //PluginLogger.debug(cameraManagerName() + ": TIME TO RENDER: " + imageStopWatch.Elapsed + " : " + DateTime.Now.ToString("hh.mm.ss.ffffff"));
-            //imageStopWatch.Reset();
-            //renderCount++;
 
-            //wait a small delay before releasing the mutex to improve performance while keeping framerate acceptable
-            //PluginLogger.debug("RENDER DELAY:" + (1.0f + (.3f * renderOffsetFactor)));
-            yield return new WaitForSeconds(0.1f + (0.05f * renderOffsetFactor));
+            // Calculate next render slot
+            float baseWait = Mathf.Lerp(2.0f, 0.033f, (float)signal);
+            float offset = (delta < 2000) ? 0f : (0.05f * renderOffsetFactor);
+            
+            nextRenderTime = Time.unscaledTime + baseWait + offset;
             mutex = false;
+            yield break;
         }
 
         public Texture2D getTexture2DFromRenderTexture()
         {
-            Texture2D texture2D = new Texture2D(overviewTexture.width, overviewTexture.height);
+            if (persistentTexture == null || 
+                persistentTexture.width != overviewTexture.width || 
+                persistentTexture.height != overviewTexture.height)
+            {
+                if (persistentTexture != null) Destroy(persistentTexture);
+                persistentTexture = new Texture2D(overviewTexture.width, overviewTexture.height, TextureFormat.RGB24, false);
+            }
+
             RenderTexture.active = overviewTexture;
-            texture2D.ReadPixels(new Rect(0, 0, overviewTexture.width, overviewTexture.height), 0, 0);
-            texture2D.Apply();
-            return texture2D;
+            persistentTexture.ReadPixels(new Rect(0, 0, overviewTexture.width, overviewTexture.height), 0, 0);
+            persistentTexture.Apply();
+            return persistentTexture;
         }
 
         protected virtual bool ShouldSkipCamera(Camera camera)

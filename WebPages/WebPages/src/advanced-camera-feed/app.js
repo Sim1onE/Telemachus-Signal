@@ -4,6 +4,10 @@ class AdvancedCameraFeed {
         this.currentFov = null;
         this.cameras = [];
         this.baseUrl = window.location.origin;
+        this.cameraStream = null;
+        this.telemetryData = {};
+        this.lastUtPollTime = null;
+        this.lastRemoteUt = 0;
 
         // UI Elements
         this.cameraList = document.getElementById('camera-list');
@@ -42,11 +46,11 @@ class AdvancedCameraFeed {
             const min = parseFloat(this.fovSlider.min);
             const max = parseFloat(this.fovSlider.max);
             const sliderVal = parseFloat(e.target.value);
-            
+
             // Invert the mapping: Max Slider = Min FOV (Zoom In)
             this.currentFov = (max + min) - sliderVal;
             this.fovInput.value = Math.round(this.currentFov);
-            
+
             this.forceImmediateUpdate();
         });
 
@@ -55,7 +59,7 @@ class AdvancedCameraFeed {
             if (!isNaN(val)) {
                 const min = parseFloat(this.fovSlider.min);
                 const max = parseFloat(this.fovSlider.max);
-                
+
                 this.currentFov = val;
                 // Update slider using inverse mapping
                 this.fovSlider.value = (max + min) - val;
@@ -103,6 +107,10 @@ class AdvancedCameraFeed {
     }
 
     selectCamera(cam) {
+        if (this.cameraStream) {
+            this.cameraStream.stop();
+        }
+
         this.selectedCamera = cam;
         this.currentFov = null; // Reset zoom state when switching
 
@@ -119,47 +127,74 @@ class AdvancedCameraFeed {
 
         this.metaName.innerText = `SENSOR: ${cam.name.toUpperCase()}`;
 
+        // Initialize and start the stream
+        // Construct the stream URL from the metadata URL
+        const streamUrl = `${this.baseUrl}/telemachus/cameras/stream/${cam.name}`;
+        this.cameraStream = new TelemachusCameraStream(streamUrl, this.cameraFeed, this);
+        this.cameraStream.start();
+
         // Highlight active
         document.querySelectorAll('.camera-item').forEach(el => el.classList.remove('active'));
         this.renderCameraList();
     }
 
     startImageLoop() {
-        setInterval(() => {
-            if (!this.selectedCamera) return;
+        // We no longer need a manual setInterval loop. 
+        // Rendering is handled by the TelemachusCameraStream library.
+    }
 
-            const cacheBuster = Date.now();
-            const fovParam = (this.currentFov !== null && this.currentFov !== undefined) ? `&fov=${this.currentFov}` : "";
+    // Proxy for the stream library to read latest telemetry
+    get(key) {
+        if (key === 't.universalTime') {
+            if (!this.lastUtPollTime) return this.lastRemoteUt;
+            const elapsedSeconds = (performance.now() - this.lastUtPollTime) / 1000;
+            const warpRate = this.telemetryData.warp || 1;
+            return this.lastRemoteUt + (elapsedSeconds * warpRate);
+        }
+        if (key === 'comm.signalDelay') return this.telemetryData.delay || 0;
+        return this.telemetryData[key];
+    }
 
-            // Generate full URL
-            const url = `${this.selectedCamera.url}?cb=${cacheBuster}${fovParam}`;
-
-            // Visual feedback: brief metadata update
-            this.metaFov.innerText = `FOV: ${this.fovInput.value}°`;
-
-            // To prevent flickering, we could use an Image object buffer, but for 4FPS simple src swap is usually okay with cache-control headers.
-            this.cameraFeed.src = url;
-
-            // Update resolution metadata once image loads
-            if (this.cameraFeed.naturalWidth) {
-                this.metaRes.innerText = `RES: ${this.cameraFeed.naturalWidth}x${this.cameraFeed.naturalHeight}`;
-            }
-        }, 100); // 10 FPS
+    // Precise sync callback from the video stream metadata
+    syncFromStream(ut, warp, delay) {
+        // Only update if we see a significant jump or a warp change
+        const currentPredicted = this.get('t.universalTime');
+        const jump = Math.abs(ut - currentPredicted);
+        
+        // If we jump more than 0.5s or if warp changed, resync the local clocks
+        if (jump > 0.5 || warp !== this.telemetryData.warp || delay !== this.telemetryData.delay) {
+            this.lastRemoteUt = ut;
+            this.lastUtPollTime = performance.now();
+            if (warp !== undefined) this.telemetryData.warp = warp;
+            if (delay !== undefined) this.telemetryData.delay = delay;
+        }
     }
 
     forceImmediateUpdate() {
-        // Force a single tick now
-        const cacheBuster = Date.now();
-        const fovParam = `&fov=${this.currentFov}`;
-        this.cameraFeed.src = `${this.selectedCamera.url}?cb=${cacheBuster}${fovParam}`;
+        if (!this.selectedCamera) return;
+        // In the new stream architecture, we send a lightweight HEAD or GET request
+        // to the regular camera endpoint just to push the new FOV to the server.
+        // The active MJPEG stream will then automatically reflect the new FOV.
+        const fovParam = (this.currentFov !== null) ? `?fov=${this.currentFov}` : "";
+        fetch(`${this.selectedCamera.url}${fovParam}`, { method: 'GET', cache: 'no-cache' })
+            .catch(err => console.error("Failed to sync FOV to server:", err));
     }
 
     async startTelemetryLoop() {
         const fetchTelemetry = async () => {
             try {
-                // Fetch basic ship stats
-                const response = await fetch(`${this.baseUrl}/telemachus/datalink?alt=v.altitude&vel=v.orbitalVelocity&met=v.missionTime`);
+                const response = await fetch(`${this.baseUrl}/telemachus/datalink?alt=v.altitude&vel=v.orbitalVelocity&met=v.missionTime&ut=t.universalTime&delay=comm.signalDelay&warp=t.currentRate`);
                 const data = await response.json();
+                
+                // Anti-Time-Travel: only update if data is more recent than what we have
+                // This prevents the 1Hz telemetry from overriding the 30Hz video sync
+                if (data.ut > this.lastRemoteUt) {
+                    this.lastRemoteUt = data.ut;
+                    this.lastUtPollTime = performance.now();
+                }
+
+                // Merge telemetry data instead of overwriting everything
+                this.telemetryData = { ...this.telemetryData, ...data };
 
                 if (data.alt) {
                     const altKm = (data.alt / 1000).toFixed(2);
@@ -171,6 +206,9 @@ class AdvancedCameraFeed {
                 if (data.met) {
                     this.telMet.innerText = `T+ ${this.formatMET(data.met)}`;
                 }
+
+                // Update FOV metadata based on UI input (since stream doesn't push this back)
+                this.metaFov.innerText = `FOV: ${this.fovInput.value}°`;
             } catch (err) {
                 // Silently fail telemetry if not in flight
             }

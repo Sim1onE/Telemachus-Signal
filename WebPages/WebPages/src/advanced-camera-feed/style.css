@@ -132,9 +132,9 @@ main {
     box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.9);
 }
 
-#camera-feed {
+#camera-feed, .camera-viewport {
     width: 100%;
-    flex: 1;
+    height: 100%;
     object-fit: contain;
     background: #000;
 }

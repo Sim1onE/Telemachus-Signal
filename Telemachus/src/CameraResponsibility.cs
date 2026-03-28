@@ -96,6 +96,14 @@ namespace Telemachus
         public bool processCameraImageRequest(string cameraName, HttpListenerRequest request, HttpListenerResponse response)
         {
             cameraName = cameraName.ToLower();
+            bool isStream = false;
+
+            if (cameraName.StartsWith("stream/"))
+            {
+                isStream = true;
+                cameraName = cameraName.Substring(7); // remove "stream/"
+            }
+
             if (!CameraCaptureManager.classedInstance.cameras.ContainsKey(cameraName))
             {
                 response.StatusCode = 404;
@@ -105,13 +113,13 @@ namespace Telemachus
             CameraCapture camera = CameraCaptureManager.classedInstance.cameras[cameraName];
 
             string fovQuery = request.QueryString["fov"];
-            if (fovQuery == null && request.Url.Query.Contains("fov=")) 
+            if (fovQuery == null && request.Url.Query.Contains("fov="))
             {
-                 // Fallback physical extraction just in case
-                 string q = request.Url.Query;
-                 int idx = q.IndexOf("fov=") + 4;
-                 int amp = q.IndexOf("&", idx);
-                 fovQuery = amp > -1 ? q.Substring(idx, amp - idx) : q.Substring(idx);
+                // Fallback physical extraction just in case
+                string q = request.Url.Query;
+                int idx = q.IndexOf("fov=") + 4;
+                int amp = q.IndexOf("&", idx);
+                fovQuery = amp > -1 ? q.Substring(idx, amp - idx) : q.Substring(idx);
             }
 
             if (fovQuery != null && float.TryParse(fovQuery, NumberStyles.Any, CultureInfo.InvariantCulture, out float fovVal))
@@ -126,20 +134,85 @@ namespace Telemachus
                 }
             }
 
-            //PluginLogger.debug("RENDERING SAVED CAMERA: "+ camera.cameraManagerName());
-            if (camera.didRender)
+            // Update last request tick to keep renderer active
+            camera.lastRequestTick = Environment.TickCount;
+
+            if (isStream)
             {
-                response.ContentEncoding = Encoding.UTF8;
-                response.ContentType = "image/jpeg";
-                response.AddHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-                response.AddHeader("Pragma", "no-cache");
-                response.AddHeader("Expires", "0");
-                response.WriteContent(camera.imageBytes);
-                dataRates.SendDataToClient(camera.imageBytes.Length);
+                response.ContentType = "multipart/x-mixed-replace; boundary=--myboundary";
+                response.SendChunked = true;
+
+                try
+                {
+                    while (true)
+                    {
+                        if (camera.didRender && camera.imageBytes != null)
+                        {
+                            camera.lastRequestTick = Environment.TickCount;
+
+                            byte[] img = camera.imageBytes; // Thread-safe copy reference
+
+                            // Planetarium might throw if not in flight, but CameraCapture is only in flight
+                            double currentUT = HighLogic.LoadedSceneIsFlight && Planetarium.fetch != null ? Planetarium.GetUniversalTime() : 0;
+                            double currentDelay = (FlightGlobals.ActiveVessel != null && FlightGlobals.ActiveVessel.Connection != null) ? 
+                                                    FlightGlobals.ActiveVessel.Connection.SignalDelay : 0;
+                            double currentWarp = TimeWarp.CurrentRate;
+
+                            string header = "--myboundary\r\n" +
+                                          "Content-Type: image/jpeg\r\n" +
+                                          $"X-KSP-UT: {currentUT.ToString("F3", CultureInfo.InvariantCulture)}\r\n" +
+                                          $"X-KSP-Delay: {currentDelay.ToString("F3", CultureInfo.InvariantCulture)}\r\n" +
+                                          $"X-KSP-Warp: {currentWarp.ToString("F1", CultureInfo.InvariantCulture)}\r\n" +
+                                          $"Content-Length: {img.Length}\r\n\r\n";
+
+                            byte[] headerBytes = Encoding.UTF8.GetBytes(header);
+                            response.OutputStream.Write(headerBytes, 0, headerBytes.Length);
+                            response.OutputStream.Write(img, 0, img.Length);
+
+                            byte[] footerBytes = Encoding.UTF8.GetBytes("\r\n");
+                            response.OutputStream.Write(footerBytes, 0, footerBytes.Length);
+                            response.OutputStream.Flush();
+
+                            dataRates.SendDataToClient(headerBytes.Length + img.Length + footerBytes.Length);
+
+                            // Reduce sleep to 10ms to support 30+ FPS comfortably
+                            System.Threading.Thread.Sleep(10);
+                        }
+                        else
+                        {
+                            // If first frame not ready, update tick to trigger render and wait
+                            camera.lastRequestTick = Environment.TickCount;
+                            System.Threading.Thread.Sleep(100);
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // Client disconnected or stream closed
+                }
             }
             else
             {
-                response.StatusCode = 503;
+                if (camera.didRender && camera.imageBytes != null)
+                {
+                    response.ContentEncoding = Encoding.UTF8;
+                    response.ContentType = "image/jpeg";
+                    response.AddHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+                    response.AddHeader("Pragma", "no-cache");
+                    response.AddHeader("Expires", "0");
+
+                    double currentUT = HighLogic.LoadedSceneIsFlight && Planetarium.fetch != null ? Planetarium.GetUniversalTime() : 0;
+                    response.AddHeader("X-KSP-UT", currentUT.ToString("F3", CultureInfo.InvariantCulture));
+
+                    response.WriteContent(camera.imageBytes);
+                    dataRates.SendDataToClient(camera.imageBytes.Length);
+                }
+                else
+                {
+                    // Try to trigger a render even if not ready
+                    camera.lastRequestTick = Environment.TickCount;
+                    response.StatusCode = 503;
+                }
             }
 
             return true;

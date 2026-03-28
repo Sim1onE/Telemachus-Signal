@@ -55,9 +55,8 @@
                 <div id="metadata-fov" style="font-size: 0.8rem; opacity: 0.7;">FOV: 64°</div>
             </div>
 
-            <img id="camera-feed"
-                src="http://localhost:8085/telemachus/cameras/RPMCamera-ExtCam4?cb=1774664579556&amp;fov=-1"
-                alt="Video Stream">
+            <!-- Use a canvas for high-performance rendering without blob URL spam -->
+            <canvas id="camera-feed" class="camera-viewport"></canvas>
 
             <div class="crt-overlay"></div>
             <div class="crt-vignette"></div>
@@ -74,6 +73,7 @@
         </section>
     </main>
 
+    <script src="../js/telemachus-camera-stream.js"></script>
     <script src="app.js"></script>
 
 

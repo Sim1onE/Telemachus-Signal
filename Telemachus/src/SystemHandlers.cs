@@ -19,9 +19,16 @@ namespace Telemachus
         {
             if (!HighLogic.LoadedSceneIsFlight) return 5;
             if (FlightDriver.Pause) return 1;
-            if (!TelemachusPowerDrain.IsAnyActive) return 2;
-            if (!TelemachusPowerDrain.IsAnyToggled) return 3;
-            if (!VesselChangeDetector.hasTelemachusPart) return 4;
+            
+            // Check native KSP CommNet connection instead of special antennas
+            if (FlightGlobals.ActiveVessel != null)
+            {
+                if (FlightGlobals.ActiveVessel.Connection == null || !FlightGlobals.ActiveVessel.Connection.IsConnected)
+                {
+                    return 2; // No Signal
+                }
+            }
+
             return 0;
         }
     }
