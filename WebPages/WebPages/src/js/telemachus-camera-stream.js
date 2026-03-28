@@ -30,6 +30,8 @@ class TelemachusCameraStream {
             currentHeaders: {},
             contentLength: 0
         };
+
+        this.latestNetworkDelay = 0;
     }
 
     start() {
@@ -133,7 +135,9 @@ class TelemachusCameraStream {
                     } else if (lowerLine.startsWith('x-ksp-warp:')) {
                         this.chunkParser.kspWarp = parseFloat(line.split(':')[1].trim());
                     } else if (lowerLine.startsWith('x-ksp-delay:')) {
-                        this.chunkParser.kspDelay = parseFloat(line.split(':')[1].trim());
+                        const delayVal = parseFloat(line.split(':')[1].trim());
+                        this.chunkParser.kspDelay = delayVal;
+                        this.latestNetworkDelay = delayVal; // Intercettazione istantanea
                     } else if (lowerLine.startsWith('x-ksp-fov:')) {
                         this.chunkParser.kspFOV = parseFloat(line.split(':')[1].trim());
                     } else if (lowerLine.startsWith('x-ksp-signal-quality:')) {
@@ -191,20 +195,27 @@ class TelemachusCameraStream {
 
         if (this.datalink && this.frameBuffer.length > 0) {
             const universalTime = this.datalink.get ? this.datalink.get('t.universalTime') : Date.now();
-            const delay = this.datalink.get ? (this.datalink.get('comm.signalDelay') || 0) : 0;
-            const delayedTimecode = universalTime - delay;
+            const currentDelay = this.latestNetworkDelay;
+            const delayedTimecode = universalTime - currentDelay;
 
             let frameToDraw = null;
-            if (this.frameBuffer.length > 0 && this.frameBuffer[0].ut <= delayedTimecode) {
-                // If we have massive physical lag, only skip if the frame is > 2s old compared to our delayed target
-                // This prevents the buffer from emptying too aggressively when we are simulation delay
-                if (this.frameBuffer.length > 2000 || (this.frameBuffer.length > 1 && this.frameBuffer[0].ut < delayedTimecode - 2.0)) {
-                    const skip = this.frameBuffer.shift();
-                    if (skip.url) URL.revokeObjectURL(skip.url);
-                    if (skip.bitmap && skip.bitmap.close) skip.bitmap.close();
+            let framesPoppedThisTick = 0;
+
+            // --- DYNAMIC BURST CATCH-UP ---
+            // Se siamo indietro rispetto al tempo reale (catch-up), processiamo più di un frame per tick.
+            // Questo crea l'effetto "fast-forward" richiesto.
+            // Limite massimo: 10 frames per tick (circa 10x velocità di recupero).
+            while (this.frameBuffer.length > 0 && this.frameBuffer[0].ut <= delayedTimecode && framesPoppedThisTick < 10) {
+                if (frameToDraw) {
+                    // Pulizia buffer dei frame intermedi (non li disegnamo, teniamo solo l'ultimo del burst)
+                    if (frameToDraw.url) URL.revokeObjectURL(frameToDraw.url);
+                    if (frameToDraw.bitmap && frameToDraw.bitmap.close) frameToDraw.bitmap.close();
                 }
-                
                 frameToDraw = this.frameBuffer.shift();
+                framesPoppedThisTick++;
+
+                // Se siamo già "in orario", fermiamo il burst per non consumare troppo buffer inutilmente
+                if (frameToDraw.ut > (delayedTimecode - 0.05)) break;
             }
 
             if (frameToDraw) {

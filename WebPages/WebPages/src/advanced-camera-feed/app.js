@@ -200,26 +200,25 @@ class AdvancedCameraFeed {
             const warpRate = this.telemetryData.warp || 1;
             return this.lastRemoteUt + (elapsedSeconds * warpRate);
         }
-        if (key === 'comm.signalDelay') return this.telemetryData.delay || 0;
+        if (key === 'comm.signalDelay') {
+            // Favor the ultra-low-latency network header from the stream if available
+            if (this.cameraStream && this.cameraStream.latestNetworkDelay !== undefined) {
+                return this.cameraStream.latestNetworkDelay;
+            }
+            return this.telemetryData.delay || 0;
+        }
         return this.telemetryData[key];
     }
 
     // Precise sync callback from the video stream metadata
     syncFromStream(ut, warp, delay, fov, signal) {
         // Only update if we see a significant jump or a warp change
-        const currentPredicted = this.get('t.universalTime');
-        // If warp or delay changed, update telemetry data immediately
-        if (warp !== this.telemetryData.warp || delay !== this.telemetryData.delay) {
-            if (warp !== undefined) this.telemetryData.warp = warp;
-            if (delay !== undefined) this.telemetryData.delay = delay;
-        }
-
-        // Update FOV metadata with real-time value from stream (includes decimals for "wow" effect)
+        if (warp !== undefined) this.telemetryData.warp = warp;
+        
+        // Metadata UI updates (FOV, Signal) remain instant
         if (fov !== null && fov > 0 && this.metaFov) {
             this.metaFov.innerText = `FOV: ${fov.toFixed(1)}°`;
         }
-
-        // Update Signal UI
         if (signal !== undefined) {
             this.updateSignalUI(signal);
         }
