@@ -173,7 +173,8 @@ namespace Telemachus
 
                             // Planetarium might throw if not in flight, but CameraCapture is only in flight
                             double currentUT = HighLogic.LoadedSceneIsFlight && Planetarium.fetch != null ? Planetarium.GetUniversalTime() : 0;
-                            double currentDelay = (FlightGlobals.ActiveVessel != null && FlightGlobals.ActiveVessel.Connection != null) ? 
+                            double currentDelay = (CameraCapture.DebugDelayOverride >= 0f) ? CameraCapture.DebugDelayOverride :
+                                                  (FlightGlobals.ActiveVessel != null && FlightGlobals.ActiveVessel.Connection != null) ? 
                                                     FlightGlobals.ActiveVessel.Connection.SignalDelay : 0;
                             double currentWarp = TimeWarp.CurrentRate;
 

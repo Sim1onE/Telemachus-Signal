@@ -17,6 +17,7 @@ namespace Telemachus.CameraSnapshots
         private Texture2D persistentTexture = null;
         private float nextRenderTime = 0f;
         public static float DebugSignalOverride = -1f;
+        public static float DebugDelayOverride = -1f;
 
         public double SignalStrength => currentSignalStrength;
 

@@ -9,7 +9,7 @@ namespace Telemachus.Debug
     {
         private Rect windowRect = new Rect(100, 100, 250, 250);
         private bool isVisible = false;
-        
+
         private float sigOverrideValue = 1.0f;
         private bool sigOverrideEnabled = false;
 
