@@ -1,0 +1,26 @@
+  Individuazione dei progetti da ripristinare...
+  Tutti i progetti sono aggiornati per il ripristino.
+  Telemachus.DocGen -> D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus.DocGen\bin\Debug\netstandard2.0\Telemachus.DocGen.dll
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\CameraSnapshots\CameraCapture.cs(31,48): error CS0117: 'TelemachusSignalManager' non contiene una definizione per 'GetActualSignalStrength' [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\KSPWebSocketService.cs(55,17): warning CS0618: 'MessageEventArgs.Type' ├¿ obsoleto: 'This property will be removed. Use any of the Is properties instead.' [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\CameraResponsibility.cs(186,76): error CS0117: 'TelemachusSignalManager' non contiene una definizione per 'GetActualSignalStrength' [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\TelemachusPartModules.cs(154,36): warning CS0612: 'Part.RequestResource(string, float)' ├¿ obsoleto [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\ScienceCareerDataLinkHandler.cs(107,48): error CS0117: 'TelemachusSignalManager' non contiene una definizione per 'GetActualSignalStrength' [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\ScienceCareerDataLinkHandler.cs(113,55): error CS0117: 'TelemachusSignalManager' non contiene una definizione per 'GetActualSignalStrength' [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\VesselChangeDetector.cs(14,27): warning CS0649: Non ├¿ possibile assegnare un valore diverso al campo 'VesselChangeDetector.updateEventArgs'. Il valore predefinito ├¿ null [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\TelemachusPartModules.cs(103,16): warning CS0414: Il campo 'TelemachusPowerDrain.statusString' ├¿ assegnato, ma il suo valore non viene mai usato [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+
+Compilazione NON RIUSCITA.
+
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\KSPWebSocketService.cs(55,17): warning CS0618: 'MessageEventArgs.Type' ├¿ obsoleto: 'This property will be removed. Use any of the Is properties instead.' [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\TelemachusPartModules.cs(154,36): warning CS0612: 'Part.RequestResource(string, float)' ├¿ obsoleto [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\VesselChangeDetector.cs(14,27): warning CS0649: Non ├¿ possibile assegnare un valore diverso al campo 'VesselChangeDetector.updateEventArgs'. Il valore predefinito ├¿ null [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\TelemachusPartModules.cs(103,16): warning CS0414: Il campo 'TelemachusPowerDrain.statusString' ├¿ assegnato, ma il suo valore non viene mai usato [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\CameraSnapshots\CameraCapture.cs(31,48): error CS0117: 'TelemachusSignalManager' non contiene una definizione per 'GetActualSignalStrength' [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\CameraResponsibility.cs(186,76): error CS0117: 'TelemachusSignalManager' non contiene una definizione per 'GetActualSignalStrength' [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\ScienceCareerDataLinkHandler.cs(107,48): error CS0117: 'TelemachusSignalManager' non contiene una definizione per 'GetActualSignalStrength' [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\src\ScienceCareerDataLinkHandler.cs(113,55): error CS0117: 'TelemachusSignalManager' non contiene una definizione per 'GetActualSignalStrength' [D:\Users\Smit2\Documents\repositories\Telemachus-Signal\Telemachus\Telemachus.csproj]
+    Avvisi: 4
+    Errori: 4
+
+Tempo trascorso 00:00:01.18

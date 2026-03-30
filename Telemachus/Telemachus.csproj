@@ -29,17 +29,26 @@
     <Reference Include="UnityEngine.ImageConversionModule" Private="false">
       <HintPath>..\references\UnityEngine.ImageConversionModule.dll</HintPath>
     </Reference>
-    <Reference Include="UnityEngine.IMGUIModule" Private="false">
+    <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>..\references\UnityEngine.IMGUIModule.dll</HintPath>
     </Reference>
-    <Reference Include="UnityEngine.InputLegacyModule" Private="false">
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>..\references\UnityEngine.TextRenderingModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
       <HintPath>..\references\UnityEngine.InputLegacyModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>..\references\UnityEngine.UIModule.dll</HintPath>
     </Reference>
     <Reference Include="Assembly-CSharp" Private="false">
       <HintPath>..\references\Assembly-CSharp.dll</HintPath>
     </Reference>
     <Reference Include="Assembly-CSharp-firstpass" Private="false">
       <HintPath>..\references\Assembly-CSharp-firstpass.dll</HintPath>
+    </Reference>
+    <Reference Include="0Harmony" Private="false">
+      <HintPath>..\references\0Harmony.dll</HintPath>
     </Reference>
     <PackageReference Include="WebSocketSharp" Version="1.0.3-rc11" />
     <ProjectReference Include="..\Telemachus.DocGen\Telemachus.DocGen.csproj"

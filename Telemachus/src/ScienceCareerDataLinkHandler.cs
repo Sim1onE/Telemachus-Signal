@@ -104,20 +104,21 @@ namespace Telemachus
 
         [TelemetryAPI("comm.connected", "CommNet Is Connected", Category = "comms", ReturnType = "bool")]
         object CommConnected(DataSources ds) =>
-            ds.vessel.Connection != null && ds.vessel.Connection.IsConnected;
+            Telemachus.TelemachusSignalManager.GetSignalQuality(ds.vessel) > 0.001;
 
         [TelemetryAPI("comm.signalStrength", "CommNet Signal Strength (0-1)", Category = "comms", ReturnType = "double")]
         object CommSignalStrength(DataSources ds) {
             if (Telemachus.CameraSnapshots.CameraCapture.DebugSignalOverride >= 0f)
                 return (double)Telemachus.CameraSnapshots.CameraCapture.DebugSignalOverride;
-            return ds.vessel.Connection != null ? ds.vessel.Connection.SignalStrength : 0d;
+            return Telemachus.TelemachusSignalManager.GetSignalQuality(ds.vessel);
         }
 
         [TelemetryAPI("comm.controlState", "CommNet Control State (0=none, 1=partial, 2=full)", Category = "comms", ReturnType = "int")]
         object CommControlState(DataSources ds)
         {
             if (ds.vessel.Connection == null) return 0;
-            // Cast the enum to int — values vary by KSP version, so use string matching
+            // Kerbalism affects connectivity, but Stock control state is still a good fallback
+            // for knowing if the vessel HAS command capability.
             string state = ds.vessel.Connection.ControlState.ToString();
             if (state.Contains("Full") || state == "Probe") return 2;
             if (state.Contains("Partial")) return 1;
@@ -132,7 +133,8 @@ namespace Telemachus
         object CommSignalDelay(DataSources ds) {
             if (Telemachus.CameraSnapshots.CameraCapture.DebugDelayOverride >= 0f)
                 return (double)Telemachus.CameraSnapshots.CameraCapture.DebugDelayOverride;
-            return ds.vessel.Connection != null ? ds.vessel.Connection.SignalDelay : 0d;
+            
+            return Telemachus.TelemachusSignalManager.GetSignalDelay(ds.vessel);
         }
 
         protected override int pausedHandler() => 0;

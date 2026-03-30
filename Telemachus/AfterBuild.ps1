@@ -17,7 +17,7 @@ if (Test-Path "$root/publish/GameData") {
     Remove-Item "$root/publish/GameData" -Recurse -Force
 }
 
-New-Item -ItemType Directory -Force -Path "$publish/Plugins", "$publish/Parts", "$publish/PluginData", $pluginData | Out-Null
+New-Item -ItemType Directory -Force -Path "$publish/Plugins", "$publish/Parts", "$publish/PluginData", "$publish/Textures", $pluginData | Out-Null
 
 Copy-Item "$TargetDir/Telemachus.dll"      "$publish/Plugins/"
 Copy-Item "$TargetDir/websocket-sharp.dll" "$publish/Plugins/"
@@ -25,6 +25,7 @@ Copy-Item "$TargetDir/websocket-sharp.dll" "$publish/Plugins/"
 Copy-Item "$root/TelemachusReborn.version" "$publish/"
 
 Copy-Item "$root/Parts/*"                "$publish/Parts/"    -Recurse -Force
+Copy-Item "$root/Telemachus/Textures/*" "$publish/Textures/" -Recurse -Force
 Copy-Item "$root/WebPages/WebPages/src/*" $pluginData          -Recurse -Force
 Copy-Item "$root/Licences/*"             "$publish/"          -Recurse -Force
 Copy-Item "$root/README.md"              "$publish/"

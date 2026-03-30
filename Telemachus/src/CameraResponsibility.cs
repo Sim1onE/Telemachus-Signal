@@ -163,20 +163,27 @@ namespace Telemachus
 
                 try
                 {
+                    long sentFrameId = -1;
                     while (true)
                     {
                         if (camera.didRender && camera.imageBytes != null)
                         {
+                            // Optimization: Only send if a new frame was actually rendered
+                            if (camera.lastFrameId == sentFrameId)
+                            {
+                                System.Threading.Thread.Sleep(5); // Minimum sleep for responsiveness
+                                continue;
+                            }
+
+                            sentFrameId = camera.lastFrameId;
                             camera.lastRequestTick = Environment.TickCount;
 
-                            byte[] img = camera.imageBytes; // Thread-safe copy reference
+                            byte[] img = camera.imageBytes; 
 
-                            // Planetarium might throw if not in flight, but CameraCapture is only in flight
                             double currentUT = HighLogic.LoadedSceneIsFlight && Planetarium.fetch != null ? Planetarium.GetUniversalTime() : 0;
-                            double currentDelay = (CameraCapture.DebugDelayOverride >= 0f) ? CameraCapture.DebugDelayOverride :
-                                                  (FlightGlobals.ActiveVessel != null && FlightGlobals.ActiveVessel.Connection != null) ? 
-                                                    FlightGlobals.ActiveVessel.Connection.SignalDelay : 0;
+                            double currentDelay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
                             double currentWarp = TimeWarp.CurrentRate;
+                            double signalQuality = TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
 
                             string header = "--myboundary\r\n" +
                                             "Content-Type: image/jpeg\r\n" +
@@ -184,7 +191,7 @@ namespace Telemachus
                                             "X-KSP-Delay: " + currentDelay.ToString("F3", CultureInfo.InvariantCulture) + "\r\n" +
                                             "X-KSP-Warp: " + currentWarp.ToString("F1", CultureInfo.InvariantCulture) + "\r\n" +
                                             "X-KSP-FOV: " + camera.interpolatedFOV.ToString("F1", CultureInfo.InvariantCulture) + "\r\n" +
-                                            "X-KSP-Signal-Quality: " + (camera.SignalStrength * 100.0).ToString("F0", CultureInfo.InvariantCulture) + "\r\n" +
+                                            "X-KSP-Signal-Quality: " + (signalQuality * 100.0).ToString("F0", CultureInfo.InvariantCulture) + "\r\n" +
                                             "Content-Length: " + img.Length + "\r\n\r\n";
 
                             byte[] headerBytes = Encoding.UTF8.GetBytes(header);
@@ -197,12 +204,10 @@ namespace Telemachus
 
                             dataRates.SendDataToClient(headerBytes.Length + img.Length + footerBytes.Length);
 
-                            // Reduce sleep to 10ms to support 30+ FPS comfortably
-                            System.Threading.Thread.Sleep(10);
+                            System.Threading.Thread.Sleep(1);
                         }
                         else
                         {
-                            // If first frame not ready, update tick to trigger render and wait
                             camera.lastRequestTick = Environment.TickCount;
                             System.Threading.Thread.Sleep(100);
                         }
