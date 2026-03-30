@@ -36,20 +36,6 @@ namespace Telemachus.Debug
         {
             GUILayout.BeginVertical();
 
-            // Fetch values for diagnostics
-            double telemachusSignal = TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
-            double telemachusDelay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
-
-            GUILayout.Label(string.Format("<color=cyan>Transmission Quality: {0:P0}</color>", telemachusSignal));
-
-            GUILayout.Space(2);
-
-            GUILayout.Label(string.Format("Signal Path Delay: {0:F2}s", telemachusDelay));
-
-            GUILayout.Space(5);
-            GUILayout.Box("", GUILayout.Height(2)); // Separator
-            GUILayout.Space(5);
-
             // --- SIGNAL SECTION ---
             GUILayout.Label("SIGNAL STRENGTH (Link Quality)");
             sigOverrideEnabled = GUILayout.Toggle(sigOverrideEnabled, "Override Strength");
