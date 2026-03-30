@@ -1,0 +1,56 @@
+# 🚀 Telemachus Houston 3D Map: Technical Integration Report
+
+This document provides a comprehensive summary of the development journey and the final architectural state of the Telemachus 3D orbital map. The goal was to achieve **Absolute Parity** with the native Kerbal Space Program (KSP) Tracking Station.
+
+---
+
+## 1. The Journey: From "Flipped" to "Synchronized"
+
+We began with a map that suffered from significant visual and mathematical discrepancies. The evolution followed five critical phases:
+
+1.  **Uniform Scaling**: Identified that orbits were appearing "too fat" or "too thin" due to a `Math.max` bug in the camera logic. Switching to `Math.min` ensured that the entire solar system scales uniformly relative to its largest dimension.
+2.  **Coordinate Migration**: Abandoned arbitrary axis-swapping in favor of a native Unity-style **Y-Up** coordinate system. This simplified the math by aligning the map directly with KSP's internal physics.
+3.  **Handedness & Rotations**: Corrected the conflict between Three.js (Right-Handed) and Unity (Left-Handed). This required implementing inverse rotations for the Longitude of Ascending Node (LAN) and Argument of Periapsis (ArgPe), as well as a **90-degree Unity Offset** to align the map's "Prime Meridian" with the game's Z-forward axis.
+4.  **Tilt Parity**: Resolved a mirrored-tilt issue where Minmus would "climb" when it should "dive." This was fixed by negating the inclination ($i$) and implementing a centralized vertical inversion ($Y \rightarrow -Y$) for the top-down camera view.
+5.  **Ultimate Intersection (The Snap)**: Created a "Source of Truth" system to solve floating-point jitter. Instead of placing the planets independently, the map now "snaps" each celestial body exactly onto its mathematically generated orbital ring.
+
+---
+
+## 2. Script Deep-Dive
+
+### 🧠 `system_position_data_formatter.js` (The Brain)
+This script is the mathematical engine that transforms raw KSP telemetry into renderable 3D coordinates.
+
+*   **`formatTruePositionVector(vector)`**: The gatekeeper. It subtracts Kerbin's origin from every object and applies the **Vertical Inversion**. This ensures a "10m North" game value becomes a "-10m Map" value (Up on the screen).
+*   **`generateOrbitFromKeplerian(...)`**: Generates a high-precision 720-point ring for any body. It implements the "Bible" rotations:
+    *   `radInc`: Negated for tilt parity.
+    *   `radArgPe`: Negated for phase parity.
+    *   `radLan`: Negated + 90° for axis parity.
+*   **`findClosestPointOnPath(target, points)`**: The snapping algorithm. It performs a distance-check to find the exact ring coordinate closest to the body's telemetry, locking the ball onto the line.
+*   **`formatReferenceBodyPaths(...)`**: Logic was updated to add relative points to **Raw** global parent positions, preventing cumulative errors that previously caused Minmus to "float" off its ring.
+
+### 👁️ `system_orbital_map.js` (The Eye)
+This script handles the WebGL scene, rendering cycles, and the User Interface.
+
+*   **Scene Architecture**: Manages the Three.js `PerspectiveCamera`, `Scene`, and `WebGLRenderer`.
+*   **Camera Logic**: Configured with an inverted `up = (0, -1, 0)` vector. This allows the camera to interpret our $Y$-inversion correctly, keeping the Tracking Station orientation natural.
+*   **Uniform Scale**: The `positionCamera` function calculates the solar system's bounding box and ensures the entire map fits within the browser window without distortion.
+*   **Focused UI**: Streamlined to focus strictly on the Kerbin system (Kerbin, Mun, Minmus), reducing clutter and improving performance.
+
+### 👂 `system_orbital_position_data.js` (The Ear)
+This script manages the data-link with the Telemachus server.
+
+*   **Data Aggregation**: Requests both Global Coordinates (`truePositionAtUT`) and Keplerian Elements (`sma`, `ecc`, `inc`, etc.) in optimized batches.
+*   **Universal Time Sync**: Ensures that all positions are calculated for the exact same "Universal Time" ($UT$) frame, preventing "vibrating" orbits during time-warp.
+
+---
+
+## 3. Final Result: The "Bible" Logic
+The system now adheres to a strict set of transformation rules:
+
+| Object | Transformation Loop | Result |
+| :--- | :--- | :--- |
+| **Spheres** | `Telemachus Raw` $\rightarrow$ `Origin Shift` $\rightarrow$ `Vertical Inversion` $\rightarrow$ `Snap to Path` | **Center Aligned** |
+| **Rings** | `Keplerian Math` $\rightarrow$ `Inverse Rotations` $\rightarrow$ `90° LAN Offset` $\rightarrow$ `Origin Shift` $\rightarrow$ `Vertical Inversion` | **Tilt Aligned** |
+
+This architecture ensures that the Telemachus 3D Map is no longer just a "vague representation," but a **mathematically accurate digital twin** of your Kerbal universe.
