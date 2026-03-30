@@ -1,0 +1,194 @@
+/**
+ * Standalone 3D Map Styling
+ * Designed for High-Contrast, Professional Telemetry (NASA/KSP Style).
+ */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto+Mono:wght@300;400;700&display=swap');
+
+:root {
+    --bg-color: #050100;
+    --panel-bg: rgba(11, 2, 0, 0.75);
+    --text-color: #e0e0e0;
+    --accent-color: #00ffcc;
+    --btn-bg: rgba(0, 255, 204, 0.15);
+    --btn-hover: rgba(0, 255, 204, 0.3);
+    --warn-color: #ff4444;
+    --border-color: rgba(0, 255, 204, 0.2);
+}
+
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--bg-color);
+    font-family: 'Roboto Mono', monospace;
+    color: var(--text-color);
+}
+
+/* Procedural Starfield via CSS Radial Gradients */
+#starfield {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    background: 
+        radial-gradient(1px 1px at 20% 30%, #fff, rgba(0,0,0,0)),
+        radial-gradient(1px 1px at 40% 70%, #fff, rgba(0,0,0,0)),
+        radial-gradient(1px 1px at 50% 10%, #fff, rgba(0,0,0,0)),
+        radial-gradient(1px 1px at 80% 50%, #fff, rgba(0,0,0,0)),
+        radial-gradient(2px 2px at 15% 85%, #00ffcc, rgba(0,0,0,0)),
+        radial-gradient(2px 2px at 90% 20%, #ff4444, rgba(0,0,0,0)),
+        radial-gradient(1px 1px at 70% 60%, #fff, rgba(0,0,0,0));
+    background-size: 550px 550px;
+    opacity: 0.4;
+}
+
+#map-container {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+#ui-overlay {
+    position: absolute;
+    top: 30px;
+    left: 30px;
+    pointer-events: none;
+    z-index: 10;
+}
+
+#vessel-name {
+    margin: 0;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.5rem;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--accent-color);
+    text-shadow: 0 0 15px rgba(0, 255, 204, 0.4);
+    border-left: 4px solid var(--accent-color);
+    padding-left: 15px;
+}
+
+#time-readout {
+    font-size: 0.9rem;
+    color: #888;
+    margin-top: 10px;
+    padding-left: 19px;
+}
+
+/* Custom Sidebar HUD */
+#sidebar {
+    position: absolute;
+    top: 30px;
+    right: 30px;
+    width: 240px;
+    background: var(--panel-bg);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0;
+    z-index: 20;
+    box-shadow: 0 0 30px rgba(0,0,0,0.5);
+}
+
+.panel-header {
+    background: var(--border-color);
+    color: var(--accent-color);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.8rem;
+    padding: 8px 15px;
+    letter-spacing: 1px;
+}
+
+.control-group {
+    padding: 15px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.control-group label {
+    display: block;
+    font-size: 0.7rem;
+    color: #666;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+}
+
+.custom-select {
+    width: 100%;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--text-color);
+    padding: 6px;
+    border-radius: 2px;
+    outline: none;
+    font-family: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.custom-select:hover {
+    border-color: var(--accent-color);
+}
+
+#body-toggles {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.toggle-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.8rem;
+    color: #aaa;
+    cursor: pointer;
+}
+
+.toggle-item:hover {
+    color: var(--accent-color);
+}
+
+.toggle-item input {
+    accent-color: var(--accent-color);
+}
+
+.control-group.buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-bottom: none;
+}
+
+.action-btn {
+    width: 100%;
+    background: var(--btn-bg);
+    border: 1px solid var(--accent-color);
+    color: var(--accent-color);
+    padding: 8px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.action-btn:hover {
+    background: var(--btn-hover);
+    box-shadow: 0 0 10px rgba(0, 255, 204, 0.2);
+}
+
+.action-btn.secondary {
+    border-color: #555;
+    color: #888;
+    background: transparent;
+}
+
+.action-btn.secondary:hover {
+    border-color: #888;
+    color: #eee;
+}
