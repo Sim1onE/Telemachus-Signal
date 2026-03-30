@@ -112,7 +112,6 @@ namespace Telemachus.Harmony
         private static float lastLog = 0f;
         private static bool wasOverridden = false;
         private static int callCount = 0;
-        private static float lastDump = 0f;
 
         // Configuration
         private const string TEXTURE_PATH = "GameData/Telemachus/Textures";
