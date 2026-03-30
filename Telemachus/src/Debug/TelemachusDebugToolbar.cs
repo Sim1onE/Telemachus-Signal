@@ -37,17 +37,14 @@ namespace Telemachus.Debug
             GUILayout.BeginVertical();
 
             // Fetch values for diagnostics
-            double stockSignal = TelemachusSignalManager.GetSignalStrength(FlightGlobals.ActiveVessel);
             double telemachusSignal = TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
             double telemachusDelay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
 
-            GUILayout.Label(string.Format("Stock Signal: {0:P0}", stockSignal));
-            GUILayout.Label(string.Format("<color=cyan>Telemachus Signal (Real): {0:P0}</color>", telemachusSignal));
-            
-            GUILayout.Space(5);
-            
-            GUILayout.Label("<color=#FFFF00>SIGNAL DELAY (Latency)</color>");
-            GUILayout.Label(string.Format("Telemachus Path Delay: {0:F2}s", telemachusDelay));
+            GUILayout.Label(string.Format("<color=cyan>Transmission Quality: {0:P0}</color>", telemachusSignal));
+
+            GUILayout.Space(2);
+
+            GUILayout.Label(string.Format("Signal Path Delay: {0:F2}s", telemachusDelay));
 
             GUILayout.Space(5);
             GUILayout.Box("", GUILayout.Height(2)); // Separator
