@@ -11,6 +11,7 @@ namespace Telemachus.CameraSnapshots
         public RenderTexture overviewTexture;
         public bool didRender;
         public byte[] imageBytes = null;
+        public long lastFrameId = 0;
         public volatile bool mutex = false;
         public int renderOffsetFactor = 0;
         public int lastRequestTick = Environment.TickCount - 6000; // Force immediate render on first check
@@ -25,13 +26,9 @@ namespace Telemachus.CameraSnapshots
         {
             get
             {
-                if (DebugSignalOverride >= 0f) return DebugSignalOverride;
+                if (DebugSignalOverride >= 0f) return (double)DebugSignalOverride;
 
-                if (FlightGlobals.ActiveVessel?.Connection != null)
-                {
-                    return FlightGlobals.ActiveVessel.Connection.SignalStrength;
-                }
-                return 0.0; // Default to no signal if null
+                return TelemachusSignalManager.GetActualSignalStrength(FlightGlobals.ActiveVessel);
             }
         }
 
@@ -133,18 +130,9 @@ namespace Telemachus.CameraSnapshots
 
             if (signal < 0.01)
             {
-                // In TimeWarp (especially "on-rails" > x1), CommNet might drop to 0 or null.
-                // We assume 1.0 if warping to maintain the frame rate.
-                if (TimeWarp.CurrentRate > 1.0f)
-                {
-                    signal = 1.0;
-                }
-                else
-                {
-                    nextRenderTime = Time.unscaledTime + 1.0f;
-                    mutex = false;
-                    yield break;
-                }
+                nextRenderTime = Time.unscaledTime + 2.0f;
+                mutex = false;
+                yield break;
             }
 
             // --- DEEP SPACE DEGRADATION LOGIC ---
@@ -178,6 +166,7 @@ namespace Telemachus.CameraSnapshots
             int jpgQuality = (int)Mathf.Lerp(2f, 85f, (float)signal);
             this.imageBytes = texture.EncodeToJPG(jpgQuality);
             this.didRender = true;
+            this.lastFrameId++;
 
             // Calculate next render slot (Framerate Reduction)
             // Signal 1.0 -> 30 FPS (0.033s)
@@ -246,6 +235,12 @@ namespace Telemachus.CameraSnapshots
                     cameraDuplicate.aspect = GetAspect(camera);
 
                     cameraDuplicate.targetTexture = this.overviewTexture;
+
+                    // --- CULLING MASK FIX ---
+                    // bit 10: ScaledSpace (Orbits), bit 24: MapUI, bit 31: MapOverlay
+                    int maskToRemove = (1 << 10) | (1 << 24) | (1 << 31);
+                    cameraDuplicate.cullingMask &= ~maskToRemove;
+
                     // Adjust near clip only for small parts/FX cameras like RPM does,
                     // but ONLY on KSP < 1.9 where this fix was needed to avoid Z-fighting.
                     if (!skipFarCamera && (camera.name == "Camera 00" || camera.name == "FXCamera"))

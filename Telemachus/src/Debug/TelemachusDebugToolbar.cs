@@ -36,17 +36,18 @@ namespace Telemachus.Debug
         {
             GUILayout.BeginVertical();
 
-            // Fetch real values from FlightGlobals/CommNet
-            double realDelay = 0;
-            double realSignal = 0;
-            if (FlightGlobals.ActiveVessel != null && FlightGlobals.ActiveVessel.Connection != null)
-            {
-                realDelay = FlightGlobals.ActiveVessel.Connection.SignalDelay;
-                realSignal = FlightGlobals.ActiveVessel.Connection.SignalStrength;
-            }
+            // Fetch values for diagnostics
+            double stockSignal = TelemachusSignalManager.GetStockSignalStrength(FlightGlobals.ActiveVessel);
+            double telemachusSignal = TelemachusSignalManager.GetActualSignalStrength(FlightGlobals.ActiveVessel);
+            double telemachusDelay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
 
-            GUILayout.Label(string.Format("<color=cyan>KSP Real Signal: {0:P0}</color>", realSignal));
-            GUILayout.Label(string.Format("<color=cyan>KSP Real Delay: {0:F2}s</color>", realDelay));
+            GUILayout.Label(string.Format("Stock Signal: {0:P0}", stockSignal));
+            GUILayout.Label(string.Format("<color=cyan>Telemachus Signal (Real): {0:P0}</color>", telemachusSignal));
+            
+            GUILayout.Space(5);
+            
+            GUILayout.Label("<color=#FFFF00>SIGNAL DELAY (Latency)</color>");
+            GUILayout.Label(string.Format("Telemachus Path Delay: {0:F2}s", telemachusDelay));
 
             GUILayout.Space(5);
             GUILayout.Box("", GUILayout.Height(2)); // Separator
