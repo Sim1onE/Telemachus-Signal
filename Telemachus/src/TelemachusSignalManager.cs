@@ -15,6 +15,9 @@ namespace Telemachus
         private static MemberInfo _dampingExponentMember = null;
         private static MethodInfo _blackoutMethod = null;
 
+        private static double DebugSignalOverride => CameraSnapshots.CameraCapture.DebugSignalOverride;
+        private static double DebugDelayOverride => CameraSnapshots.CameraCapture.DebugDelayOverride;
+
         public static bool IsKerbalismInstalled
         {
             get
@@ -75,6 +78,7 @@ namespace Telemachus
 
         public static double GetSignalQuality(Vessel v)
         {
+            if (DebugSignalOverride >= 0) return DebugSignalOverride;
             if (v == null) return 0;
             double stock = GetSignalStrength(v);
 
@@ -170,6 +174,7 @@ namespace Telemachus
 
         public static double GetSignalDelay(Vessel v)
         {
+            if (DebugDelayOverride >= 0) return DebugDelayOverride;
             if (v == null || v.connection == null) return 0;
 
             // Average round trip time / 2
