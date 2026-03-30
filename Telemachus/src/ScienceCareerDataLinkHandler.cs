@@ -104,13 +104,13 @@ namespace Telemachus
 
         [TelemetryAPI("comm.connected", "CommNet Is Connected", Category = "comms", ReturnType = "bool")]
         object CommConnected(DataSources ds) =>
-            Telemachus.TelemachusSignalManager.GetActualSignalStrength(ds.vessel) > 0.001;
+            Telemachus.TelemachusSignalManager.GetSignalQuality(ds.vessel) > 0.001;
 
         [TelemetryAPI("comm.signalStrength", "CommNet Signal Strength (0-1)", Category = "comms", ReturnType = "double")]
         object CommSignalStrength(DataSources ds) {
             if (Telemachus.CameraSnapshots.CameraCapture.DebugSignalOverride >= 0f)
                 return (double)Telemachus.CameraSnapshots.CameraCapture.DebugSignalOverride;
-            return Telemachus.TelemachusSignalManager.GetActualSignalStrength(ds.vessel);
+            return Telemachus.TelemachusSignalManager.GetSignalQuality(ds.vessel);
         }
 
         [TelemetryAPI("comm.controlState", "CommNet Control State (0=none, 1=partial, 2=full)", Category = "comms", ReturnType = "int")]

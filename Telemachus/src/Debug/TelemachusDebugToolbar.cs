@@ -37,8 +37,8 @@ namespace Telemachus.Debug
             GUILayout.BeginVertical();
 
             // Fetch values for diagnostics
-            double stockSignal = TelemachusSignalManager.GetStockSignalStrength(FlightGlobals.ActiveVessel);
-            double telemachusSignal = TelemachusSignalManager.GetActualSignalStrength(FlightGlobals.ActiveVessel);
+            double stockSignal = TelemachusSignalManager.GetSignalStrength(FlightGlobals.ActiveVessel);
+            double telemachusSignal = TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
             double telemachusDelay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
 
             GUILayout.Label(string.Format("Stock Signal: {0:P0}", stockSignal));

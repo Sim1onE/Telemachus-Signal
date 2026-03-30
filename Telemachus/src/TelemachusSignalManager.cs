@@ -73,10 +73,10 @@ namespace Telemachus
             catch (Exception) { return new Type[0]; }
         }
 
-        public static double GetActualSignalStrength(Vessel v)
+        public static double GetSignalQuality(Vessel v)
         {
             if (v == null) return 0;
-            double stock = GetStockSignalStrength(v);
+            double stock = GetSignalStrength(v);
 
             if (IsKerbalismInstalled)
             {
@@ -124,7 +124,7 @@ namespace Telemachus
         /// <summary>
         /// Returns the stock CommNet signal strength for a vessel (0.0 to 1.0)
         /// </summary>
-        public static double GetStockSignalStrength(Vessel v)
+        public static double GetSignalStrength(Vessel v)
         {
             if (v != null && v.connection != null)
             {
@@ -137,7 +137,7 @@ namespace Telemachus
         /// Returns true if Kerbalism says the vessel is connected, false if disconnected.
         /// Returns null if Kerbalism is not installed (so caller knows to skip).
         /// </summary>
-        public static bool? IsKerbalismLinked(Vessel v)
+        public static bool? IsTransmissionLinked(Vessel v)
         {
             if (v == null) return null;
             if (!IsKerbalismInstalled || _vesselConnectionLinkedMethod == null) return null;
@@ -197,6 +197,15 @@ namespace Telemachus
             // Fallback: Path Distance / c
             double distance = GetTotalPathDistance(v);
             return distance / 299792458.0;
+        }
+        public static Type FindType(string fullName)
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var type = assembly.GetType(fullName);
+                if (type != null) return type;
+            }
+            return null;
         }
     }
 }

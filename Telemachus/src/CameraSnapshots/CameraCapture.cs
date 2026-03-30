@@ -28,7 +28,7 @@ namespace Telemachus.CameraSnapshots
             {
                 if (DebugSignalOverride >= 0f) return (double)DebugSignalOverride;
 
-                return TelemachusSignalManager.GetActualSignalStrength(FlightGlobals.ActiveVessel);
+                return TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
             }
         }
 

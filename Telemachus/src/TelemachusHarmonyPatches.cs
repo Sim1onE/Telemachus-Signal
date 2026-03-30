@@ -54,6 +54,9 @@ namespace Telemachus.Harmony
                     _patchedTelemetry = PatchUIComponent(harmony, "TelemetryUpdate", new[] { "Update", "LateUpdate" });
                 }
 
+                // Apply all attributed patches (like PatchTooltipSignalStrength)
+                harmony.PatchAll(Assembly.GetExecutingAssembly());
+
                 patchesFinalized = true;
             }
             catch (Exception e) { UnityEngine.Debug.LogError("[Telemachus] CRITICAL ERROR: " + e); }
@@ -109,6 +112,7 @@ namespace Telemachus.Harmony
         private static float lastLog = 0f;
         private static bool wasOverridden = false;
         private static int callCount = 0;
+        private static float lastDump = 0f;
 
         // Configuration
         private const string TEXTURE_PATH = "GameData/Telemachus/Textures";
@@ -124,44 +128,38 @@ namespace Telemachus.Harmony
             {
                 callCount++;
                 Vessel v = FlightGlobals.ActiveVessel;
-                
+
                 // Get connection states
-                bool? kerbalismLinked = TelemachusSignalManager.IsKerbalismLinked(v);
-                double stockStrength = TelemachusSignalManager.GetStockSignalStrength(v);
-                double actualStrength = TelemachusSignalManager.GetActualSignalStrength(v);
+                bool? transmissionLinked = TelemachusSignalManager.IsTransmissionLinked(v);
+                double stock = TelemachusSignalManager.GetSignalStrength(v);
+                double actual = TelemachusSignalManager.GetSignalQuality(v);
 
                 Image signalIcon = GetSignalIcon(__instance);
                 if (signalIcon == null) return;
 
-                // Logging: Increased frequency and detail for diagnosis
+                // Logging
                 bool shouldLog = callCount <= 10 || Time.time > lastLog + 10f;
                 if (shouldLog)
                 {
                     lastLog = Time.time;
                     UnityEngine.Debug.Log(string.Format(
                         "[Telemachus] UI Sync Status: KerbalismLinked={0}, StockStrength={1:F3}, ActualStrength={2:F3}, Overridden={3}",
-                        kerbalismLinked.HasValue ? kerbalismLinked.Value.ToString() : "N/A", 
-                        stockStrength, actualStrength, wasOverridden));
+                        transmissionLinked.HasValue ? transmissionLinked.Value.ToString() : "N/A",
+                        stock, actual, wasOverridden));
                 }
 
                 // If Kerbalism is not installed, leave Stock alone
-                if (!kerbalismLinked.HasValue) return;
+                if (!transmissionLinked.HasValue) return;
 
-                // Logic: 
-                // 1. If kerbalism is not linked -> Null variant of current stock bars
-                // 2. If actual strength < stock strength -> Lower variant of current stock bars
-                // 3. Otherwise -> Stock behavior
-                
                 string variant = null;
-                // Get linked status explicitly
-                bool linked = kerbalismLinked.Value;
+                bool linked = transmissionLinked.Value;
 
                 if (!linked)
                 {
                     variant = "Null";
                     if (shouldLog) UnityEngine.Debug.Log("[Telemachus] UI State: Selecting NULL (Kerbalism OFFLINE)");
                 }
-                else if (actualStrength < stockStrength - 0.05)
+                else if (actual < stock - 0.05)
                 {
                     variant = "Lower";
                     if (shouldLog) UnityEngine.Debug.Log("[Telemachus] UI State: Selecting LOWER (Degraded Signal vs Stock)");
@@ -173,25 +171,21 @@ namespace Telemachus.Harmony
 
                 if (variant != null)
                 {
-                    string ssKey = GetSSKeyForSignalStrength(stockStrength);
+                    string ssKey = GetSSKeyForSignalStrength(stock);
                     Sprite customSprite = GetCustomSprite(ssKey, variant);
-                    
+
                     if (customSprite != null)
                     {
                         signalIcon.sprite = customSprite;
-                        // For custom PNGs, we use white color to show them exactly as they are
                         signalIcon.color = new Color(1f, 1f, 1f, signalIcon.color.a);
                         wasOverridden = true;
                     }
                 }
                 else if (wasOverridden)
                 {
-                    // Reset to stock color - KSP will handle the sprite swap naturally on its next tick
                     signalIcon.color = new Color(1f, 1f, 1f, signalIcon.color.a);
                     wasOverridden = false;
                 }
-
-                InjectTooltipText(__instance, kerbalismLinked.Value);
             }
             catch (Exception e)
             {
@@ -201,7 +195,6 @@ namespace Telemachus.Harmony
 
         private static Sprite GetCustomSprite(string ssKey, string variant)
         {
-            // Map SS key to the suffix used in filenames
             string spriteSuffix = "";
             switch (ssKey)
             {
@@ -219,7 +212,6 @@ namespace Telemachus.Harmony
             if (customSpriteCache.ContainsKey(cacheKey))
                 return customSpriteCache[cacheKey];
 
-            // Load from file
             try
             {
                 string fullPath = Path.Combine(KSPUtil.ApplicationRootPath, TEXTURE_PATH, filename);
@@ -234,13 +226,12 @@ namespace Telemachus.Harmony
                 Texture2D tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
                 if (tex.LoadImage(fileData))
                 {
-                    // Create sprite from texture
                     Sprite sprite = Sprite.Create(
-                        tex, 
-                        new Rect(0, 0, tex.width, tex.height), 
-                        new Vector2(0.5f, 0.5f), 
-                        100.0f); // Standard PPU
-                    
+                        tex,
+                        new Rect(0, 0, tex.width, tex.height),
+                        new Vector2(0.5f, 0.5f),
+                        100.0f);
+
                     sprite.name = cacheKey;
                     customSpriteCache[cacheKey] = sprite;
                     UnityEngine.Debug.Log("[Telemachus] Loaded custom sprite: " + cacheKey);
@@ -271,26 +262,97 @@ namespace Telemachus.Harmony
             if (sig < 0.75) return "SS3";
             return "SS4";
         }
+    }
 
-        private static void InjectTooltipText(MonoBehaviour instance, bool linked)
+    [HarmonyPatch]
+    public class PatchTooltipSignalStrength
+    {
+        static MethodBase TargetMethod()
+        {
+            Type t = TelemachusSignalManager.FindType("CommNet.TooltipController_SignalStrength");
+            if (t == null) return null;
+            return t.GetMethod("UpdateList", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        }
+
+        public static void Postfix(MonoBehaviour __instance)
+        {
+            if (FlightGlobals.ActiveVessel == null) return;
+            
+            double actual = TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
+            bool linked = TelemachusSignalManager.IsTransmissionLinked(FlightGlobals.ActiveVessel) ?? true;
+            
+            InjectTooltip(__instance, linked, actual);
+        }
+
+        private static int injectCount = 0;
+        private static void InjectTooltip(MonoBehaviour ctrl, bool linked, double actual)
         {
             try
             {
-                var f = instance.GetType().GetField("signal_tooltip",
-                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                if (f == null) return;
-                var ctrl = f.GetValue(instance);
-                if (ctrl == null) return;
-                var tp = ctrl.GetType().GetProperty("TooltipText")
-                    ?? ctrl.GetType().GetProperty("text");
-                if (tp == null) return;
-                string cur = tp.GetValue(ctrl) as string;
-                if (cur != null && !cur.Contains("[TELEMACHUS]"))
+                // Extract items for fallback and duplicate checking
+                var itemsField = ctrl.GetType().GetField("items", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                var items = itemsField?.GetValue(ctrl) as System.Collections.IList;
+
+                // --- HEADER-MERGE STRATEGY ---
+                var windowField = ctrl.GetType().GetField("tooltip", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                var windowInstance = windowField?.GetValue(ctrl) as MonoBehaviour;
+                
+                if (windowInstance != null) {
+                    bool foundHeader = false;
+                    foreach (var textComp in windowInstance.GetComponentsInChildren<MonoBehaviour>(true)) {
+                        if (textComp.GetType().Name.Contains("TextMeshPro")) {
+                            var textProp = textComp.GetType().GetProperty("text");
+                            string currentText = textProp?.GetValue(textComp, null) as string;
+                            
+                            if (!string.IsNullOrEmpty(currentText) && currentText.Contains("Signal Strength")) {
+                                if (currentText.Contains("Transmission Quality")) return;
+                                
+                                string qualityText = string.Format("\n<size=85%><color=#00FFFF>Transmission Quality: {0:P0}</color></size>", actual);
+                                textProp?.SetValue(textComp, currentText + qualityText, null);
+                                foundHeader = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (foundHeader) return;
+                }
+
+                // --- FALLBACK (List Item) ---
+                if (items == null) return;
+                foreach (var item in items)
                 {
-                    string hex = linked ? "44FF44" : "FF4444";
-                    string s = linked ? "LINKED" : "OFFLINE";
-                    tp.SetValue(ctrl, cur + string.Format(
-                        "\n<color=#{0}><b>[TELEMACHUS]</b> Kerbalism: {1}</color>", hex, s));
+                    var labelF = item.GetType().GetField("label", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    if (labelF == null) continue;
+                    var label = labelF.GetValue(item);
+                    var textP = label?.GetType().GetProperty("text");
+                    string txt = textP?.GetValue(label, null) as string;
+                    if (txt != null && txt.Contains("Transmission Quality:")) return; 
+                }
+
+                var prefabField = ctrl.GetType().GetField("itemPrefab", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (prefabField == null) return;
+                var prefab = prefabField.GetValue(ctrl) as MonoBehaviour;
+                if (prefab == null) return;
+
+                var newItem = UnityEngine.Object.Instantiate(prefab);
+                var labelField = newItem.GetType().GetField("label", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                var labelObj = labelField?.GetValue(newItem);
+                if (labelObj != null)
+                {
+                    var textProp = labelObj.GetType().GetProperty("text");
+                    textProp?.SetValue(labelObj, string.Format("<size=85%><color=#00FFFF>Transmission Quality: {0:P0}</color></size>", actual), null);
+                    
+                    foreach (var img in newItem.GetComponentsInChildren<UnityEngine.UI.Image>(true)) {
+                        if (img.gameObject.name.ToLower().Contains("background")) continue;
+                        img.gameObject.SetActive(false);
+                    }
+
+                    Transform parent = prefab.transform.parent;
+                    if (items.Count > 0) parent = ((MonoBehaviour)items[0]).transform.parent;
+                    
+                    newItem.transform.SetParent(parent, false);
+                    items.Insert(0, newItem);
+                    newItem.transform.SetAsFirstSibling();
                 }
             }
             catch { }

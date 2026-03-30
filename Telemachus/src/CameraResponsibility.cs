@@ -183,7 +183,7 @@ namespace Telemachus
                             double currentUT = HighLogic.LoadedSceneIsFlight && Planetarium.fetch != null ? Planetarium.GetUniversalTime() : 0;
                             double currentDelay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
                             double currentWarp = TimeWarp.CurrentRate;
-                            double signalQuality = TelemachusSignalManager.GetActualSignalStrength(FlightGlobals.ActiveVessel);
+                            double signalQuality = TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
 
                             string header = "--myboundary\r\n" +
                                             "Content-Type: image/jpeg\r\n" +
