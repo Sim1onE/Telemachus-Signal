@@ -1,21 +1,17 @@
 /**
- * TelemachusCameraStream (WebSocket Edition)
+ * TelemachusCameraStream
  * 
- * Reusable utility to decode binary WebSocket streams from Telemachus,
- * intercept frame metadata (UT, Warp, Delay, FOV, Quality), and buffer playback.
- * 
- * Carbon copy of the original MJPEG logic, adapted for high-performance binary transport.
+ * Reusable utility to decode MJPEG streams from Telemachus, intercept frame metadata (X-KSP-UT),
+ * and buffer playback. Uses Canvas API to avoid "blob avalanche" in network tabs.
  */
 class TelemachusCameraStream {
     /**
-     * @param {string} streamUrl - The URL (ws://) to the /stream endpoint
-     * @param {string} cameraName - The name of the sensor to subscribe to
-     * @param {HTMLImageElement|HTMLCanvasElement} displayElement - Target element
-     * @param {Object} datalink - Object providing `.get('t.universalTime')`
+     * @param {string} streamUrl - The URL to the /telemachus/cameras/stream/ endpoint
+     * @param {HTMLImageElement|HTMLCanvasElement} displayElement - The <img> or <canvas> tag to draw the frames to
+     * @param {Object} datalink - Object providing `.get('t.universalTime')` and `.get('comm.signalDelay')`
      */
-    constructor(streamUrl, cameraName, displayElement, datalink) {
+    constructor(streamUrl, displayElement, datalink) {
         this.streamUrl = streamUrl;
-        this.cameraName = cameraName;
         this.displayElement = displayElement;
         this.datalink = datalink;
         
@@ -24,28 +20,35 @@ class TelemachusCameraStream {
             this.ctx = displayElement.getContext('2d');
         }
 
-        this.frameBuffer = []; // Queue of { bitmap: ImageBitmap, ut: float, ... }
+        this.frameBuffer = []; // Queue of { data: Blob|ImageBitmap, ut: float }
         this.isRunning = false;
-        this.ws = null;
+        this.activeFetch = null;
         
-        // Intercettazione istantanea (Network Layer)
+        this.chunkParser = {
+            buffer: new Uint8Array(0),
+            searchingHeader: true,
+            currentHeaders: {},
+            contentLength: 0
+        };
+
         this.latestNetworkDelay = 0;
     }
 
     start() {
         if (this.isRunning) return;
         this.isRunning = true;
-        this.connectWebSocket();
+        this.connectStream();
         this.playbackLoop();
     }
 
     stop() {
         this.isRunning = false;
-        if (this.ws) {
-            this.ws.close();
-            this.ws = null;
+        if (this.activeFetch) {
+            this.activeFetch.abort();
+            this.activeFetch = null;
         }
         this.cleanupBuffer();
+        this.chunkParser.buffer = new Uint8Array(0);
     }
 
     cleanupBuffer() {
@@ -56,62 +59,134 @@ class TelemachusCameraStream {
         this.frameBuffer = [];
     }
 
-    connectWebSocket() {
-        this.ws = new WebSocket(this.streamUrl);
-        this.ws.binaryType = 'arraybuffer';
-
-        this.ws.onopen = () => {
-            console.log("Stream: Connected. Subscribing to:", this.cameraName);
-            this.ws.send(JSON.stringify({ camera: this.cameraName }));
-        };
-
-        this.ws.onmessage = async (e) => {
-            if (!this.isRunning) return;
-            
-            const view = new DataView(e.data);
-            const type = view.getUint8(0);
-
-            if (type === 0) { // Video/Metadata Packet
-                const kspUT = view.getFloat64(1, true);
-                const kspWarp = view.getFloat64(9, true);
-                const kspDelay = view.getFloat64(17, true);
-                const kspFOV = view.getFloat64(25, true);
-                const kspSignal = view.getUint8(33);
-
-                // Intercettazione istantanea del delay (Network layer)
-                this.latestNetworkDelay = kspDelay;
-
-                // Decode Image
-                const jpgBytes = new Uint8Array(e.data, 34);
-                const blob = new Blob([jpgBytes], { type: 'image/jpeg' });
+    async connectStream() {
+        while (this.isRunning) {
+            try {
+                const controller = new AbortController();
+                this.activeFetch = controller;
                 
-                try {
-                    const bitmap = await createImageBitmap(blob);
-                    this.frameBuffer.push({ 
-                        bitmap: bitmap, 
-                        ut: kspUT,
-                        warp: kspWarp,
-                        delay: kspDelay,
-                        fov: kspFOV,
-                        signal: kspSignal
-                    });
-                } catch (err) {
-                    console.error("Frame decoding failed", err);
-                }
-            }
-        };
+                const response = await fetch(this.streamUrl, {
+                    signal: controller.signal,
+                    cache: 'no-store'
+                });
 
-        this.ws.onclose = () => {
-            if (this.isRunning) {
-                console.warn("Stream connection lost, retrying in 2s...");
-                setTimeout(() => { if (this.isRunning) this.connectWebSocket(); }, 2000);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const reader = response.body.getReader();
+                
+                while (this.isRunning) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    this.appendAndParse(value);
+                }
+            } catch (e) {
+                if (e.name === 'AbortError') return;
+                console.warn("TelemachusCameraStream connection lost, retrying in 2s...", e);
+                await new Promise(r => setTimeout(r, 2000));
             }
-        };
+        }
     }
 
-    sendCameraCommand(cmd) {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify(cmd));
+    appendAndParse(chunk) {
+        let newBuffer = new Uint8Array(this.chunkParser.buffer.length + chunk.length);
+        newBuffer.set(this.chunkParser.buffer);
+        newBuffer.set(chunk, this.chunkParser.buffer.length);
+        this.chunkParser.buffer = newBuffer;
+        this.processBuffer();
+    }
+
+    async processBuffer() {
+        const encoder = new TextEncoder();
+        const decoder = new TextDecoder();
+        
+        while (this.chunkParser.buffer.length > 0) {
+            if (this.chunkParser.searchingHeader) {
+                // Safety: if buffer grows too huge without header, flush it (5MB limit is massive safety)
+                if (this.chunkParser.buffer.length > 5000000) {
+                    this.chunkParser.buffer = new Uint8Array(0);
+                    return;
+                }
+
+                // Decode only the first 1KB of the buffer to find the header. 
+                // This protects the binary image data from string corruption.
+                const headerSearchSlice = this.chunkParser.buffer.slice(0, 1024);
+                const headerSearchStr = decoder.decode(headerSearchSlice);
+                const headerEndStr = "\r\n\r\n";
+                const headerEndIdxStr = headerSearchStr.indexOf(headerEndStr);
+
+                if (headerEndIdxStr === -1) return;
+
+                // We found the header end in the string. 
+                // Now find the exact byte length by encoding back the substring.
+                const headerStr = headerSearchStr.substring(0, headerEndIdxStr);
+                const headerBytes = encoder.encode(headerStr);
+                const headerByteLenTotal = headerBytes.length + 4; // header + \r\n\r\n
+
+                const lines = headerStr.split('\r\n');
+                let contentLength = 0;
+                let kspUT = 0;
+
+                lines.forEach(line => {
+                    const lowerLine = line.toLowerCase();
+                    if (lowerLine.startsWith('content-length:')) {
+                        contentLength = parseInt(line.split(':')[1].trim(), 10);
+                    } else if (lowerLine.startsWith('x-ksp-ut:')) {
+                        kspUT = parseFloat(line.split(':')[1].trim());
+                    } else if (lowerLine.startsWith('x-ksp-warp:')) {
+                        this.chunkParser.kspWarp = parseFloat(line.split(':')[1].trim());
+                    } else if (lowerLine.startsWith('x-ksp-delay:')) {
+                        const delayVal = parseFloat(line.split(':')[1].trim());
+                        this.chunkParser.kspDelay = delayVal;
+                        this.latestNetworkDelay = delayVal; // Intercettazione istantanea
+                    } else if (lowerLine.startsWith('x-ksp-fov:')) {
+                        this.chunkParser.kspFOV = parseFloat(line.split(':')[1].trim());
+                    } else if (lowerLine.startsWith('x-ksp-signal-quality:')) {
+                        this.chunkParser.kspSignal = parseFloat(line.split(':')[1].trim());
+                    }
+                });
+
+                this.chunkParser.contentLength = contentLength;
+                this.chunkParser.kspUT = kspUT;
+                this.chunkParser.searchingHeader = false;
+
+                // Move buffer past exactly the header bytes found
+                this.chunkParser.buffer = this.chunkParser.buffer.slice(headerByteLenTotal);
+            } else {
+                if (this.chunkParser.contentLength > 0 && this.chunkParser.buffer.length >= this.chunkParser.contentLength) {
+                    const imgBytes = this.chunkParser.buffer.slice(0, this.chunkParser.contentLength);
+                    const blob = new Blob([imgBytes], { type: 'image/jpeg' });
+                    
+                    // Optimization: convert to ImageBitmap immediately if on a modern browser
+                    // and using canvas. This avoids creating blob URLs in the registry.
+                    if (this.isCanvas && typeof createImageBitmap !== 'undefined') {
+                        const bitmap = await createImageBitmap(blob);
+                        this.frameBuffer.push({ 
+                            bitmap: bitmap, 
+                            ut: this.chunkParser.kspUT,
+                            warp: this.chunkParser.kspWarp || 1,
+                            delay: this.chunkParser.kspDelay || 0,
+                            fov: this.chunkParser.kspFOV || null,
+                            signal: this.chunkParser.kspSignal || 100
+                        });
+                    } else {
+                        const url = URL.createObjectURL(blob);
+                        this.frameBuffer.push({ 
+                            url: url, 
+                            ut: this.chunkParser.kspUT,
+                            warp: this.chunkParser.kspWarp || 1,
+                            delay: this.chunkParser.kspDelay || 0,
+                            fov: this.chunkParser.kspFOV || null,
+                            signal: this.chunkParser.kspSignal || 100
+                        });
+                    }
+
+                    this.chunkParser.buffer = this.chunkParser.buffer.slice(this.chunkParser.contentLength);
+                    this.chunkParser.searchingHeader = true;
+                    this.chunkParser.contentLength = 0;
+                } else {
+                    return;
+                }
+            }
         }
     }
 
@@ -119,7 +194,6 @@ class TelemachusCameraStream {
         if (!this.isRunning) return;
 
         if (this.datalink && this.frameBuffer.length > 0) {
-            // Logica originale: Calcolo del Delayed Timecode basato sull'UT reale del Datalink
             const universalTime = this.datalink.get ? this.datalink.get('t.universalTime') : Date.now();
             const currentDelay = this.latestNetworkDelay;
             const delayedTimecode = universalTime - currentDelay;
@@ -127,21 +201,25 @@ class TelemachusCameraStream {
             let frameToDraw = null;
             let framesPoppedThisTick = 0;
 
-            // --- DYNAMIC BURST CATCH-UP (Original Logic) ---
+            // --- DYNAMIC BURST CATCH-UP ---
+            // Se siamo indietro rispetto al tempo reale (catch-up), processiamo più di un frame per tick.
+            // Questo crea l'effetto "fast-forward" richiesto.
+            // Limite massimo: 10 frames per tick (circa 10x velocità di recupero).
             while (this.frameBuffer.length > 0 && this.frameBuffer[0].ut <= delayedTimecode && framesPoppedThisTick < 10) {
                 if (frameToDraw) {
+                    // Pulizia buffer dei frame intermedi (non li disegnamo, teniamo solo l'ultimo del burst)
                     if (frameToDraw.url) URL.revokeObjectURL(frameToDraw.url);
                     if (frameToDraw.bitmap && frameToDraw.bitmap.close) frameToDraw.bitmap.close();
                 }
                 frameToDraw = this.frameBuffer.shift();
                 framesPoppedThisTick++;
 
-                // Se siamo già "in orario", fermiamo il burst
+                // Se siamo già "in orario", fermiamo il burst per non consumare troppo buffer inutilmente
                 if (frameToDraw.ut > (delayedTimecode - 0.05)) break;
             }
 
             if (frameToDraw) {
-                // Sincronizzazione metadati nel momento del DISEGNO
+                // Instantly update the master clock/warp if the stream provides it
                 if (frameToDraw.ut && this.datalink.syncFromStream) {
                     this.datalink.syncFromStream(
                         frameToDraw.ut, 
@@ -153,31 +231,50 @@ class TelemachusCameraStream {
                 }
 
                 if (this.isCanvas) {
+                    // Draw to canvas
                     if (frameToDraw.bitmap) {
+                        // Only resize canvas if dimensions actually changed to avoid flickering
                         if (this.displayElement.width !== frameToDraw.bitmap.width || this.displayElement.height !== frameToDraw.bitmap.height) {
                             this.displayElement.width = frameToDraw.bitmap.width;
                             this.displayElement.height = frameToDraw.bitmap.height;
                         }
                         this.ctx.drawImage(frameToDraw.bitmap, 0, 0);
                         frameToDraw.bitmap.close();
+                    } else {
+                        // Fallback for non-bitmap frames
+                        const img = new Image();
+                        img.onload = () => {
+                            if (this.displayElement.width !== img.width || this.displayElement.height !== img.height) {
+                                this.displayElement.width = img.width;
+                                this.displayElement.height = img.height;
+                            }
+                            this.ctx.drawImage(img, 0, 0);
+                            URL.revokeObjectURL(frameToDraw.url);
+                        };
+                        img.src = frameToDraw.url;
                     }
                 } else {
-                    // Fallback img tag
-                    if (frameToDraw.url) {
-                        const oldUrl = this.displayElement.src;
-                        this.displayElement.src = frameToDraw.url;
-                        if (oldUrl.startsWith('blob:')) {
-                            setTimeout(() => URL.revokeObjectURL(oldUrl), 100);
-                        }
+                    // Draw to img tag
+                    const oldUrl = this.displayElement.src;
+                    this.displayElement.src = frameToDraw.url;
+                    // Revoke old URL only after it has been replaced to avoid flicker
+                    if (oldUrl.startsWith('blob:')) {
+                        // Minimal delay to ensure browser finished drawing previous frame
+                        setTimeout(() => URL.revokeObjectURL(oldUrl), 100);
                     }
                 }
             }
+            
+            // Buffer safety cleanup removed to allow deep space delays (60s+). 
+            // The 2000 frame limit in the playback loop handles extreme cases.
         }
 
         requestAnimationFrame(() => this.playbackLoop());
     }
 }
 
-if (typeof window !== 'undefined') {
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = TelemachusCameraStream;
+} else if (typeof window !== 'undefined') {
     window.TelemachusCameraStream = TelemachusCameraStream;
 }
