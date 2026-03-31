@@ -12,6 +12,7 @@ class AdvancedCameraFeed {
         this.fovUpdateTimeout = null;
 
         // Radio/Audio state
+        this.radioWs = null;
         this.audioCtx = null;
         this.micStream = null;
         this.micProcessor = null;
@@ -54,6 +55,7 @@ class AdvancedCameraFeed {
         this.bindEvents();
         await this.refreshCameraList();
         this.startTelemetryLoop();
+        this.initRadio();
 
         // NO SIGNAL initial state
         if (this.cameras.length === 0) {
@@ -277,9 +279,25 @@ class AdvancedCameraFeed {
         this.statusText.classList.toggle('error', type === 'error');
     }
 
-    // --- RADIO TRANSMISSION (Simplified and Integrated) ---
+    // --- RADIO TRANSMISSION (Independent from Camera) ---
+    initRadio() {
+        if (this.radioWs) this.radioWs.close();
+        
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const url = `${protocol}//${window.location.host}/radio`;
+        
+        this.radioWs = new WebSocket(url);
+        this.radioWs.binaryType = 'arraybuffer';
+        
+        this.radioWs.onopen = () => console.log("[Radio] Connected to Huston Uplink.");
+        this.radioWs.onclose = () => {
+            console.warn("[Radio] Connection lost, reconnecting...");
+            setTimeout(() => this.initRadio(), 2000);
+        };
+    }
+
     async startTransmission() {
-        if (!this.cameraStream?.ws || this.cameraStream.ws.readyState !== WebSocket.OPEN) return;
+        if (!this.radioWs || this.radioWs.readyState !== WebSocket.OPEN) return;
         try {
             this.isTransmitting = true;
             this.radioBtn.classList.add('active');
@@ -304,10 +322,10 @@ class AdvancedCameraFeed {
                     const s = Math.max(-1, Math.min(1, input[i]));
                     pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 }
-                const packet = new Uint8Array(1 + pcm.buffer.byteLength);
-                packet[0] = 1; // Type 1: Audio Uplink
-                packet.set(new Uint8Array(pcm.buffer), 1);
-                this.cameraStream.ws.send(packet);
+                // No headers needed for the dedicated radio stream
+                if (this.radioWs.readyState === WebSocket.OPEN) {
+                    this.radioWs.send(pcm.buffer);
+                }
             };
         } catch (err) { console.error("Mic error:", err); this.stopTransmission(); }
     }
