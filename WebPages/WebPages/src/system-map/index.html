@@ -14,10 +14,11 @@
     
     <!-- Custom Modern HUD -->
     <div id="ui-overlay">
-        <h1 id="vessel-name">MISISON CONTROL</h1>
+        <h1 id="vessel-name">MISSION CONTROL</h1>
         <div id="time-readout">UT: 00:00:00</div>
     </div>
 
+    <!-- Sidebar Overview -->
     <div id="sidebar">
         <div class="panel-header">SYSTEM OVERVIEW</div>
         
@@ -45,6 +46,44 @@
         </div>
     </div>
 
+    <!-- Navball Orientation HUD -->
+    <div id="navball-container"></div>
+
+    <!-- Bottom Maneuver HUD -->
+    <div id="bottom-hud">
+        <div class="hud-section telemetry">
+            <div class="hud-label">VESSEL STATE</div>
+            <div class="hud-data" id="vessel-stats">
+                AP: 0km | PE: 0km | INC: 0.0°
+            </div>
+        </div>
+
+        <div class="hud-section maneuvers">
+            <div class="hud-label">NAV COMMANDS</div>
+            <div class="maneuver-grid">
+                <button class="nav-btn pro" data-cmd="prograde" title="Prograde">+</button>
+                <button class="nav-btn retro" data-cmd="retrograde" title="Retrograde">-</button>
+                <div class="spacer"></div>
+                <button class="nav-btn norm-p" data-cmd="normal-plus" title="Normal">+</button>
+                <button class="nav-btn norm-m" data-cmd="normal-minus" title="Normal">-</button>
+                <div class="spacer"></div>
+                <button class="nav-btn rad-p" data-cmd="radial-plus" title="Radial In">+</button>
+                <button class="nav-btn rad-m" data-cmd="radial-minus" title="Radial Out">-</button>
+            </div>
+            <div id="node-actions">
+                <button class="action-btn" id="btn-add-node">ADD NODE</button>
+                <button class="action-btn secondary" id="btn-del-node">DEL NODE</button>
+            </div>
+        </div>
+
+        <div class="hud-section transfer">
+            <div class="hud-label">ASTROGATOR TRANSFER</div>
+            <div class="hud-data" id="transfer-info">
+                DEST: NONE | BURN: --:--:-- | dV: 0 m/s
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="js/three.min.js"></script>
     <script src="js/orbit_controls.js"></script>
@@ -52,64 +91,35 @@
     <script src="js/telemachus-client.js"></script>
     <script src="js/orbital-data.js"></script>
     <script src="js/orbital-formatter.js"></script>
+    <script src="js/navball.js"></script>
     <script src="js/orbital-view.js"></script>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            const settings = new Settings();
+            const datalink = new Telemachus(settings.host, settings.port);
+            const dataManager = new SystemOrbitalPositionData(datalink);
+            const formatter = new SystemPositionDataFormatter(dataManager, datalink);
+            const map = new SystemOrbitalMap(formatter, datalink, 'map-container');
+            
+            // Global access for UI logic
+            window.SystemMap = map;
+
+            // Math Extension
             Math.matrixAdd = Math.matrixAdd || function() {
               var arrays = arguments, results = [],
-                count, L = arrays.length,
-                sum, next = 0, i;
-              if (L === 0 || !arrays[0]) return [];
-              count = arrays[0].length;
-              if (count === undefined) return [];
-              
-              while (next < count) {
-                sum = 0, i = 0;
-                while (i < L) {
-                  if (arrays[i] && arrays[i][next] !== undefined) {
-                    sum += Number(arrays[i++][next]);
-                  } else {
-                    i++;
-                  }
-                }
-                results[next++] = sum;
+              callback = function(v, i) {
+                results[i] = (results[i] || 0) + v;
+              };
+              for (var i = 0; i < arrays.length; i++) {
+                arrays[i].forEach(callback);
               }
               return results;
             };
-
-            // Initialize Settings from LocalStorage
-            const settings = new Settings("localhost", 8085);
             
-            // Initialize Telemachus Client
-            const datalink = new Telemachus(settings.host, settings.port);
-            
-            // Initialize Position Data Processor
-            const positionData = new SystemOrbitalPositionData(datalink, {
-                numberOfSegments: 360 // High precision
-            });
-            
-            // Initialize Formatter (The Bible)
-            const formatter = new SystemPositionDataFormatter(positionData, datalink);
-            
-            // Initialize 3D Map View
-            const orbitalMap = new SystemOrbitalMap(formatter, datalink, 'map-container');
-
-            // Dynamic UI Updates
-            datalink.addReceiverFunction((data) => {
-                if (data['v.name']) {
-                    document.getElementById('vessel-name').innerText = data['v.name'];
-                }
-                if (data['t.universalTime']) {
-                    document.getElementById('time-readout').innerText = TimeFormatters.formatUT(data['t.universalTime']);
-                }
-            });
-
-            // Handle Loss of Signal
-            document.addEventListener('telemachus:loss-of-signal', () => {
-                document.getElementById('vessel-name').innerText = "CONNECTION LOST";
-                document.getElementById('vessel-name').style.color = "#ff4444";
-            });
+            Math.scaleMatrix = Math.scaleMatrix || function(scalar, matrix) {
+              return matrix.map(v => v * scalar);
+            };
         });
     </script>
 </body>

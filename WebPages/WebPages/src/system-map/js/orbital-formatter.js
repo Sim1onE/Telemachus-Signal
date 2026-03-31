@@ -14,7 +14,7 @@ class SystemPositionDataFormatter {
 
     this.options = Object.assign({
       onFormat: null,
-      numberOfSegments: 1024
+      numberOfSegments: 4096 // Increased resolution for vessels
     }, options);
   }
 
@@ -145,7 +145,7 @@ class SystemPositionDataFormatter {
   generateOrbitFromKeplerian(sma, ecc, inc, argPe, lan) {
     if (!sma) return [];
     const points = [];
-    const segments = 2048;
+    const segments = 16384; // Increased resolution for celestial rings
 
     const radInc = (inc * Math.PI / 180.0); // No negation here; formatter handles vertical inversion
     const radArgPe = - (argPe * Math.PI / 180.0); // Bible: Inverse Rotation
@@ -216,6 +216,7 @@ class SystemPositionDataFormatter {
   }
 
   formatManeuverNodes(positionData, formattedData) {
+    if (!positionData["o.maneuverNodes"]) return;
     positionData["o.maneuverNodes"].forEach((node, i) => {
       const orbitPatches = this.formatOrbitPatches(formattedData, positionData, node.orbitPatches, {
         type: "maneuverNode", parentType: "vessel", parentName: "current vessel"
@@ -236,8 +237,12 @@ class SystemPositionDataFormatter {
     let lastPatchesPoint = null;
     let distanceFromLastPatchesPoint = null;
 
+    if (!rawOrbitPatches) return formattedOrbitPatches;
+
     rawOrbitPatches.forEach((orbitPatch, j) => {
       const referenceBody = positionData.referenceBodies[orbitPatch.referenceBody];
+      if (!referenceBody) return;
+
       const sortedTimes = this.sortedUniversalTimes(orbitPatch.positionData);
       const positions = [];
       const middleUT = sortedTimes[Math.floor((sortedTimes.length - 1) / 2)];
@@ -324,6 +329,7 @@ class SystemPositionDataFormatter {
   }
 
   findProjectedPositionOfReferenceBody(rootReferenceBody, body, universalTime) {
+    if (!rootReferenceBody || !body) return [0, 0, 0];
     const rootPos = rootReferenceBody.positionData[this.findClosestUT(universalTime, rootReferenceBody.positionData)].truePosition;
     const targetPos = body.positionData[universalTime].truePosition;
 
@@ -357,3 +363,4 @@ class SystemPositionDataFormatter {
 }
 
 window.SystemPositionDataFormatter = SystemPositionDataFormatter;
+走

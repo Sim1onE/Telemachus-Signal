@@ -2,6 +2,7 @@
  * Telemachus Client (ES6)
  * A standalone, high-performance bridge to the KSP Telemachus DataLink.
  * Replaces the legacy Prototype.js-based telemachus.js.
+ * Optimized for real-time telemetry and 2D/3D maneuver manipulation.
  */
 class Telemachus {
   constructor(host, port) {
@@ -22,7 +23,7 @@ class Telemachus {
     const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
     const host = this.host === "localhost" || !this.host ? window.location.hostname : this.host;
     const port = this.port || window.location.port;
-    
+
     return `${protocol}//${host}${port ? ':' + port : ''}/telemachus/datalink`;
   }
 
@@ -41,19 +42,8 @@ class Telemachus {
     });
   }
 
-  dispatchMessages(data) {
-    this.receiverFunctions.forEach(func => {
-      try {
-        func(data);
-      } catch (e) {
-        console.error("Telemachus Dispatch Error:", e);
-      }
-    });
-  }
-
   /**
-   * Sends a JSON-batched request to Telemachus (POST).
-   * This is the efficient strategy used by Houston for heavy orbital data.
+   * Sending generic datalink parameters (polling strategy).
    */
   async sendMessage(params, callback) {
     try {
@@ -76,19 +66,47 @@ class Telemachus {
   }
 
   /**
-   * Prepares parameters for GET requests (Simple polling).
+   * Command Bridge (SEND commands instead of polling data).
+   * Follows Houston's "command-as-key" pattern.
    */
-  prepareParams(params) {
-    return Object.keys(params).map(field => {
-      // Telemachus uses { } as aliases internally for [ ] in URLs
-      const sanitizedFieldName = field.replace(/\[/g, "{").replace(/\]/g, "}");
-      return `${sanitizedFieldName}=${field}`;
-    });
+  async sendCommand(command, callback) {
+    const params = {};
+    params[command] = command;
+
+    try {
+      const response = await fetch(this.url, {
+        method: "POST",
+        body: JSON.stringify(params),
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+
+      if (response.ok) {
+        const rawData = await response.json();
+        const data = this.convertData(rawData);
+        if (callback) callback(data);
+      }
+    } catch (e) {
+      console.error("Telemachus Command Error:", e);
+    }
   }
 
-  /**
-   * Converts Telemachus alias format { } back to [ ].
-   */
+  addManeuverNode(ut, callback) {
+    const cmd = `o.addManeuverNode[${ut},0,0,0]`;
+    this.sendCommand(cmd, callback);
+  }
+
+  updateManeuverNode(index, ut, radial, normal, prograde, callback) {
+    const cmd = `o.updateManeuverNode[${index},${ut},${radial},${normal},${prograde}]`;
+    this.sendCommand(cmd, callback);
+  }
+
+  removeManeuverNode(index, callback) {
+    const cmd = `o.removeManeuverNode[${index}]`;
+    this.sendCommand(cmd, callback);
+  }
+
   convertData(rawData) {
     const data = {};
     Object.keys(rawData).forEach(key => {
@@ -100,7 +118,10 @@ class Telemachus {
 
   async poll() {
     const fieldsToPoll = this.subscribedFields;
-    const params = this.prepareParams(fieldsToPoll);
+    const params = Object.keys(fieldsToPoll).map(field => {
+      const sanitizedFieldName = field.replace(/\[/g, "{").replace(/\]/g, "}");
+      return `${sanitizedFieldName}=${field}`;
+    });
     const requestURL = `${this.url}?${params.join("&")}`;
 
     try {
@@ -112,11 +133,16 @@ class Telemachus {
       }
     } catch (e) {
       console.warn("Telemachus Poll Error (Likely LOS):", e);
-      // Trigger a custom event for Loss of Signal if needed
       document.dispatchEvent(new CustomEvent('telemachus:loss-of-signal'));
     }
 
     this.loopTimeout = setTimeout(() => this.poll(), this.rate);
+  }
+
+  dispatchMessages(data) {
+    this.receiverFunctions.forEach(func => {
+      try { func(data); } catch (e) { console.error("Telemachus Dispatch Error:", e); }
+    });
   }
 
   startPolling() {
@@ -124,16 +150,9 @@ class Telemachus {
     this.poll();
   }
 
-  stopPolling() {
-    if (this.loopTimeout) clearTimeout(this.loopTimeout);
-  }
-
   getOrbitalBodyInfo(name) {
     const properties = this.orbitingBodies[name];
-    if (properties) {
-      return Object.assign({ name: name }, properties);
-    }
-    return null;
+    return properties ? Object.assign({ name: name }, properties) : null;
   }
 
   getOrbitalBodies() {
@@ -159,31 +178,21 @@ class Telemachus {
   }
 }
 
-/**
- * Handle settings (host/port) via LocalStorage.
- * Mimics Houston's storage keys for seamless compatibility.
- */
 class Settings {
   constructor(defaultHost, defaultPort) {
     this.defaultHost = defaultHost || window.location.hostname || "localhost";
     this.defaultPort = defaultPort || window.location.port || "8085";
-    
+
     if (!this.host) this.host = this.defaultHost;
     if (!this.port) this.port = this.defaultPort;
   }
-
-  get host() { return localStorage.getItem('host'); }
+  get host() { return localStorage.getItem('host') }
   set host(value) { localStorage.setItem('host', value); }
 
-  get port() { return localStorage.getItem('port'); }
+  get port() { return localStorage.getItem('port') }
   set port(value) { localStorage.setItem('port', value); }
-  
-  // Legacy getters for compatibility
-  getHost() { return this.host; }
-  getPort() { return this.port; }
-  setHost(v) { this.host = v; }
-  setPort(v) { this.port = v; }
 }
 
 window.Telemachus = Telemachus;
 window.Settings = Settings;
+走

@@ -192,3 +192,104 @@ body, html {
     border-color: #888;
     color: #eee;
 }
+
+/* Navball Container */
+#navball-container {
+    position: absolute;
+    bottom: 120px;
+    left: 30px;
+    width: 180px;
+    height: 180px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    box-shadow: 0 0 20px rgba(0, 255, 204, 0.1);
+    overflow: hidden;
+    z-index: 30;
+}
+
+/* Bottom HUD Styling */
+#bottom-hud {
+    position: absolute;
+    bottom: 30px;
+    left: 30px;
+    right: 30px;
+    height: 80px;
+    background: var(--panel-bg);
+    backdrop-filter: blur(15px);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    z-index: 20;
+}
+
+.hud-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    border-right: 1px solid rgba(255,255,255,0.05);
+    height: 100%;
+    padding: 0 20px;
+}
+
+.hud-section:last-child {
+    border-right: none;
+}
+
+.hud-label {
+    font-size: 0.65rem;
+    color: #666;
+    letter-spacing: 2px;
+    margin-bottom: 5px;
+}
+
+.hud-data {
+    font-family: 'Roboto Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--accent-color);
+}
+
+/* Maneuver Deck */
+.maneuver-grid {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+
+.nav-btn {
+    width: 24px;
+    height: 24px;
+    border: 1px solid #444;
+    background: rgba(255,255,255,0.05);
+    color: #eee;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.1s;
+}
+
+.nav-btn:hover {
+    background: var(--btn-hover);
+    border-color: var(--accent-color);
+}
+
+.nav-btn.pro { border-color: #ffcc00; color: #ffcc00; }
+.nav-btn.retro { border-color: #00ff77; color: #00ff77; }
+.nav-btn.norm-p, .nav-btn.norm-m { border-color: #cc00ff; color: #cc00ff; }
+.nav-btn.rad-p, .nav-btn.rad-m { border-color: #ff5500; color: #ff5500; }
+
+.spacer { width: 5px; }
+
+#node-actions {
+    margin-left: 15px;
+    display: flex;
+    gap: 8px;
+}
+
+#node-actions .action-btn {
+    width: auto;
+    padding: 4px 10px;
+    font-size: 0.6rem;
+}
