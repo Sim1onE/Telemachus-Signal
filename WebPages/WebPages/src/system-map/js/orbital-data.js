@@ -1,6 +1,7 @@
 /**
  * SystemOrbitalPositionData (ES6)
  * Handles fetching and caching of orbital data from Telemachus.
+ * Powering the premium 3D Map HUD and Orientation Sphere.
  */
 class SystemOrbitalPositionData {
   constructor(datalink, options = {}) {
@@ -9,7 +10,7 @@ class SystemOrbitalPositionData {
     this.mutexTimestamp = null;
     this.rootReferenceBody = null;
     this.options = Object.assign({
-      numberOfSegments: 1024,
+      numberOfSegments: 4096,
       onRecalculate: null
     }, options);
 
@@ -25,20 +26,15 @@ class SystemOrbitalPositionData {
     return this.mutexTimestamp && this.mutexTimestamp < ((Date.now() / 1000 | 0) + this.timeoutRate);
   }
 
-  mutexLock() {
-    this.mutexTimestamp = Date.now();
-  }
-
-  mutexUnlock() {
-    this.mutexTimestamp = null;
-  }
+  mutexLock() { this.mutexTimestamp = Date.now(); }
+  mutexUnlock() { this.mutexTimestamp = null; }
 
   recalculate(data) {
     if (this.isLocked()) return;
     this.mutexLock();
 
     Object.assign(data, {
-      "currentUniversalTime": this.adjustUniversalTime(data['t.universalTime']),
+      "currentUniversalTime": data['t.universalTime'],
       "vesselBody": data['v.body'],
       "vesselCurrentPosition": { "relativePosition": null },
       "targetCurrentPosition": { "relativePosition": null },
@@ -71,7 +67,6 @@ class SystemOrbitalPositionData {
         if (body) {
           requestParams[`${body.name}[metadata]radius`] = `b.radius[${body.id}]`;
           requestParams[`${body.name}[${positionData["currentUniversalTime"]}]TruePosition`] = `b.o.truePositionAtUT[${body.id},${positionData["currentUniversalTime"]}]`;
-          requestParams[`${body.name}[metadata]currentTruePosition`] = `b.o.truePositionAtUT[${body.id},${positionData["currentUniversalTime"]}]`;
         }
       }
     }
@@ -93,9 +88,6 @@ class SystemOrbitalPositionData {
       }
     });
 
-    Object.assign(requestParams, this.staticOrbitRequestParams);
-    this.staticOrbitRequestParams = {};
-
     this.datalink.sendMessage(requestParams, (data) => {
       positionData["currentReferenceBodyRadius"] = data["currentReferenceBodyRadius"];
       positionData["currentReferenceBodyTruePosition"] = data["currentReferenceBodyTruePosition"];
@@ -103,46 +95,11 @@ class SystemOrbitalPositionData {
       this.buildReferenceBodyPositionData(data, positionData);
       this.buildReferenceBodyMetadata(data, positionData);
 
-      // Cache Keplerian elements
-      if (!this.planetStaticOrbitsFetched && positionData.referenceBodies && positionData.referenceBodies["Kerbin"] && positionData.referenceBodies["Kerbin"].sma !== undefined) {
-        this.planetStaticOrbitsFetched = true;
-        this.cachedKeplerian = {};
-        Object.keys(positionData.referenceBodies).forEach(bName => {
-          const bInfo = this.datalink.getOrbitalBodyInfo(bName);
-          if (bName !== "Kerbin" && (!bInfo || bInfo.referenceBodyName !== "Kerbin")) return;
-          const b = positionData.referenceBodies[bName];
-          this.cachedKeplerian[bName] = {
-            sma: b.sma,
-            ecc: b.eccentricity,
-            inc: b.inclination,
-            argPe: b.argPe,
-            lan: b.lan
-          };
-        });
-      }
-
-      // Inject cached Keplerian elements
-      if (this.cachedKeplerian) {
-        Object.keys(this.cachedKeplerian).forEach(bName => {
-          const refBody = positionData.referenceBodies[bName] = positionData.referenceBodies[bName] || {};
-          refBody.sma = this.cachedKeplerian[bName].sma;
-          refBody.eccentricity = this.cachedKeplerian[bName].ecc;
-          refBody.inclination = this.cachedKeplerian[bName].inc;
-          refBody.argPe = this.cachedKeplerian[bName].argPe;
-          refBody.lan = this.cachedKeplerian[bName].lan;
-        });
-      }
-
       positionData["vesselCurrentPosition"]["relativePosition"] = data["vesselCurrentPositionRelativePosition"];
       this.buildRelativePositionPositionDataForOrbitPatches(data, positionData, "vesselCurrentOrbit", 'o.orbitPatches');
 
       if (positionData['o.maneuverNodes']) {
         this.buildRelativePositionPositionDataForManeuverNodeOrbitPatches(data, positionData, "vesselManeuverNodes", 'o.maneuverNodes');
-      }
-
-      if (positionData['tar.o.orbitPatches']) {
-        this.buildRelativePositionPositionDataForOrbitPatches(data, positionData, "targetCurrentOrbit", 'tar.o.orbitPatches', 'tar.o');
-        positionData["targetCurrentPosition"]["relativePosition"] = data["targetCurrentPositionRelativePosition"];
       }
 
       this.mutexUnlock();
@@ -154,22 +111,19 @@ class SystemOrbitalPositionData {
     if (!orbitPatches || !orbitPatches.length) return;
     for (let i = 0; i < orbitPatches.length; i++) {
       const orbitPatch = orbitPatches[i];
-      const startUT = this.adjustUniversalTime(orbitPatch["startUT"]);
-      const endUT = this.adjustUniversalTime(orbitPatch["endUT"]);
+      const startUT = orbitPatch["startUT"];
+      const endUT = orbitPatch["endUT"];
       const referenceBody = this.datalink.getOrbitalBodyInfo(orbitPatch["referenceBody"]);
       const timeInterval = (endUT - startUT) / this.options.numberOfSegments;
 
       for (let j = 0; j < this.options.numberOfSegments; j++) {
-        let UTForInterval = this.adjustUniversalTime(startUT + (timeInterval * j));
+        let UTForInterval = startUT + (timeInterval * j);
         if (UTForInterval > endUT) UTForInterval = endUT;
 
         requestParams[`${this.rootReferenceBody.name}[${UTForInterval}]TruePosition`] = `b.o.truePositionAtUT[${this.rootReferenceBody.id},${UTForInterval}]`;
         requestParams[`${orbitPatchType}[${i}][${UTForInterval}]RelativePosition`] = `${requestPrefix}.relativePositionAtUTForOrbitPatch[${i},${UTForInterval}]`;
         requestParams[`${orbitPatch["referenceBody"]}[${UTForInterval}]TruePosition`] = `b.o.truePositionAtUT[${referenceBody.id},${UTForInterval}]`;
       }
-
-      requestParams[`${orbitPatch["referenceBody"]}[metadata]radius`] = `b.radius[${referenceBody.id}]`;
-      requestParams[`${orbitPatch["referenceBody"]}[metadata]currentTruePosition`] = `b.o.truePositionAtUT[${referenceBody.id},${currentUniversalTime}]`;
     }
   }
 
@@ -182,29 +136,22 @@ class SystemOrbitalPositionData {
 
       for (let j = 0; j < maneuverNode['orbitPatches'].length; j++) {
         const orbitPatch = maneuverNode['orbitPatches'][j];
-        const startUT = this.adjustUniversalTime(orbitPatch["startUT"]);
-        const endUT = this.adjustUniversalTime(orbitPatch["endUT"]);
-        const period = this.adjustUniversalTime(orbitPatch["period"]);
-        const endTransition = orbitPatch["patchEndTransition"];
+        const startUT = orbitPatch["startUT"];
+        const endUT = orbitPatch["endUT"];
+        const period = orbitPatch["period"];
         const referenceBody = this.datalink.getOrbitalBodyInfo(orbitPatch["referenceBody"]);
         const expectedUT = startUT + period;
 
-        const timeInterval = (expectedUT < endUT && endTransition === "MANEUVER")
-          ? (expectedUT - startUT) / this.options.numberOfSegments
-          : (endUT - startUT) / this.options.numberOfSegments;
+        const timeInterval = (endUT - startUT) / this.options.numberOfSegments;
 
-        let UTForInterval = null;
         for (let k = 0; k < this.options.numberOfSegments; k++) {
-          UTForInterval = this.adjustUniversalTime((UTForInterval || startUT) + timeInterval);
+          let UTForInterval = startUT + (timeInterval * k);
           if (UTForInterval > endUT) UTForInterval = endUT;
 
           requestParams[`${this.rootReferenceBody.name}[${UTForInterval}]TruePosition`] = `b.o.truePositionAtUT[${this.rootReferenceBody.id},${UTForInterval}]`;
           requestParams[`${labelPrefix}[${j}][${UTForInterval}]RelativePosition`] = `${requestPrefix}[${i},${j},${UTForInterval}]`;
           requestParams[`${orbitPatch["referenceBody"]}[${UTForInterval}]TruePosition`] = `b.o.truePositionAtUT[${referenceBody.id},${UTForInterval}]`;
         }
-
-        requestParams[`${orbitPatch["referenceBody"]}[metadata]radius`] = `b.radius[${referenceBody.id}]`;
-        requestParams[`${orbitPatch["referenceBody"]}[metadata]currentTruePosition`] = `b.o.truePositionAtUT[${referenceBody.id},${currentUniversalTime}]`;
       }
     }
   }
@@ -244,15 +191,11 @@ class SystemOrbitalPositionData {
     Object.keys(rawData).forEach(key => {
       if (regex.test(key)) {
         const [, name, ut] = regex.exec(key);
-        const truePos = rawData[key];
         const refBodies = positionData["referenceBodies"] = positionData["referenceBodies"] || {};
         const body = refBodies[name] = refBodies[name] || {};
         body["positionData"] = body["positionData"] || {};
         body["positionData"][ut] = body["positionData"][ut] || {};
-        body["positionData"][ut]["truePosition"] = truePos;
-
-        this.cachedPlanetPaths[name] = this.cachedPlanetPaths[name] || {};
-        this.cachedPlanetPaths[name][ut] = truePos;
+        body["positionData"][ut]["truePosition"] = rawData[key];
       }
     });
   }
@@ -269,18 +212,20 @@ class SystemOrbitalPositionData {
     });
   }
 
-  adjustUniversalTime(ut) {
-    return ut;
-  }
-
   initializeDatalink() {
     this.datalink.subscribeToData([
       'o.orbitPatches', 't.universalTime', 'v.body',
       'tar.name', 'tar.type', 'tar.o.orbitingBody',
-      'tar.o.orbitPatches', 'o.maneuverNodes'
+      'tar.o.orbitPatches', 'o.maneuverNodes',
+      // Vessel Stats & Attitude Indicator
+      'v.altitude', 'o.ApA', 'o.PeA', 'o.inclination',
+      'n.pitch', 'n.roll', 'n.heading',
+      // Astrogator Transfer Info
+      'a.installed', 'a.nextTransfer.destination', 'a.nextTransfer.burnUT', 'a.nextTransfer.dv'
     ]);
     this.datalink.addReceiverFunction(this.recalculate.bind(this));
   }
 }
 
 window.SystemOrbitalPositionData = SystemOrbitalPositionData;
+走
