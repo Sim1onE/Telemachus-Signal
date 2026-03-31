@@ -112,7 +112,6 @@ namespace Telemachus.Harmony
         private static float lastLog = 0f;
         private static bool wasOverridden = false;
         private static int callCount = 0;
-        private static float lastDump = 0f;
 
         // Configuration
         private const string TEXTURE_PATH = "GameData/Telemachus/Textures";
@@ -256,7 +255,7 @@ namespace Telemachus.Harmony
 
         private static string GetSSKeyForSignalStrength(double sig)
         {
-            if (sig <= 0.01) return "SS0";
+            if (sig <= 0.00) return "SS0";
             if (sig < 0.25) return "SS1";
             if (sig < 0.50) return "SS2";
             if (sig < 0.75) return "SS3";
@@ -277,82 +276,50 @@ namespace Telemachus.Harmony
         public static void Postfix(MonoBehaviour __instance)
         {
             if (FlightGlobals.ActiveVessel == null) return;
-            
-            double actual = TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
-            bool linked = TelemachusSignalManager.IsTransmissionLinked(FlightGlobals.ActiveVessel) ?? true;
-            
-            InjectTooltip(__instance, linked, actual);
+
+            double quality = TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
+            double delay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
+
+            InjectTooltip(__instance, quality, delay);
         }
 
-        private static int injectCount = 0;
-        private static void InjectTooltip(MonoBehaviour ctrl, bool linked, double actual)
+        private static void InjectTooltip(MonoBehaviour ctrl, double quality, double delay)
         {
             try
             {
-                // Extract items for fallback and duplicate checking
-                var itemsField = ctrl.GetType().GetField("items", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                var items = itemsField?.GetValue(ctrl) as System.Collections.IList;
-
                 // --- HEADER-MERGE STRATEGY ---
                 var windowField = ctrl.GetType().GetField("tooltip", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
                 var windowInstance = windowField?.GetValue(ctrl) as MonoBehaviour;
-                
-                if (windowInstance != null) {
-                    bool foundHeader = false;
-                    foreach (var textComp in windowInstance.GetComponentsInChildren<MonoBehaviour>(true)) {
-                        if (textComp.GetType().Name.Contains("TextMeshPro")) {
+
+                if (windowInstance != null)
+                {
+                    foreach (var textComp in windowInstance.GetComponentsInChildren<MonoBehaviour>(true))
+                    {
+                        if (textComp.GetType().Name.Contains("TextMeshPro"))
+                        {
                             var textProp = textComp.GetType().GetProperty("text");
                             string currentText = textProp?.GetValue(textComp, null) as string;
-                            
-                            if (!string.IsNullOrEmpty(currentText) && currentText.Contains("Signal Strength")) {
+
+                            if (!string.IsNullOrEmpty(currentText) && currentText.Contains("Signal Strength"))
+                            {
                                 if (currentText.Contains("Transmission Quality")) return;
-                                
-                                string qualityText = string.Format("\n<size=85%><color=#00FFFF>Transmission Quality: {0:P0}</color></size>", actual);
-                                textProp?.SetValue(textComp, currentText + qualityText, null);
-                                foundHeader = true;
+
+                                string qualityText = string.Format("\n<size=85%><color=#00FFFF>Transmission Quality: {0:P0}</color></size>", quality);
+
+                                string delayText = "";
+                                if (delay > 0)
+                                {
+                                    string delayFormatted = delay >= 1.0
+                                        ? string.Format("{0:F2}s", delay)
+                                        : string.Format("{0:F0}ms", delay * 1000.0);
+                                    delayText = string.Format("\n<size=85%><color=#FF00FF>Signal Delay: {0}</color></size>", delayFormatted);
+                                }
+
+                                textProp?.SetValue(textComp, currentText + qualityText + delayText, null);
                                 break;
                             }
                         }
                     }
-                    if (foundHeader) return;
-                }
-
-                // --- FALLBACK (List Item) ---
-                if (items == null) return;
-                foreach (var item in items)
-                {
-                    var labelF = item.GetType().GetField("label", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                    if (labelF == null) continue;
-                    var label = labelF.GetValue(item);
-                    var textP = label?.GetType().GetProperty("text");
-                    string txt = textP?.GetValue(label, null) as string;
-                    if (txt != null && txt.Contains("Transmission Quality:")) return; 
-                }
-
-                var prefabField = ctrl.GetType().GetField("itemPrefab", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                if (prefabField == null) return;
-                var prefab = prefabField.GetValue(ctrl) as MonoBehaviour;
-                if (prefab == null) return;
-
-                var newItem = UnityEngine.Object.Instantiate(prefab);
-                var labelField = newItem.GetType().GetField("label", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                var labelObj = labelField?.GetValue(newItem);
-                if (labelObj != null)
-                {
-                    var textProp = labelObj.GetType().GetProperty("text");
-                    textProp?.SetValue(labelObj, string.Format("<size=85%><color=#00FFFF>Transmission Quality: {0:P0}</color></size>", actual), null);
-                    
-                    foreach (var img in newItem.GetComponentsInChildren<UnityEngine.UI.Image>(true)) {
-                        if (img.gameObject.name.ToLower().Contains("background")) continue;
-                        img.gameObject.SetActive(false);
-                    }
-
-                    Transform parent = prefab.transform.parent;
-                    if (items.Count > 0) parent = ((MonoBehaviour)items[0]).transform.parent;
-                    
-                    newItem.transform.SetParent(parent, false);
-                    items.Insert(0, newItem);
-                    newItem.transform.SetAsFirstSibling();
                 }
             }
             catch { }

@@ -32,14 +32,8 @@
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>..\references\UnityEngine.IMGUIModule.dll</HintPath>
     </Reference>
-    <Reference Include="UnityEngine.TextRenderingModule">
-      <HintPath>..\references\UnityEngine.TextRenderingModule.dll</HintPath>
-    </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
       <HintPath>..\references\UnityEngine.InputLegacyModule.dll</HintPath>
-    </Reference>
-    <Reference Include="UnityEngine.UIModule">
-      <HintPath>..\references\UnityEngine.UIModule.dll</HintPath>
     </Reference>
     <Reference Include="Assembly-CSharp" Private="false">
       <HintPath>..\references\Assembly-CSharp.dll</HintPath>
