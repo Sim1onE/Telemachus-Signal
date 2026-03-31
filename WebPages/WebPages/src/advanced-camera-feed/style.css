@@ -147,6 +147,17 @@ main {
 .radio-btn {
     background: rgba(0, 0, 0, 0.6);
     border: 1px solid var(--accent-color);
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-drag: none;
+    
+    overflow: hidden;
     color: var(--accent-color);
     padding: 12px;
     border-radius: 6px;

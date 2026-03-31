@@ -39,7 +39,7 @@ class AdvancedCameraFeed {
         this.telMet = document.getElementById('tel-met');
         this.telDelay = document.getElementById('tel-delay');
         this.telSignal = document.getElementById('tel-signal');
-        
+
         this.statusOverlay = document.getElementById('viewport-overlay');
         this.statusText = document.getElementById('status-text');
         this.statusSpinner = document.getElementById('status-spinner');
@@ -89,9 +89,28 @@ class AdvancedCameraFeed {
         });
 
         if (this.radioBtn) {
-            this.radioBtn.addEventListener('mousedown', () => this.startTransmission());
-            this.radioBtn.addEventListener('mouseup', () => this.stopTransmission());
-            this.radioBtn.addEventListener('mouseleave', () => this.stopTransmission());
+            // Context menu & selection block (prevent long-press from opening OS menus)
+            this.radioBtn.oncontextmenu = (e) => { e.preventDefault(); return false; };
+            this.radioBtn.onselectstart = (e) => { e.preventDefault(); return false; };
+
+            // Unified Pointer Events (Mouse + Touch)
+            this.radioBtn.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                this.radioBtn.setPointerCapture(e.pointerId);
+                this.startTransmission();
+            });
+
+            this.radioBtn.addEventListener('pointerup', (e) => {
+                e.preventDefault();
+                this.radioBtn.releasePointerCapture(e.pointerId);
+                this.stopTransmission();
+            });
+
+            this.radioBtn.addEventListener('pointercancel', (e) => {
+                e.preventDefault();
+                this.radioBtn.releasePointerCapture(e.pointerId);
+                this.stopTransmission();
+            });
         }
     }
 
@@ -125,7 +144,7 @@ class AdvancedCameraFeed {
         if (this.cameraStream) this.cameraStream.stop();
         this.selectedCamera = cam;
         this.updateStatus('loading', `CONNECTING: ${cam.name}...`);
-        
+
         // UI Defaults
         this.fovSlider.min = cam.fovMin || 1;
         this.fovSlider.max = cam.fovMax || 120;
@@ -135,7 +154,7 @@ class AdvancedCameraFeed {
         // Initialize Specialized WebSocket Stream Library
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const streamUrl = `${protocol}//${window.location.host}/stream`;
-        
+
         this.cameraStream = new TelemachusCameraStream(streamUrl, cam.name, this.cameraFeed, this);
         this.cameraStream.start();
 
@@ -160,7 +179,7 @@ class AdvancedCameraFeed {
         // We NO LONGER update lastRemoteUt here. 
         // The master clock must only be driven by the 1Hz telemetry poll
         // to avoid double-delay and clock jitter.
-        
+
         if (warp !== undefined) this.telemetryData.warp = warp;
 
         // Metadata UI updates (Instant)
@@ -179,7 +198,7 @@ class AdvancedCameraFeed {
             if (bar) bar.classList.toggle('active', i <= numBars);
         }
         if (this.glitchOverlay) this.glitchOverlay.classList.toggle('active', signal < 15);
-        
+
         // Resolution label logic
         if (this.metaRes) {
             let res = 300;
@@ -212,7 +231,7 @@ class AdvancedCameraFeed {
         const delay = this.get('comm.signalDelay');
 
         if (this.telDelay) this.telDelay.innerText = `${delay.toFixed(1)}S`;
-        
+
         if (ut && this.telMet && this.telemetryData.met) {
             // Sincronizzazione dell'orologio MET basata sull'UT interpolato
             const metOffset = ut - (this.telemetryData.ut || ut);
@@ -226,7 +245,7 @@ class AdvancedCameraFeed {
             try {
                 const response = await fetch(`${this.baseUrl}/telemachus/datalink?alt=v.altitude&vel=v.orbitalVelocity&met=v.missionTime&ut=t.universalTime&delay=comm.signalDelay&warp=t.currentRate`);
                 const data = await response.json();
-                
+
                 // Anti-Time-Travel & Restart Detection:
                 // If the remote UT is much lower than our last recorded UT, 
                 // it means the game was restarted or a save was loaded.
@@ -246,7 +265,7 @@ class AdvancedCameraFeed {
 
     forceFovUpdate() {
         if (!this.selectedCamera || !this.cameraStream) return;
-        
+
         const now = performance.now();
         const minInterval = 33; // 30 FPS ceiling
 
@@ -282,13 +301,13 @@ class AdvancedCameraFeed {
     // --- RADIO TRANSMISSION (Independent from Camera) ---
     initRadio() {
         if (this.radioWs) this.radioWs.close();
-        
+
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const url = `${protocol}//${window.location.host}/radio`;
-        
+
         this.radioWs = new WebSocket(url);
         this.radioWs.binaryType = 'arraybuffer';
-        
+
         this.radioWs.onopen = () => console.log("[Radio] Connected to Huston Uplink.");
         this.radioWs.onclose = () => {
             console.warn("[Radio] Connection lost, reconnecting...");
@@ -298,12 +317,19 @@ class AdvancedCameraFeed {
 
     async startTransmission() {
         if (!this.radioWs || this.radioWs.readyState !== WebSocket.OPEN) return;
+        if (this.isTransmitting) return; // Prevent double-trigger
+
         try {
             this.isTransmitting = true;
             this.radioBtn.classList.add('active');
             if (this.radioStatusUI) {
                 this.radioStatusUI.classList.add('transmitting');
                 this.radioStatusText.innerText = 'TRANSMITTING...';
+            }
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                if (this.radioStatusText) this.radioStatusText.innerText = 'HTTPS REQ.';
+                throw new Error("Mic access requires HTTPS or localhost");
             }
 
             this.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 22050 });
@@ -322,12 +348,16 @@ class AdvancedCameraFeed {
                     const s = Math.max(-1, Math.min(1, input[i]));
                     pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 }
-                // No headers needed for the dedicated radio stream
+                
                 if (this.radioWs.readyState === WebSocket.OPEN) {
                     this.radioWs.send(pcm.buffer);
                 }
             };
-        } catch (err) { console.error("Mic error:", err); this.stopTransmission(); }
+        } catch (err) { 
+            console.error("Mic error:", err); 
+            // In case of error (like user denied permission), we reset the button
+            setTimeout(() => this.stopTransmission(), 500);
+        }
     }
 
     stopTransmission() {
