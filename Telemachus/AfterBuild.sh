@@ -5,13 +5,26 @@ set -o nounset
 
 ProjectDir=$1
 TargetDir=$2
+Dev=false
+if [[ "${3:-}" == "--dev" ]] || [[ "${3:-}" == "-dev" ]]; then
+  Dev=true
+fi
 
 authHeader=()
 if [ -n "${GITHUB_TOKEN:-}" ]; then
   authHeader=(-H "Authorization: token $GITHUB_TOKEN")
 fi
-houstonUrl="$(curl --silent "${authHeader[@]}" "https://api.github.com/repos/TeleIO/houston/releases/latest" | grep '"browser_download_url":' | cut -d : -f2,3 | cut -d \" -f2)"
-mkonUrl="https://github.com/TeleIO/mkon/archive/master.zip"
+
+mustPublish=true
+if [ "$Dev" = true ] && [ -f "$ProjectDir/../publish/GameData/Telemachus/Plugins/Telemachus.dll" ]; then
+  mustPublish=false
+fi
+
+if [ "$mustPublish" = true ]; then
+  if [ "$Dev" = true ]; then echo "Publish folder missing or incomplete, forcing full build even in -Dev mode."; fi
+  
+  houstonUrl="$(curl --silent "${authHeader[@]}" "https://api.github.com/repos/TeleIO/houston/releases/latest" | grep '"browser_download_url":' | cut -d : -f2,3 | cut -d \" -f2)"
+  mkonUrl="https://github.com/TeleIO/mkon/archive/master.zip"
 
 echo "$ProjectDir"
 echo "$TargetDir"
@@ -45,27 +58,37 @@ mkdir -p "$ProjectDir/../publish/GameData/Telemachus/Plugins/PluginData/Telemach
 unzip mkon.zip
 cp -ra mkon-master/. "$ProjectDir/../publish/GameData/Telemachus/Plugins/PluginData/Telemachus/mkon"
 
-rm Houston.zip mkon.zip
-rm -rf mkon-master
+  # Cleanup
+  rm -f Houston.zip mkon.zip
+  rm -rf mkon-master
 
-# Extract API schema from source-generated file
-schemaFile=$(find "$ProjectDir/obj" -name "TelemetrySchema.g.cs" -type f 2>/dev/null | head -1)
-if [ -n "$schemaFile" ]; then
-  # Extract the JSON from between the @" and "; markers, un-doubling quotes
-  sed -n '/SCHEMA_JSON_BEGIN/,/SCHEMA_JSON_END/p' "$schemaFile" \
-    | grep -v 'SCHEMA_JSON' \
-    | sed 's/.*internal const string Json = @"//;s/";//' \
-    | sed 's/""/"/g' \
-    > "$ProjectDir/../publish/api-schema.json"
-  echo "Extracted API schema to publish/api-schema.json"
+  # Extract API schema from source-generated file
+  schemaFile=$(find "$ProjectDir/obj" -name "TelemetrySchema.g.cs" -type f 2>/dev/null | head -1)
+  if [ -n "$schemaFile" ]; then
+    # Extract the JSON from between the @" and "; markers, un-doubling quotes
+    sed -n '/SCHEMA_JSON_BEGIN/,/SCHEMA_JSON_END/p' "$schemaFile" \
+      | grep -v 'SCHEMA_JSON' \
+      | sed 's/.*internal const string Json = @"//;s/";//' \
+      | sed 's/""/"/g' \
+      > "$ProjectDir/../publish/api-schema.json"
+    echo "Extracted API schema to publish/api-schema.json"
+  else
+    echo "Warning: TelemetrySchema.g.cs not found in obj/"
+  fi
 else
-  echo "Warning: TelemetrySchema.g.cs not found in obj/"
+  echo "Skipping Publish build (--dev mode active and publish folder found)."
 fi
 
-  # Copy to local KSP install (local dev only — skipped in CI)
   kspDir="$ProjectDir/../ksp-telemachus-dev"
   if [ -d "$kspDir" ]; then
     rm -rf "$kspDir/GameData/Telemachus"
+    mkdir -p "$kspDir/GameData/Telemachus/Plugins"
+
+    if [ "$Dev" = true ]; then
+      echo "Updating DLLs directly in KSP (Dev Mode)..."
+      cp "$TargetDir/Telemachus.dll"      "$kspDir/GameData/Telemachus/Plugins/"
+      cp "$TargetDir/websocket-sharp.dll" "$kspDir/GameData/Telemachus/Plugins/"
+    fi
     
     # Copy everything from publish to GameData, excluding the core web assets folder
     if command -v rsync >/dev/null 2>&1; then

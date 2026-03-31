@@ -61,6 +61,12 @@ namespace Telemachus
                     {
                         response.ContentEncoding = Encoding.UTF8;
                     }
+                    
+                    if (contentType.mimeType != null)
+                    {
+                        response.ContentType = contentType.mimeType;
+                    }
+
                     response.WriteContent(contentData);
 
                     return true;

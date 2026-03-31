@@ -60,9 +60,14 @@
     </EmbeddedResource>
   </ItemGroup>
 
+  <PropertyGroup>
+    <DevModeFlagPS Condition="'$(Dev)' == 'true'">-Dev</DevModeFlagPS>
+    <DevModeFlagSH Condition="'$(Dev)' == 'true'">--dev</DevModeFlagSH>
+  </PropertyGroup>
+
   <Target Name="PostBuild" AfterTargets="Build" Condition=" '$(SkipPostBuild)' != 'true' ">
-    <Exec Command="./AfterBuild.sh $(ProjectDir) $(OutputPath)" WorkingDirectory="$(ProjectDir)" Condition=" '$(OS)' != 'Windows_NT' " />
-    <Exec Command="powershell -ExecutionPolicy Bypass -File AfterBuild.ps1 -ProjectDir $(ProjectDir) -TargetDir $(OutputPath)" WorkingDirectory="$(ProjectDir)" Condition=" '$(OS)' == 'Windows_NT' " />
+    <Exec Command="./AfterBuild.sh $(ProjectDir) $(OutputPath) $(DevModeFlagSH)" WorkingDirectory="$(ProjectDir)" Condition=" '$(OS)' != 'Windows_NT' " />
+    <Exec Command="powershell -ExecutionPolicy Bypass -File AfterBuild.ps1 -ProjectDir $(ProjectDir) -TargetDir $(OutputPath) $(DevModeFlagPS)" WorkingDirectory="$(ProjectDir)" Condition=" '$(OS)' == 'Windows_NT' " />
   </Target>
 
 </Project>
