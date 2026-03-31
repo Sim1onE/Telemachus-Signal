@@ -90,12 +90,13 @@ fi
       rsync -au --exclude='Telemachus/Plugins/PluginData/Telemachus' "$ProjectDir/../publish/GameData/" "$kspDir/GameData/"
     else
       # Fallback to manual folder copying if rsync is not available
-      mkdir -p "$kspDir/GameData/Telemachus"
-      cp -ra "$ProjectDir/../publish/GameData/Telemachus/Plugins" "$kspDir/GameData/Telemachus/"
+      mkdir -p "$kspDir/GameData/Telemachus/Plugins"
       cp -ra "$ProjectDir/../publish/GameData/Telemachus/Parts"   "$kspDir/GameData/Telemachus/"
       if [ -f "$ProjectDir/../publish/GameData/Telemachus/TelemachusReborn.version" ]; then
         cp "$ProjectDir/../publish/GameData/Telemachus/TelemachusReborn.version" "$kspDir/GameData/Telemachus/"
       fi
+      # Copy only the DLLs to avoid bringing in stale web assets from publish/
+      cp -f "$ProjectDir/../publish/GameData/Telemachus/Plugins/"*.dll "$kspDir/GameData/Telemachus/Plugins/" 2>/dev/null || true
     fi
 
     if [ "$Dev" = true ]; then
