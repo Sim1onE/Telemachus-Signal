@@ -84,15 +84,10 @@ fi
     rm -rf "$kspDir/GameData/Telemachus"
     mkdir -p "$kspDir/GameData/Telemachus/Plugins"
 
-    if [ "$Dev" = true ]; then
-      echo "Updating DLLs directly in KSP (Dev Mode)..."
-      cp "$TargetDir/Telemachus.dll"      "$kspDir/GameData/Telemachus/Plugins/"
-      cp "$TargetDir/websocket-sharp.dll" "$kspDir/GameData/Telemachus/Plugins/"
-    fi
-    
     # Copy everything from publish to GameData, excluding the core web assets folder
+    # We use --update (-u) with rsync to prevent overwriting newer files
     if command -v rsync >/dev/null 2>&1; then
-      rsync -a --exclude='Telemachus/Plugins/PluginData/Telemachus' "$ProjectDir/../publish/GameData/" "$kspDir/GameData/"
+      rsync -au --exclude='Telemachus/Plugins/PluginData/Telemachus' "$ProjectDir/../publish/GameData/" "$kspDir/GameData/"
     else
       # Fallback to manual folder copying if rsync is not available
       mkdir -p "$kspDir/GameData/Telemachus"
@@ -101,6 +96,12 @@ fi
       if [ -f "$ProjectDir/../publish/GameData/Telemachus/TelemachusReborn.version" ]; then
         cp "$ProjectDir/../publish/GameData/Telemachus/TelemachusReborn.version" "$kspDir/GameData/Telemachus/"
       fi
+    fi
+
+    if [ "$Dev" = true ]; then
+      echo "Updating DLLs directly in KSP (Dev Mode)..."
+      cp -f "$TargetDir/Telemachus.dll"      "$kspDir/GameData/Telemachus/Plugins/"
+      cp -f "$TargetDir/websocket-sharp.dll" "$kspDir/GameData/Telemachus/Plugins/"
     fi
 
     devPluginData="$kspDir/GameData/Telemachus/Plugins/PluginData/Telemachus"

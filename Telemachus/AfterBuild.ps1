@@ -90,16 +90,10 @@ if (Test-Path $kspDir) {
     # Ensure base directory exists
     New-Item -ItemType Directory -Force -Path "$kspDir/GameData/Telemachus/Plugins" | Out-Null
 
-    # If in dev mode, we copy the DLL from the target dir directly since publish was skipped
-    if ($Dev) {
-        Write-Host "Updating DLLs directly in KSP (Dev Mode)..."
-        Copy-Item "$TargetDir/Telemachus.dll"      "$kspDir/GameData/Telemachus/Plugins/"
-        Copy-Item "$TargetDir/websocket-sharp.dll" "$kspDir/GameData/Telemachus/Plugins/"
-    }
-
     # Robocopy copies everything EXCEPT the web assets folder that we want to link
     # /E = Copy subdirectories, including empty ones.
     # /XD = Exclude Directories
+    # /XO = Exclude Older files (prevent stale publish dir from overwriting newer DLLs)
     $publishGameData = "$root/publish/GameData"
     $devGameData = "$kspDir/GameData"
     # Robocopy /XD works best with absolute paths or exact folder names
@@ -107,9 +101,17 @@ if (Test-Path $kspDir) {
     Write-Host "Copying from $publishGameData to $devGameData (excluding $excludePath)..."
     
     # Robocopy exit codes 0-3 are success. We ignore them to avoid false positives in ErrorActionPreference
-    $robocopyArgs = @($publishGameData, $devGameData, "/E", "/XD", $excludePath, "/NFL", "/NDL", "/NJH", "/NJS", "/nc", "/ns", "/np")
+    $robocopyArgs = @($publishGameData, $devGameData, "/E", "/XO", "/XD", $excludePath, "/NFL", "/NDL", "/NJH", "/NJS", "/nc", "/ns", "/np")
     & robocopy $robocopyArgs
     if ($LASTEXITCODE -ge 8) { throw "Robocopy failed with exit code $LASTEXITCODE" }
+    
+    # If in dev mode, we MUST copy the DLL from the target dir directly AFTER Robocopy
+    # Otherwise, Robocopy from the stale publish folder will silently overwrite our fresh compile!
+    if ($Dev) {
+        Write-Host "Updating DLLs directly in KSP (Dev Mode)..."
+        Copy-Item "$TargetDir/Telemachus.dll"      "$kspDir/GameData/Telemachus/Plugins/" -Force
+        Copy-Item "$TargetDir/websocket-sharp.dll" "$kspDir/GameData/Telemachus/Plugins/" -Force
+    }
     
     # Create the excluded directory
     $devPluginData = "$kspDir/GameData/Telemachus/Plugins/PluginData/Telemachus"

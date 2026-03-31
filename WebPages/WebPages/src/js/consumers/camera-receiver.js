@@ -66,16 +66,16 @@ class CameraReceiver {
     playbackLoop() {
         if (!this.isRunning) return;
 
-        if (this.datalink && this.sync.queue.length > 0) {
-            
-            // 1. Calculate Master Clock
-            const universalTime = this.datalink.get ? this.datalink.get('t.universalTime') : Date.now();
+        // Use the Master Flight Clock from the SignalLink (Estimated Present)
+        const flightTimeNow = this.signalLink.getEstimatedFlightUT();
+        
+        if (flightTimeNow > 0 && this.sync.queue.length > 0) {
             
             // 2. Obtain Instant Delay from the Link
             const currentDelay = this.signalLink.latestNetworkDelay;
             
             // 3. Subtract to find the exact historical moment we should be presenting
-            const delayedTimecode = universalTime - currentDelay;
+            const delayedTimecode = flightTimeNow - currentDelay;
 
             // 4. Extract all frames that are older than our target presentation moment
             const expiredFrames = this.sync.popReady(delayedTimecode);

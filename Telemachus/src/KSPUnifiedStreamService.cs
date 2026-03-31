@@ -10,7 +10,10 @@ namespace Telemachus
 {
     public class KSPUnifiedStreamService : WebSocketBehavior
     {
-        public enum PacketType : byte { VideoDownlink = 0, AudioUplink = 1, AudioDownlink = 2, CommandUplink = 3 }
+        public enum PacketType : byte { 
+            VideoDownlink = 0, VideoUplink = 1, 
+            AudioDownlink = 2, AudioUplink = 3
+        }
         public const int HEADER_SIZE = 34;
 
         private UpLinkDownLinkRate dataRates;
@@ -19,7 +22,6 @@ namespace Telemachus
         private string cameraName = null;
         private long lastSentFrameId = -1;
 
-        private Queue<AudioChunk> uplinkAudioBuffer = new Queue<AudioChunk>();
         private const int AUDIO_SAMPLE_RATE = 22050;
 
         public KSPUnifiedStreamService(UpLinkDownLinkRate rateTracker)
@@ -54,7 +56,10 @@ namespace Telemachus
             if (e.IsBinary)
             {
                 dataRates.RecieveDataFromClient(e.RawData.Length);
-                if (e.RawData.Length > 0 && e.RawData[0] == (byte)PacketType.AudioUplink) // Audio
+                if (e.RawData.Length == 0) return;
+
+                byte type = e.RawData[0];
+                if (type == (byte)PacketType.AudioUplink) // Voice In
                 {
                     byte[] pcmData = new byte[e.RawData.Length - 1];
                     Buffer.BlockCopy(e.RawData, 1, pcmData, 0, pcmData.Length);
@@ -63,56 +68,66 @@ namespace Telemachus
             }
             else if (e.IsText)
             {
-                // Simple JSON Command pattern
+                // JSON Protocol for Metadata and Immediate Actions
                 try {
                     var json = Json.DecodeObject(e.Data) as Dictionary<string, object>;
-                    if (json != null) {
-                        if (json.ContainsKey("camera")) {
-                            cameraName = json["camera"].ToString().ToLower();
-                            PluginLogger.print($"[Stream] Client {ID} selected camera: {cameraName}");
-                            if (CameraCaptureManager.classedInstance != null) CameraCaptureManager.classedInstance.EnsureFlightCamera();
-                        }
-                        
-                        // Generic command processing (FOV, Pitch, Yaw, ViewMode, etc.)
-                        CameraCapture sensor = null;
-                        if (!string.IsNullOrEmpty(cameraName) && CameraCaptureManager.classedInstance.cameras.ContainsKey(cameraName)) {
-                            sensor = CameraCaptureManager.classedInstance.cameras[cameraName];
-                        }
-                        
-                        if (sensor != null) {
-                            sensor.ProcessCameraCommand(json);
-                        } else {
-                            PluginLogger.print($"[Stream] WARNING: Received command but no sensor found for '{cameraName}'");
-                        }
+                    if (json == null) return;
+
+                    if (json.ContainsKey("list")) {
+                        SendCameraList();
+                    } else {
+                        HandleCommand(json);
                     }
                 } catch (Exception ex) {
-                    PluginLogger.print("Error parsing WS command: " + ex.Message);
+                    PluginLogger.print("[Stream] JSON Parse Error: " + ex.Message);
                 }
             }
+        }
+
+        private void HandleCommand(Dictionary<string, object> json)
+        {
+            if (json.ContainsKey("camera")) {
+                cameraName = json["camera"].ToString(); // Case-sensitive or insensitive (now handled by GetSensor)
+                PluginLogger.print($"[Stream] Client {ID} requested camera: {cameraName}");
+                if (CameraCaptureManager.classedInstance != null) CameraCaptureManager.classedInstance.EnsureFlightCamera();
+            }
+            
+            // Generic command processing (FOV, etc.)
+            CameraCapture sensor = GetSensor(cameraName);
+            
+            if (sensor != null) {
+                sensor.ProcessCameraCommand(json);
+            }
+        }
+
+        private CameraCapture GetSensor(string name)
+        {
+            if (string.IsNullOrEmpty(name) || CameraCaptureManager.classedInstance == null) return null;
+            
+            var cameras = CameraCaptureManager.classedInstance.cameras;
+            if (cameras.ContainsKey(name)) return cameras[name];
+            
+            var key = cameras.Keys.FirstOrDefault(k => k.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (key != null) return cameras[key];
+            
+            return null;
         }
 
         private void HandleIncomingAudio(byte[] pcmData)
         {
-            double delay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
-            double quality = TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
+            float quality = (float)TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
 
-            lock (uplinkAudioBuffer)
-            {
-                uplinkAudioBuffer.Enqueue(new AudioChunk {
-                    Data = pcmData, PlayAt = (float)(UnityEngine.Time.unscaledTime + delay), Quality = (float)quality
-                });
-            }
+            MainThreadDispatcher.Enqueue(() => {
+                if (audioSource != null) {
+                    PlayAudioChunk(pcmData, quality);
+                }
+            });
         }
 
         public void ProcessUpdate()
         {
-            if (audioSource != null) {
-                lock (uplinkAudioBuffer) {
-                    while (uplinkAudioBuffer.Count > 0 && UnityEngine.Time.unscaledTime >= uplinkAudioBuffer.Peek().PlayAt) {
-                        PlayAudioChunk(uplinkAudioBuffer.Dequeue());
-                    }
-                }
-            }
+            // Always send Heartbeat to keep client clock in sync even when camera is off
+            SendHeartbeat();
 
             if (!string.IsNullOrEmpty(cameraName)) {
                 PushVideoFrame();
@@ -121,39 +136,64 @@ namespace Telemachus
 
         private void PushVideoFrame()
         {
-            if (CameraCaptureManager.classedInstance == null) return;
-            
-            CameraCapture sensor = null;
-            
-            // Try Case-Insensitive search to be ultra-safe
-            if (CameraCaptureManager.classedInstance.cameras.ContainsKey(cameraName)) {
-                sensor = CameraCaptureManager.classedInstance.cameras[cameraName];
-            } else {
-                // Fallback: search ignoring case
-                var key = CameraCaptureManager.classedInstance.cameras.Keys.FirstOrDefault(k => k.Equals(cameraName, StringComparison.OrdinalIgnoreCase));
-                if (key != null) sensor = CameraCaptureManager.classedInstance.cameras[key];
-            }
+            CameraCapture sensor = GetSensor(cameraName);
 
             if (sensor == null) return;
-
-            // Wake up the sensor! We must update the tick BEFORE checking for imageBytes
-            // otherwise the sensor will never start rendering if it was idle.
+            
+            // CRITICAL FIX: Tell the camera it's being watched BEFORE checking if imageBytes is null.
+            // Otherwise, it refuses to render the first frame, creating an endless deadlock!
             sensor.lastRequestTick = Environment.TickCount;
 
-            if (sensor.imageBytes == null) return;
-
-            if (sensor.lastFrameId == lastSentFrameId) return;
+            if (sensor.imageBytes == null || sensor.lastFrameId == lastSentFrameId) return;
             lastSentFrameId = sensor.lastFrameId;
 
             byte[] jpegData = sensor.imageBytes;
             byte[] packet = new byte[HEADER_SIZE + jpegData.Length];
-            packet[0] = (byte)PacketType.VideoDownlink;
             
-            // Critical Fix: Use the time when the frame WAS RENDERED, not when it is SENT
-            double ut = sensor.lastFrameUT; 
+            // Build header
+            FillHeader(packet, (byte)PacketType.VideoDownlink, sensor.lastFrameUT, sensor.interpolatedFOV);
+            
+            Buffer.BlockCopy(jpegData, 0, packet, HEADER_SIZE, jpegData.Length);
+
+            SendAsync(packet, null);
+            dataRates.SendDataToClient(packet.Length);
+        }
+
+        private void SendHeartbeat()
+        {
+            try {
+                Vessel v = FlightGlobals.ActiveVessel;
+                if (v == null) return;
+
+                double currentUT = Planetarium.GetUniversalTime();
+                double warp = TimeWarp.fetch != null ? TimeWarp.CurrentRate : 1.0;
+                double delay = TelemachusSignalManager.GetSignalDelay(v);
+                
+                // CRITICAL FIX: MiniJSON crashes on `byte`, must cast to `int`
+                int quality = (int)(TelemachusSignalManager.GetSignalQuality(v) * 100);
+
+                var status = new Dictionary<string, object> {
+                    { "type", "status" },
+                    { "ut", currentUT },
+                    { "warp", warp },
+                    { "delay", delay },
+                    { "quality", quality },
+                    { "alt", (double)v.altitude },
+                    { "vel", (double)v.obt_speed },
+                    { "met", (double)v.missionTime }
+                };
+
+                SendAsync(Json.Encode(status), null);
+            } catch (Exception ex) {
+                PluginLogger.print("[Stream] SendHeartbeat Crash: " + ex.Message + "\n" + ex.StackTrace);
+            }
+        }
+
+        private void FillHeader(byte[] packet, byte type, double ut, double fov)
+        {
+            packet[0] = type;
             double warp = TimeWarp.fetch != null ? TimeWarp.CurrentRate : 1.0;
             double delay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
-            double fov = sensor.interpolatedFOV;
             byte quality = (byte)(TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel) * 100);
 
             Buffer.BlockCopy(BitConverter.GetBytes(ut), 0, packet, 1, 8);
@@ -161,25 +201,46 @@ namespace Telemachus
             Buffer.BlockCopy(BitConverter.GetBytes(delay), 0, packet, 17, 8);
             Buffer.BlockCopy(BitConverter.GetBytes(fov), 0, packet, 25, 8);
             packet[33] = quality;
-
-            Buffer.BlockCopy(jpegData, 0, packet, HEADER_SIZE, jpegData.Length);
-
-            SendAsync(packet, null);
-            dataRates.SendDataToClient(packet.Length);
         }
 
-        private void PlayAudioChunk(AudioChunk chunk)
+        private void SendCameraList()
         {
-            float[] samples = new float[chunk.Data.Length / 2];
+            try {
+                if (CameraCaptureManager.classedInstance == null) return;
+                
+                var cameraList = new List<Dictionary<string, object>>();
+                foreach (var c in CameraCaptureManager.classedInstance.cameras.Values) {
+                    cameraList.Add(new Dictionary<string, object> {
+                        { "name", c.cameraManagerName() ?? "Unknown" },
+                        { "type", c.cameraType() ?? "Unknown" },
+                        // CRITICAL FIX: MiniJSON crashes on `float`, must cast to `double`
+                        { "fovMin", (double)c.minFOV },
+                        { "fovMax", (double)c.maxFOV },
+                        { "currentFov", (double)c.interpolatedFOV }
+                    });
+                }
+
+                var response = new Dictionary<string, object> {
+                    { "type", "cameraList" },
+                    { "cameras", cameraList }
+                };
+
+                SendAsync(Json.Encode(response), null);
+            } catch (Exception ex) {
+                PluginLogger.print("[Stream] SendCameraList Crash: " + ex.Message + "\n" + ex.StackTrace);
+            }
+        }
+
+        private void PlayAudioChunk(byte[] data, float quality)
+        {
+            float[] samples = new float[data.Length / 2];
             for (int i = 0; i < samples.Length; i++) {
-                samples[i] = BitConverter.ToInt16(chunk.Data, i * 2) / 32768f;
-                if (chunk.Quality < 0.95f) samples[i] += (UnityEngine.Random.value * 2f - 1f) * (1.0f - chunk.Quality) * 0.15f;
+                samples[i] = BitConverter.ToInt16(data, i * 2) / 32768f;
+                if (quality < 0.95f) samples[i] += (UnityEngine.Random.value * 2f - 1f) * (1.0f - quality) * 0.15f;
             }
             AudioClip clip = AudioClip.Create("Radio", samples.Length, 1, AUDIO_SAMPLE_RATE, false);
             clip.SetData(samples, 0);
             audioSource.PlayOneShot(clip);
         }
-
-        private struct AudioChunk { public byte[] Data; public float PlayAt; public float Quality; }
     }
 }
