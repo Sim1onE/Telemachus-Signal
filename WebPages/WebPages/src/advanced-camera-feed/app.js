@@ -54,6 +54,16 @@ class AdvancedCameraFeed {
 
     async init() {
         this.bindEvents();
+
+        // Initialize General Signal Link (Singleton) once
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const streamUrl = `${protocol}//${window.location.host}/stream`;
+        
+        if (!this.signalLink) {
+            this.signalLink = new TelemachusSignalLink(streamUrl, this);
+            this.signalLink.connect();
+        }
+
         await this.refreshCameraList();
         this.startTelemetryLoop();
         this.initRadio();
@@ -152,15 +162,6 @@ class AdvancedCameraFeed {
         this.fovInput.value = Math.round(cam.currentFov || 60);
         this.metaName.innerText = `SENSOR: ${cam.name.toUpperCase()}`;
 
-        // Initialize General Signal Link (Singleton) if not already created
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const streamUrl = `${protocol}//${window.location.host}/stream`;
-        
-        if (!this.signalLink) {
-            this.signalLink = new TelemachusSignalLink(streamUrl, this);
-            this.signalLink.connect();
-        }
-
         // Initialize isolated Video Consumer
         this.cameraReceiver = new CameraReceiver(this.signalLink, this.cameraFeed, this);
         this.cameraReceiver.start(cam.name);
@@ -223,7 +224,7 @@ class AdvancedCameraFeed {
             const now = Date.now();
             // Signal Loss Check
             if (now - this.lastFrameTime > 2500) {
-                if (this.cameraReceiver && this.cameraReceiver.buffer.buffer.length > 5) {
+                if (this.cameraReceiver && this.cameraReceiver.sync.queue.length > 5) {
                     this.updateStatus('loading', 'BUFFERING/SYNCING...');
                 } else {
                     this.updateStatus('error', 'NO SIGNAL');

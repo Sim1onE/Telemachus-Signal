@@ -15,7 +15,7 @@ class CameraReceiver {
         }
 
         // The isolated time-buffer given to this specific receiver
-        this.buffer = new DownlinkSynchronizer();
+        this.sync = new DownlinkSynchronizer();
         this.isRunning = false;
 
         // Subscribe to Type 0 (Video) packets flowing out of the main Hub
@@ -33,11 +33,11 @@ class CameraReceiver {
         this.isRunning = false;
         
         // Clean up memory
-        this.buffer.buffer.forEach(f => {
+        this.sync.queue.forEach(f => {
             if (f.payload.bitmap && f.payload.bitmap.close) f.payload.bitmap.close();
         });
         
-        this.buffer.clear();
+        this.sync.clear();
     }
 
     // Fired instantly when the hub reads the 34-byte header
@@ -45,7 +45,7 @@ class CameraReceiver {
         if (!this.isRunning) return;
 
         // Skip the 34-byte header, read the JPEG
-        const jpgBytes = new Uint8Array(rawData, 34);
+        const jpgBytes = new Uint8Array(rawData, StreamConstants.HEADER_SIZE);
         const blob = new Blob([jpgBytes], { type: 'image/jpeg' });
 
         try {
@@ -53,7 +53,7 @@ class CameraReceiver {
              const bitmap = await createImageBitmap(blob);
              
              // Queue the frame in the synchronizer for delayed playback
-             this.buffer.pushPacket(
+             this.sync.pushPacket(
                  metadata.ut, metadata.warp, metadata.delay, 
                  metadata.fov, metadata.quality, 
                  { bitmap }
@@ -66,7 +66,7 @@ class CameraReceiver {
     playbackLoop() {
         if (!this.isRunning) return;
 
-        if (this.datalink && this.buffer.buffer.length > 0) {
+        if (this.datalink && this.sync.queue.length > 0) {
             
             // 1. Calculate Master Clock
             const universalTime = this.datalink.get ? this.datalink.get('t.universalTime') : Date.now();
@@ -78,7 +78,7 @@ class CameraReceiver {
             const delayedTimecode = universalTime - currentDelay;
 
             // 4. Extract all frames that are older than our target presentation moment
-            const expiredFrames = this.buffer.popReady(delayedTimecode);
+            const expiredFrames = this.sync.popReady(delayedTimecode);
             
             // ---------------------------------------------------------------------
             // DYNAMIC BURST CATCH-UP LOGIC
@@ -93,7 +93,7 @@ class CameraReceiver {
             // Return surplus frames back to the top of the queue if the burst is too large
             if (expiredFrames.length > burstLimit) {
                  const surplus = expiredFrames.slice(burstLimit);
-                 this.buffer.buffer.unshift(...surplus);
+                 this.sync.queue.unshift(...surplus);
             }
 
             for(let i=0; i < drawCount; i++) {

@@ -6,6 +6,10 @@ const PacketType = {
     COMMAND_UPLINK: 3
 };
 
+const StreamConstants = {
+    HEADER_SIZE: 34
+};
+
 /**
  * Reusable buffer that holds chronological data (Video frames, Audio PCM).
  * The DownlinkSynchronizer does not care about what data is inside it.
@@ -13,14 +17,14 @@ const PacketType = {
  */
 class DownlinkSynchronizer {
     constructor() {
-        this.buffer = [];
+        this.queue = [];
     }
 
     pushPacket(ut, warp, delay, fov, quality, payload) {
-        this.buffer.push({ ut, warp, delay, fov, quality, payload });
+        this.queue.push({ ut, warp, delay, fov, quality, payload });
         
         // Ensure chronological order in case of weird network packet arrival
-        this.buffer.sort((a, b) => a.ut - b.ut);
+        this.queue.sort((a, b) => a.ut - b.ut);
     }
 
     // Dynamic Catch-Up Method
@@ -31,14 +35,14 @@ class DownlinkSynchronizer {
         // Extract all packets older than or equal to the current master timecode.
         // If the signal delay just dropped instantly, masterTimecode jumps forward,
         // and this loop will return dozens of packets at once.
-        while (this.buffer.length > 0 && this.buffer[0].ut <= masterTimecode) {
-            readyPackets.push(this.buffer.shift());
+        while (this.queue.length > 0 && this.queue[0].ut <= masterTimecode) {
+            readyPackets.push(this.queue.shift());
         }
         return readyPackets;
     }
 
     clear() {
-        this.buffer = [];
+        this.queue = [];
     }
 }
 
@@ -198,6 +202,7 @@ class TelemachusSignalLink {
 // Ensure modules attach to the window in vanilla JS
 if (typeof window !== 'undefined') {
     window.PacketType = PacketType;
+    window.StreamConstants = StreamConstants;
     window.DownlinkSynchronizer = DownlinkSynchronizer;
     window.UplinkSynchronizer = UplinkSynchronizer;
     window.TelemachusSignalLink = TelemachusSignalLink;
