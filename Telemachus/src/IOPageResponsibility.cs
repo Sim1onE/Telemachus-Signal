@@ -101,7 +101,7 @@ namespace Telemachus
             {
                 [".html"] = new HTMLResponseContentType { contentType = HTMLContentType.TextContent, mimeType = "text/html" },
                 [".css"] = new HTMLResponseContentType { contentType = HTMLContentType.TextContent, mimeType = "text/css" },
-                [".js"] = new HTMLResponseContentType { contentType = HTMLContentType.TextContent, mimeType = "application/x-javascript" },
+                [".js"] = new HTMLResponseContentType { contentType = HTMLContentType.TextContent, mimeType = "application/javascript" },
                 [".jpg"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/jpeg" },
                 [".jpeg"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/jpeg" },
                 [".png"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/png" },

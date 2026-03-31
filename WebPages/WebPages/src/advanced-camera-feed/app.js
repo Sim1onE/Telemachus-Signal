@@ -348,13 +348,13 @@ class AdvancedCameraFeed {
                     const s = Math.max(-1, Math.min(1, input[i]));
                     pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 }
-                
+
                 if (this.radioWs.readyState === WebSocket.OPEN) {
                     this.radioWs.send(pcm.buffer);
                 }
             };
-        } catch (err) { 
-            console.error("Mic error:", err); 
+        } catch (err) {
+            console.error("Mic error:", err);
             // In case of error (like user denied permission), we reset the button
             setTimeout(() => this.stopTransmission(), 500);
         }
