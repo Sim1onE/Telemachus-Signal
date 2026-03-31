@@ -12,6 +12,9 @@ namespace Telemachus.CameraSnapshots
         public bool didRender;
         public byte[] imageBytes = null;
         public long lastFrameId = 0;
+        public double lastFrameUT = 0;
+        public long lastSentFrameId = -1;
+        public byte[] lastSentBytes = null;
         public volatile bool mutex = false;
         public int renderOffsetFactor = 0;
         public int lastRequestTick = Environment.TickCount - 6000; // Force immediate render on first check
@@ -165,6 +168,7 @@ namespace Telemachus.CameraSnapshots
             // Adjust JPEG quality based on signal (very low for bad signal)
             int jpgQuality = (int)Mathf.Lerp(2f, 85f, (float)signal);
             this.imageBytes = texture.EncodeToJPG(jpgQuality);
+            this.lastFrameUT = Planetarium.fetch != null ? Planetarium.GetUniversalTime() : 0;
             this.didRender = true;
             this.lastFrameId++;
 

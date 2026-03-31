@@ -18,6 +18,7 @@ namespace Telemachus
 
         public static GameObject instance;
         private DelayedAPIRunner delayedAPIRunner = new();
+        private MainThreadDispatcher mainThreadDispatcher;
 
         #endregion
 
@@ -81,6 +82,7 @@ namespace Telemachus
 
                     // Create the websocket server and attach to the web server
                     webServer.AddWebSocketService("/datalink", () => new KSPWebSocketService(apiInstance, rateTracker));
+                    webServer.AddWebSocketService("/stream", () => new KSPUnifiedStreamService(rateTracker));
 
                     // Finally, start serving requests!
                     try
@@ -211,6 +213,7 @@ namespace Telemachus
 
             LookForModsToInject();
             DontDestroyOnLoad(this);
+            mainThreadDispatcher = gameObject.AddComponent<MainThreadDispatcher>();
             startDataLink();
         }
 
@@ -233,6 +236,11 @@ namespace Telemachus
                     {
                         client.SendDataUpdate();
                     }
+                }
+
+                foreach (var client in webServer.WebSocketServices["/stream"].Sessions.Sessions.OfType<KSPUnifiedStreamService>())
+                {
+                    client.ProcessUpdate();
                 }
             }
             else

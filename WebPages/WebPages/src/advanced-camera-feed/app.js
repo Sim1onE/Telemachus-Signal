@@ -10,8 +10,12 @@ class AdvancedCameraFeed {
         this.lastRemoteUt = 0;
         this.lastFovUpdateTick = 0;
         this.fovUpdateTimeout = null;
-        this.isUpdatingFov = false;
-        this.fovAbortController = null;
+
+        // Radio/Audio state
+        this.audioCtx = null;
+        this.micStream = null;
+        this.micProcessor = null;
+        this.isTransmitting = false;
 
         // UI Elements
         this.cameraList = document.getElementById('camera-list');
@@ -19,25 +23,25 @@ class AdvancedCameraFeed {
         this.fovSlider = document.getElementById('fov-slider');
         this.fovInput = document.getElementById('fov-input');
         this.resetZoomBtn = document.getElementById('reset-zoom-btn');
+        this.radioBtn = document.getElementById('radio-ptt-btn');
+        this.radioStatusUI = document.getElementById('radio-status');
+        this.radioStatusText = this.radioStatusUI?.querySelector('.status-text');
 
         // Metadata elements
         this.metaName = document.getElementById('metadata-camera-name');
         this.metaRes = document.getElementById('metadata-resolution');
         this.metaFov = document.getElementById('metadata-fov');
-        this.rulerScale = document.getElementById('ruler-scale');
 
         // Telemetry elements
         this.telAlt = document.getElementById('tel-alt');
         this.telVel = document.getElementById('tel-vel');
         this.telMet = document.getElementById('tel-met');
+        this.telDelay = document.getElementById('tel-delay');
+        this.telSignal = document.getElementById('tel-signal');
+        
         this.statusOverlay = document.getElementById('viewport-overlay');
         this.statusText = document.getElementById('status-text');
         this.statusSpinner = document.getElementById('status-spinner');
-
-        this.telDelay = document.getElementById('tel-delay');
-
-        this.telSignal = document.getElementById('tel-signal');
-        this.signalBars = document.querySelector('.signal-bars');
         this.glitchOverlay = document.getElementById('glitch-overlay');
 
         this.lastFrameTime = 0;
@@ -50,7 +54,6 @@ class AdvancedCameraFeed {
         this.bindEvents();
         await this.refreshCameraList();
         this.startTelemetryLoop();
-        this.startImageLoop();
 
         // Select first camera if available
         if (this.cameras.length > 0) {
@@ -59,7 +62,7 @@ class AdvancedCameraFeed {
             this.updateStatus('error', 'NO CAMERAS DETECTED');
         }
 
-        // Start signal watchdog
+        // Start signal watchdog (10Hz)
         this.startSignalWatchdog();
     }
 
@@ -68,67 +71,36 @@ class AdvancedCameraFeed {
             const min = parseFloat(this.fovSlider.min);
             const max = parseFloat(this.fovSlider.max);
             const sliderVal = parseFloat(e.target.value);
-
-            // Invert the mapping: Max Slider = Min FOV (Zoom In)
             this.currentFov = (max + min) - sliderVal;
             this.fovInput.value = Math.round(this.currentFov);
-
-            this.forceImmediateUpdate();
-        });
-
-        this.fovInput.addEventListener('change', (e) => {
-            let val = parseFloat(e.target.value);
-            if (!isNaN(val)) {
-                const min = parseFloat(this.fovSlider.min);
-                const max = parseFloat(this.fovSlider.max);
-                const step = 5;
-
-                // Snap to 5 degree increments
-                val = Math.round(val / step) * step;
-                val = Math.max(min, Math.min(max, val));
-
-                this.currentFov = val;
-                this.fovInput.value = val;
-                // Update slider using inverse mapping
-                this.fovSlider.value = (max + min) - val;
-                this.forceImmediateUpdate();
-            }
+            this.forceFovUpdate();
         });
 
         this.resetZoomBtn.addEventListener('click', () => {
             if (this.selectedCamera) {
                 const min = parseFloat(this.fovSlider.min);
                 const max = parseFloat(this.fovSlider.max);
-                const step = 5;
-
-                let def = this.selectedCamera.currentFov || 60;
-                // Snap default to grid
-                def = Math.round(def / step) * step;
-
+                const def = this.selectedCamera.currentFov || 60;
                 this.currentFov = def;
-                this.fovSlider.value = (max + min) - def; // Inverted mapping
-                this.fovInput.value = def;
-                this.forceImmediateUpdate();
+                this.fovSlider.value = (max + min) - def;
+                this.fovInput.value = Math.round(this.currentFov);
+                this.forceFovUpdate();
             }
         });
+
+        if (this.radioBtn) {
+            this.radioBtn.addEventListener('mousedown', () => this.startTransmission());
+            this.radioBtn.addEventListener('mouseup', () => this.stopTransmission());
+            this.radioBtn.addEventListener('mouseleave', () => this.stopTransmission());
+        }
     }
 
     async refreshCameraList() {
         try {
             const response = await fetch(`${this.baseUrl}/telemachus/cameras`);
-            const data = await response.json();
-            this.cameras = data;
+            this.cameras = await response.json();
             this.renderCameraList();
-
-            // Auto-select first camera if nothing is selected yet and cameras are available
-            if (!this.selectedCamera && this.cameras.length > 0) {
-                this.selectCamera(this.cameras[0]);
-            }
-        } catch (err) {
-            console.error('Failed to fetch camera list:', err);
-        }
-
-        // Refresh list every 5 seconds to detect new cameras
+        } catch (err) { console.error('Failed to fetch cameras:', err); }
         setTimeout(() => this.refreshCameraList(), 5000);
     }
 
@@ -143,153 +115,71 @@ class AdvancedCameraFeed {
         });
     }
 
-    async selectCamera(cam) {
-        if (this.cameraStream) {
-            this.cameraStream.stop();
-        }
-
-        // Fresh Fetch: Get the absolute latest metadata for THIS specific camera
-        // before initializing the slider to prevent any "fov jump" due to stale data.
-        try {
-            const response = await fetch(`${this.baseUrl}/telemachus/cameras`);
-            const allCameras = await response.json();
-            const freshCam = allCameras.find(c => c.name === cam.name);
-            if (freshCam) {
-                cam = freshCam; // Use updated metadata (especially currentFov)
-            }
-        } catch (err) {
-            console.warn("Failed to perform fresh metadata fetch, falling back to cached state.", err);
-        }
-
+    selectCamera(cam) {
+        if (this.cameraStream) this.cameraStream.stop();
         this.selectedCamera = cam;
         this.updateStatus('loading', `CONNECTING: ${cam.name}...`);
-        this.currentFov = null; // Reset zoom state when switching
-
-        // Update UI limits
-        const min = cam.fovMin || 1;
-        const max = cam.fovMax || 120;
-        const current = cam.currentFov || 60;
-
-        this.currentFov = current; // Sincronizza lo stato logico con quello reale del sensore
-
-        this.fovSlider.min = min;
-        this.fovSlider.max = max;
-        // Set slider position using inverted mapping
-        this.fovSlider.value = (max + min) - current;
-        this.fovInput.value = Math.round(current);
-
-        // Regerate the ruler markers based on sensor limits
-        this.generateRuler(min, max);
-
+        
+        // UI Defaults
+        this.fovSlider.min = cam.fovMin || 1;
+        this.fovSlider.max = cam.fovMax || 120;
+        this.fovInput.value = Math.round(cam.currentFov || 60);
         this.metaName.innerText = `SENSOR: ${cam.name.toUpperCase()}`;
 
-        // Initialize and start the stream
-        if (this.cameraStream) {
-            console.log("Stopping previous stream...");
-            this.cameraStream.stop();
-        }
-
-        // Construct the stream URL from the metadata URL
-        const streamUrl = `${this.baseUrl}/telemachus/cameras/stream/${cam.name}`;
-        this.cameraStream = new TelemachusCameraStream(streamUrl, this.cameraFeed, this);
+        // Initialize Specialized WebSocket Stream Library
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const streamUrl = `${protocol}//${window.location.host}/stream`;
+        
+        this.cameraStream = new TelemachusCameraStream(streamUrl, cam.name, this.cameraFeed, this);
         this.cameraStream.start();
 
-        // Highlight active
-        document.querySelectorAll('.camera-item').forEach(el => el.classList.remove('active'));
         this.renderCameraList();
     }
 
-    startImageLoop() {
-        // We no longer need a manual setInterval loop. 
-        // Rendering is handled by the TelemachusCameraStream library.
-    }
-
-    // Proxy for the stream library to read latest telemetry
+    // Proxy for the stream library to read latest telemetry (Original Logic)
     get(key) {
         if (key === 't.universalTime') {
             if (!this.lastUtPollTime) return this.lastRemoteUt;
+            // Interpolazione basata sul tempo locale trascorso dal poll e il warp rate
             const elapsedSeconds = (performance.now() - this.lastUtPollTime) / 1000;
             const warpRate = this.telemetryData.warp || 1;
             return this.lastRemoteUt + (elapsedSeconds * warpRate);
         }
-        if (key === 'comm.signalDelay') {
-            // UI Realism: Use the 1Hz telemetry poll delay for display.
-            // Note: The Video Engine uses its own 'latestNetworkDelay' internally.
-            return this.telemetryData.delay || 0;
-        }
+        if (key === 'comm.signalDelay') return this.telemetryData.delay || 0;
         return this.telemetryData[key];
     }
 
     // Precise sync callback from the video stream metadata
     syncFromStream(ut, warp, delay, fov, signal) {
-        // Only update if we see a significant jump or a warp change
+        // We NO LONGER update lastRemoteUt here. 
+        // The master clock must only be driven by the 1Hz telemetry poll
+        // to avoid double-delay and clock jitter.
+        
         if (warp !== undefined) this.telemetryData.warp = warp;
 
-        // Metadata UI updates (FOV, Signal) remain instant
-        if (fov !== null && fov > 0 && this.metaFov) {
-            this.metaFov.innerText = `FOV: ${fov.toFixed(1)}°`;
-        }
-        if (signal !== undefined) {
-            this.updateSignalUI(signal);
-        }
+        // Metadata UI updates (Instant)
+        if (fov && this.metaFov) this.metaFov.innerText = `FOV: ${fov.toFixed(1)}°`;
+        if (signal !== undefined) this.updateSignalUI(signal);
 
-        // Signal received: Hide overlay
         this.lastFrameTime = Date.now();
-        if (this.statusOverlay.style.display !== 'none') {
-            this.updateStatus('online');
-        }
+        if (this.statusOverlay.style.display !== 'none') this.updateStatus('online');
     }
 
     updateSignalUI(signal) {
         if (this.telSignal) this.telSignal.innerText = `${signal}%`;
-
-        // Update bars
         const numBars = Math.ceil(signal / 25);
         for (let i = 1; i <= 4; i++) {
             const bar = document.getElementById(`signal-bar-${i}`);
-            if (bar) {
-                if (i <= numBars) bar.classList.add('active');
-                else bar.classList.remove('active');
-            }
+            if (bar) bar.classList.toggle('active', i <= numBars);
         }
-
-        // Update bar colors and glitch
-        if (this.signalBars) {
-            this.signalBars.classList.toggle('low', signal < 40 && signal >= 15);
-            this.signalBars.classList.toggle('critical', signal < 15);
-        }
-
-        if (this.glitchOverlay) {
-            // Activate glitch if signal is very low
-            this.glitchOverlay.classList.toggle('active', signal < 15);
-        }
-
-        // Update resolution metadata based on scaling
+        if (this.glitchOverlay) this.glitchOverlay.classList.toggle('active', signal < 15);
+        
+        // Resolution label logic
         if (this.metaRes) {
             let res = 300;
             if (signal < 8) res = 75;
             else if (signal < 25) res = 150;
             this.metaRes.innerText = `RES: ${res}x${res}px`;
-        }
-    }
-
-    updateStatus(type, message) {
-        if (!this.statusOverlay) return;
-
-        if (type === 'online') {
-            this.statusOverlay.style.display = 'none';
-            return;
-        }
-
-        this.statusOverlay.style.display = 'flex';
-        this.statusText.innerText = (message || '').toUpperCase();
-
-        if (type === 'loading') {
-            this.statusSpinner.style.display = 'block';
-            this.statusText.classList.remove('error');
-        } else if (type === 'error') {
-            this.statusSpinner.style.display = 'none';
-            this.statusText.classList.add('error');
         }
     }
 
@@ -299,111 +189,30 @@ class AdvancedCameraFeed {
             if (!this.selectedCamera) return;
 
             const now = Date.now();
+            // Signal Loss Check
             if (now - this.lastFrameTime > 2500) {
-                // Se non disegnamo frame, controlliamo se il buffer ha dati (sta caricando o è in delay)
                 if (this.cameraStream && this.cameraStream.frameBuffer.length > 5) {
                     this.updateStatus('loading', 'BUFFERING/SYNCING...');
                 } else {
                     this.updateStatus('error', 'NO SIGNAL');
                 }
             }
-
-            // High-frequency UI update for MET clock smoothness
             this.updateTelemetryUI();
-        }, 100); // 10Hz UI refresh for clock smoothness
+        }, 100);
     }
 
     updateTelemetryUI() {
         const ut = this.get('t.universalTime');
         const delay = this.get('comm.signalDelay');
 
-        // Update Delay UI
-        if (this.telDelay) {
-            this.telDelay.innerText = `${delay.toFixed(1)}S`;
-        }
+        if (this.telDelay) this.telDelay.innerText = `${delay.toFixed(1)}S`;
+        
         if (ut && this.telMet && this.telemetryData.met) {
-            // Calculate current MET based on UT drift from the first poll
+            // Sincronizzazione dell'orologio MET basata sull'UT interpolato
             const metOffset = ut - (this.telemetryData.ut || ut);
             const currentMet = this.telemetryData.met + metOffset;
             this.telMet.innerText = `T+ ${this.formatMET(currentMet)}`;
         }
-    }
-
-    forceImmediateUpdate() {
-        if (!this.selectedCamera) return;
-
-        const now = performance.now();
-        const minInterval = 33; // 30 FPS ceiling
-
-        // If we are moving too fast, schedule a single update for the "cooldown"
-        if (now - this.lastFovUpdateTick < minInterval) {
-            if (!this.fovUpdateTimeout) {
-                this.fovUpdateTimeout = setTimeout(() => {
-                    this.fovUpdateTimeout = null;
-                    this.forceImmediateUpdate();
-                }, minInterval);
-            }
-            return;
-        }
-
-        // Abort the previous request if it's still hanging in the network queue
-        if (this.fovAbortController) {
-            this.fovAbortController.abort();
-        }
-
-        this.fovAbortController = new AbortController();
-        this.lastFovUpdateTick = now;
-
-        const payload = { fov: this.currentFov };
-
-        fetch(this.selectedCamera.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            signal: this.fovAbortController.signal
-        })
-            .then(() => {
-                this.fovAbortController = null;
-            })
-            .catch(err => {
-                if (err.name === 'AbortError') return; // Expected
-                console.error("Failed to sync FOV via POST:", err);
-                this.fovAbortController = null;
-            });
-    }
-
-    generateRuler(min, max) {
-        if (!this.rulerScale) return;
-
-        this.rulerScale.innerHTML = '';
-        const step = 5;
-
-        // Collect all values to mark: min, max, and multiples of 5 in between
-        let values = [min];
-
-        // Find first multiple of 5 > min
-        let firstStep = Math.ceil((min + 0.1) / step) * step;
-        for (let v = firstStep; v < max; v += step) {
-            values.push(v);
-        }
-
-        // Only push max if it's not already added (e.g. max is multiple of 5)
-        if (max > values[values.length - 1]) {
-            values.push(max);
-        }
-
-        values.forEach(val => {
-            const span = document.createElement('span');
-            // Calculate exact percentage position on the track
-            const percent = ((val - min) / (max - min)) * 100;
-            span.style.left = `${percent}%`;
-
-            // Check if it's a "major" tick (every 15 degrees)
-            if (val % 15 === 0) {
-                span.classList.add('major');
-            }
-            this.rulerScale.appendChild(span);
-        });
     }
 
     async startTelemetryLoop() {
@@ -411,52 +220,102 @@ class AdvancedCameraFeed {
             try {
                 const response = await fetch(`${this.baseUrl}/telemachus/datalink?alt=v.altitude&vel=v.orbitalVelocity&met=v.missionTime&ut=t.universalTime&delay=comm.signalDelay&warp=t.currentRate`);
                 const data = await response.json();
-
-                // Anti-Time-Travel: only update if data is more recent than what we have
-                // This prevents the 1Hz telemetry from overriding the 30Hz video sync
-                if (data.ut > this.lastRemoteUt) {
+                
+                // Anti-Time-Travel & Restart Detection:
+                // If the remote UT is much lower than our last recorded UT, 
+                // it means the game was restarted or a save was loaded.
+                if (data.ut > this.lastRemoteUt || (this.lastRemoteUt - data.ut) > 1.0) {
                     this.lastRemoteUt = data.ut;
                     this.lastUtPollTime = performance.now();
                 }
-
-                // Merge telemetry data instead of overwriting everything
                 this.telemetryData = { ...this.telemetryData, ...data };
 
-                // Display data update
-                if (data.alt) {
-                    const altKm = (data.alt / 1000).toFixed(2);
-                    this.telAlt.innerText = `${altKm} KM`;
-                }
-                if (data.vel) {
-                    this.telVel.innerText = `${Math.round(data.vel)} M/S`;
-                }
-
-                // Note: telMet is now updated in a high-frequency loop elsewhere (updateTelemetryUI)
-                // for absolute smoothness.
-
-
-            } catch (err) {
-                // Silently fail telemetry if not in flight
-            }
+                if (data.alt) this.telAlt.innerText = `${(data.alt / 1000).toFixed(2)} KM`;
+                if (data.vel) this.telVel.innerText = `${Math.round(data.vel)} M/S`;
+            } catch (err) { }
         };
-
         setInterval(fetchTelemetry, 1000);
-        fetchTelemetry(); // Initial fetch
+        fetchTelemetry();
+    }
+
+    forceFovUpdate() {
+        if (!this.selectedCamera) return;
+        const now = performance.now();
+        if (now - this.lastFovUpdateTick < 100) return; // Debounce
+        this.lastFovUpdateTick = now;
+
+        fetch(this.selectedCamera.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fov: this.currentFov })
+        }).catch(e => console.error("FOV Update Error", e));
+    }
+
+    updateStatus(type, msg) {
+        if (!this.statusOverlay) return;
+        if (type === 'online') { this.statusOverlay.style.display = 'none'; return; }
+        this.statusOverlay.style.display = 'flex';
+        this.statusText.innerText = (msg || '').toUpperCase();
+        this.statusSpinner.style.display = type === 'loading' ? 'block' : 'none';
+        this.statusText.classList.toggle('error', type === 'error');
+    }
+
+    // --- RADIO TRANSMISSION (Simplified and Integrated) ---
+    async startTransmission() {
+        if (!this.cameraStream?.ws || this.cameraStream.ws.readyState !== WebSocket.OPEN) return;
+        try {
+            this.isTransmitting = true;
+            this.radioBtn.classList.add('active');
+            if (this.radioStatusUI) {
+                this.radioStatusUI.classList.add('transmitting');
+                this.radioStatusText.innerText = 'TRANSMITTING...';
+            }
+
+            this.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 22050 });
+            this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const source = this.audioCtx.createMediaStreamSource(this.micStream);
+            this.micProcessor = this.audioCtx.createScriptProcessor(2048, 1, 1);
+
+            source.connect(this.micProcessor);
+            this.micProcessor.connect(this.audioCtx.destination);
+
+            this.micProcessor.onaudioprocess = (e) => {
+                if (!this.isTransmitting) return;
+                const input = e.inputBuffer.getChannelData(0);
+                const pcm = new Int16Array(input.length);
+                for (let i = 0; i < input.length; i++) {
+                    const s = Math.max(-1, Math.min(1, input[i]));
+                    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+                const packet = new Uint8Array(1 + pcm.buffer.byteLength);
+                packet[0] = 1; // Type 1: Audio Uplink
+                packet.set(new Uint8Array(pcm.buffer), 1);
+                this.cameraStream.ws.send(packet);
+            };
+        } catch (err) { console.error("Mic error:", err); this.stopTransmission(); }
+    }
+
+    stopTransmission() {
+        this.isTransmitting = false;
+        if (this.radioBtn) this.radioBtn.classList.remove('active');
+        if (this.radioStatusUI) {
+            this.radioStatusUI.classList.remove('transmitting');
+            this.radioStatusText.innerText = 'STANDBY';
+        }
+        if (this.micProcessor) this.micProcessor.disconnect();
+        if (this.micStream) this.micStream.getTracks().forEach(t => t.stop());
+        if (this.audioCtx) this.audioCtx.close();
+        this.micProcessor = null;
     }
 
     formatMET(seconds) {
-        const days = Math.floor(seconds / (3600 * 24));
-        seconds -= days * (3600 * 24);
-        const hrs = Math.floor(seconds / 3600);
-        seconds -= hrs * 3600;
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-
-        return `${days}D ${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        const d = Math.floor(seconds / (3600 * 24));
+        seconds -= d * (3600 * 24);
+        const h = Math.floor(seconds / 3600);
+        seconds -= h * 3600;
+        const m = Math.floor(seconds / 60);
+        const sec = Math.floor(seconds % 60);
+        return `${d}D ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
     }
 }
-
-// Initialize on Load
-document.addEventListener('DOMContentLoaded', () => {
-    window.app = new AdvancedCameraFeed();
-});
+document.addEventListener('DOMContentLoaded', () => { window.app = new AdvancedCameraFeed(); });

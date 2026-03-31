@@ -134,6 +134,73 @@ main {
     list-style: none;
 }
 
+/* Radio/Comms Panel */
+.comms-panel {
+    padding: 20px 15px;
+    background: rgba(0, 0, 0, 0.4);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.radio-btn {
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid var(--accent-color);
+    color: var(--accent-color);
+    padding: 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    transition: var(--transition);
+    text-transform: uppercase;
+    font-size: 0.9rem;
+}
+
+.radio-btn:hover {
+    background: var(--accent-glow);
+    box-shadow: 0 0 15px var(--accent-glow);
+}
+
+.radio-btn.active {
+    background: #ff4c4c;
+    color: white;
+    border-color: #ff4c4c;
+    box-shadow: 0 0 20px rgba(255, 76, 76, 0.5);
+}
+
+.radio-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-family: monospace;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    background: #333;
+    border-radius: 50%;
+    transition: var(--transition);
+}
+
+.radio-status.online .status-dot {
+    background: #00ff00;
+    box-shadow: 0 0 8px #00ff00;
+}
+
+.radio-status.transmitting .status-dot {
+    background: #ff0000;
+    animation: blink 0.5s infinite;
+}
+
 .camera-item {
     padding: 12px 15px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);

@@ -3,22 +3,18 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Linq;
-using System.Threading;
 using System.Reflection;
 using WebSocketSharp.Net;
-using WebSocketSharp;
+using WebSocketSharp; // NECESSARIO per i metodi di estensione come WriteContent
 using UnityEngine;
-using System.Collections;
 using Telemachus.CameraSnapshots;
 using System.Text.RegularExpressions;
 using System.Globalization;
-using System.Collections.Specialized;
 
 namespace Telemachus
 {
     public class CameraResponsibility : IHTTPRequestResponder
     {
-        /// The page prefix that this class handles
         public const String PAGE_PREFIX = "/telemachus/cameras";
         public const String CAMERA_LIST_ENDPOINT = PAGE_PREFIX;
         public const String NGROK_ORIGINAL_HOST_HEADER = "X-Original-Host";
@@ -32,14 +28,8 @@ namespace Telemachus
             }
         }
 
-        /// The KSP API to use to access variable data
         private KSPAPIBase kspAPI = null;
-
         private UpLinkDownLinkRate dataRates = null;
-
-
-
-        #region Initialisation
 
         public CameraResponsibility(KSPAPIBase kspAPI, UpLinkDownLinkRate rateTracker)
         {
@@ -47,26 +37,21 @@ namespace Telemachus
             dataRates = rateTracker;
         }
 
-        #endregion
-
         public string cameraURL(HttpListenerRequest request, CameraCapture camera)
         {
-            String hostname = "";
-            if (request.Headers.Contains(NGROK_ORIGINAL_HOST_HEADER))
-            {
-                hostname = request.Headers[NGROK_ORIGINAL_HOST_HEADER];
-            }
-            else
-            {
-                hostname = request.UserHostName;
-            }
+            // Controllo robusto per l'header dell'host
+            String hostname = request.Headers[NGROK_ORIGINAL_HOST_HEADER] != null 
+                ? request.Headers[NGROK_ORIGINAL_HOST_HEADER] 
+                : request.UserHostName;
 
             return request.Url.Scheme + "://" + hostname + PAGE_PREFIX + "/" + Uri.EscapeDataString(camera.cameraManagerName());
         }
 
         public bool processCameraManagerIndex(HttpListenerRequest request, HttpListenerResponse response)
         {
-            CameraCaptureManager.classedInstance.EnsureFlightCamera();
+            if (CameraCaptureManager.classedInstance != null) {
+                CameraCaptureManager.classedInstance.EnsureFlightCamera();
+            }
 
             var jsonObject = new List<Dictionary<string, object>>();
 
@@ -79,15 +64,13 @@ namespace Telemachus
                 jsonData["fovMin"] = cameraKVP.Value.minFOV;
                 jsonData["fovMax"] = cameraKVP.Value.maxFOV;
                 jsonData["currentFov"] = cameraKVP.Value.interpolatedFOV;
-
                 jsonObject.Add(jsonData);
             }
 
             byte[] jsonBytes = Encoding.UTF8.GetBytes(Json.Encode(jsonObject));
-
             response.ContentEncoding = Encoding.UTF8;
             response.ContentType = "application/json";
-            response.WriteContent(jsonBytes);
+            response.WriteContent(jsonBytes); // Ora rifunziona grazie a 'using WebSocketSharp'
             dataRates.SendDataToClient(jsonBytes.Length);
 
             return true;
@@ -96,13 +79,6 @@ namespace Telemachus
         public bool processCameraImageRequest(string cameraName, HttpListenerRequest request, HttpListenerResponse response)
         {
             cameraName = cameraName.ToLower();
-            bool isStream = false;
-
-            if (cameraName.StartsWith("stream/"))
-            {
-                isStream = true;
-                cameraName = cameraName.Substring(7); // remove "stream/"
-            }
 
             if (!CameraCaptureManager.classedInstance.cameras.ContainsKey(cameraName))
             {
@@ -112,7 +88,7 @@ namespace Telemachus
 
             CameraCapture camera = CameraCaptureManager.classedInstance.cameras[cameraName];
 
-            // Handle RESTful command updates (POST)
+            // Handle FOV Updates via POST
             if (request.HttpMethod == "POST")
             {
                 try {
@@ -127,119 +103,34 @@ namespace Telemachus
                             else camera.customFOV = Mathf.Clamp(fovVal, camera.minFOV, camera.maxFOV);
                         }
                     }
-                    response.StatusCode = 204; // No Content
+                    response.StatusCode = 204;
                     return true;
-                } catch (Exception ex) {
-                    PluginLogger.print("Error processing POST: " + ex.Message);
+                } catch (Exception) {
                     response.StatusCode = 400;
                     return true;
                 }
             }
 
-            // --- Legacy GET parameter handling ---
-            string fovQuery = request.QueryString["fov"];
-            if (fovQuery == null && request.Url.Query.Contains("fov="))
-            {
-                // Fallback physical extraction just in case
-                string q = request.Url.Query;
-                int idx = q.IndexOf("fov=") + 4;
-                int amp = q.IndexOf("&", idx);
-                fovQuery = amp > -1 ? q.Substring(idx, amp - idx) : q.Substring(idx);
-            }
-
-            if (fovQuery != null && float.TryParse(fovQuery, NumberStyles.Any, CultureInfo.InvariantCulture, out float fovValLegacy))
-            {
-                if (fovValLegacy < 0) camera.customFOV = -1f;
-                else camera.customFOV = Mathf.Clamp(fovValLegacy, camera.minFOV, camera.maxFOV);
-            }
-
-            // Update last request tick to keep renderer active
+            // Keep renderer active
             camera.lastRequestTick = Environment.TickCount;
 
-            if (isStream)
+            // Single Frame Polling (Legacy Support)
+            if (camera.didRender && camera.imageBytes != null)
             {
-                response.ContentType = "multipart/x-mixed-replace; boundary=--myboundary";
-                response.SendChunked = true;
+                response.ContentType = "image/jpeg";
+                response.AddHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+                response.AddHeader("Pragma", "no-cache");
+                response.AddHeader("Expires", "0");
 
-                try
-                {
-                    long sentFrameId = -1;
-                    while (true)
-                    {
-                        if (camera.didRender && camera.imageBytes != null)
-                        {
-                            // Optimization: Only send if a new frame was actually rendered
-                            if (camera.lastFrameId == sentFrameId)
-                            {
-                                System.Threading.Thread.Sleep(5); // Minimum sleep for responsiveness
-                                continue;
-                            }
+                double currentUT = HighLogic.LoadedSceneIsFlight && Planetarium.fetch != null ? Planetarium.GetUniversalTime() : 0;
+                response.AddHeader("X-KSP-UT", currentUT.ToString("F3", CultureInfo.InvariantCulture));
 
-                            sentFrameId = camera.lastFrameId;
-                            camera.lastRequestTick = Environment.TickCount;
-
-                            byte[] img = camera.imageBytes; 
-
-                            double currentUT = HighLogic.LoadedSceneIsFlight && Planetarium.fetch != null ? Planetarium.GetUniversalTime() : 0;
-                            double currentDelay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
-                            double currentWarp = TimeWarp.CurrentRate;
-                            double signalQuality = TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
-
-                            string header = "--myboundary\r\n" +
-                                            "Content-Type: image/jpeg\r\n" +
-                                            "X-KSP-UT: " + currentUT.ToString("F3", CultureInfo.InvariantCulture) + "\r\n" +
-                                            "X-KSP-Delay: " + currentDelay.ToString("F3", CultureInfo.InvariantCulture) + "\r\n" +
-                                            "X-KSP-Warp: " + currentWarp.ToString("F1", CultureInfo.InvariantCulture) + "\r\n" +
-                                            "X-KSP-FOV: " + camera.interpolatedFOV.ToString("F1", CultureInfo.InvariantCulture) + "\r\n" +
-                                            "X-KSP-Signal-Quality: " + (signalQuality * 100.0).ToString("F0", CultureInfo.InvariantCulture) + "\r\n" +
-                                            "Content-Length: " + img.Length + "\r\n\r\n";
-
-                            byte[] headerBytes = Encoding.UTF8.GetBytes(header);
-                            response.OutputStream.Write(headerBytes, 0, headerBytes.Length);
-                            response.OutputStream.Write(img, 0, img.Length);
-
-                            byte[] footerBytes = Encoding.UTF8.GetBytes("\r\n");
-                            response.OutputStream.Write(footerBytes, 0, footerBytes.Length);
-                            response.OutputStream.Flush();
-
-                            dataRates.SendDataToClient(headerBytes.Length + img.Length + footerBytes.Length);
-
-                            System.Threading.Thread.Sleep(1);
-                        }
-                        else
-                        {
-                            camera.lastRequestTick = Environment.TickCount;
-                            System.Threading.Thread.Sleep(100);
-                        }
-                    }
-                }
-                catch (Exception)
-                {
-                    // Client disconnected or stream closed
-                }
+                response.WriteContent(camera.imageBytes);
+                dataRates.SendDataToClient(camera.imageBytes.Length);
             }
             else
             {
-                if (camera.didRender && camera.imageBytes != null)
-                {
-                    response.ContentEncoding = Encoding.UTF8;
-                    response.ContentType = "image/jpeg";
-                    response.AddHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-                    response.AddHeader("Pragma", "no-cache");
-                    response.AddHeader("Expires", "0");
-
-                    double currentUT = HighLogic.LoadedSceneIsFlight && Planetarium.fetch != null ? Planetarium.GetUniversalTime() : 0;
-                    response.AddHeader("X-KSP-UT", currentUT.ToString("F3", CultureInfo.InvariantCulture));
-
-                    response.WriteContent(camera.imageBytes);
-                    dataRates.SendDataToClient(camera.imageBytes.Length);
-                }
-                else
-                {
-                    // Try to trigger a render even if not ready
-                    camera.lastRequestTick = Environment.TickCount;
-                    response.StatusCode = 503;
-                }
+                response.StatusCode = 503;
             }
 
             return true;
@@ -247,23 +138,15 @@ namespace Telemachus
 
         public bool process(HttpListenerRequest request, HttpListenerResponse response)
         {
-            //PluginLogger.debug(request.Url.AbsolutePath.TrimEnd('/'));
-            //PluginLogger.debug(String.Join(",", CameraCaptureManager.classedInstance.cameras.Keys.ToArray()));
-            //PluginLogger.debug("FLIGHT CAMERA: " + this.cameraCaptureTest);
             if (request.Url.AbsolutePath.TrimEnd('/').ToLower() == CAMERA_LIST_ENDPOINT)
             {
-                // Work out how big this request was
-                long byteCount = request.RawUrl.Length + request.ContentLength64;
-                // Don't count headers + request.Headers.AllKeys.Sum(x => x.Length + request.Headers[x].Length + 1);
-                dataRates.RecieveDataFromClient(Convert.ToInt32(byteCount));
-
+                dataRates.RecieveDataFromClient(request.RawUrl.Length + (int)request.ContentLength64);
                 return processCameraManagerIndex(request, response);
             }
             else if (cameraNameEndpointRegex.IsMatch(request.Url.AbsolutePath))
             {
                 Match match = cameraNameEndpointRegex.Match(request.Url.AbsolutePath);
                 string cameraName = Uri.UnescapeDataString(match.Groups[1].Value);
-                //PluginLogger.debug("GET CAMERA: " + cameraName);
                 return processCameraImageRequest(cameraName, request, response);
             }
 
