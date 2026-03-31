@@ -4,7 +4,8 @@ class AdvancedCameraFeed {
         this.currentFov = null;
         this.cameras = [];
         this.baseUrl = window.location.origin;
-        this.cameraStream = null;
+        this.signalLink = null;
+        this.cameraReceiver = null;
         this.telemetryData = {};
         this.lastUtPollTime = null;
         this.lastRemoteUt = 0;
@@ -141,7 +142,7 @@ class AdvancedCameraFeed {
     }
 
     selectCamera(cam) {
-        if (this.cameraStream) this.cameraStream.stop();
+        if (this.cameraReceiver) this.cameraReceiver.stop();
         this.selectedCamera = cam;
         this.updateStatus('loading', `CONNECTING: ${cam.name}...`);
 
@@ -151,12 +152,18 @@ class AdvancedCameraFeed {
         this.fovInput.value = Math.round(cam.currentFov || 60);
         this.metaName.innerText = `SENSOR: ${cam.name.toUpperCase()}`;
 
-        // Initialize Specialized WebSocket Stream Library
+        // Initialize General Signal Link (Singleton) if not already created
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const streamUrl = `${protocol}//${window.location.host}/stream`;
+        
+        if (!this.signalLink) {
+            this.signalLink = new TelemachusSignalLink(streamUrl, this);
+            this.signalLink.connect();
+        }
 
-        this.cameraStream = new TelemachusCameraStream(streamUrl, cam.name, this.cameraFeed, this);
-        this.cameraStream.start();
+        // Initialize isolated Video Consumer
+        this.cameraReceiver = new CameraReceiver(this.signalLink, this.cameraFeed, this);
+        this.cameraReceiver.start(cam.name);
 
         this.renderCameraList();
     }
@@ -216,7 +223,7 @@ class AdvancedCameraFeed {
             const now = Date.now();
             // Signal Loss Check
             if (now - this.lastFrameTime > 2500) {
-                if (this.cameraStream && this.cameraStream.frameBuffer.length > 5) {
+                if (this.cameraReceiver && this.cameraReceiver.buffer.buffer.length > 5) {
                     this.updateStatus('loading', 'BUFFERING/SYNCING...');
                 } else {
                     this.updateStatus('error', 'NO SIGNAL');
@@ -264,7 +271,7 @@ class AdvancedCameraFeed {
     }
 
     forceFovUpdate() {
-        if (!this.selectedCamera || !this.cameraStream) return;
+        if (!this.selectedCamera || !this.signalLink) return;
 
         const now = performance.now();
         const minInterval = 33; // 30 FPS ceiling
@@ -286,7 +293,7 @@ class AdvancedCameraFeed {
         }
 
         this.lastFovUpdateTick = now;
-        this.cameraStream.sendCameraCommand({ fov: this.currentFov });
+        this.signalLink.sendSystemCommand({ camera: this.selectedCamera.name, action: "fov", fov: this.currentFov });
     }
 
     updateStatus(type, msg) {

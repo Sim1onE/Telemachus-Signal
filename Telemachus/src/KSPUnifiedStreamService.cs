@@ -10,6 +10,9 @@ namespace Telemachus
 {
     public class KSPUnifiedStreamService : WebSocketBehavior
     {
+        public enum PacketType : byte { VideoDownlink = 0, AudioUplink = 1, AudioDownlink = 2, CommandUplink = 3 }
+        public const int HEADER_SIZE = 34;
+
         private UpLinkDownLinkRate dataRates;
         private AudioSource audioSource;
         private GameObject audioHost;
@@ -51,7 +54,7 @@ namespace Telemachus
             if (e.IsBinary)
             {
                 dataRates.RecieveDataFromClient(e.RawData.Length);
-                if (e.RawData.Length > 0 && e.RawData[0] == 1) // Audio
+                if (e.RawData.Length > 0 && e.RawData[0] == (byte)PacketType.AudioUplink) // Audio
                 {
                     byte[] pcmData = new byte[e.RawData.Length - 1];
                     Buffer.BlockCopy(e.RawData, 1, pcmData, 0, pcmData.Length);
@@ -143,8 +146,8 @@ namespace Telemachus
             lastSentFrameId = sensor.lastFrameId;
 
             byte[] jpegData = sensor.imageBytes;
-            byte[] packet = new byte[34 + jpegData.Length];
-            packet[0] = 0; // Video Type
+            byte[] packet = new byte[HEADER_SIZE + jpegData.Length];
+            packet[0] = (byte)PacketType.VideoDownlink;
             
             // Critical Fix: Use the time when the frame WAS RENDERED, not when it is SENT
             double ut = sensor.lastFrameUT; 
@@ -159,7 +162,7 @@ namespace Telemachus
             Buffer.BlockCopy(BitConverter.GetBytes(fov), 0, packet, 25, 8);
             packet[33] = quality;
 
-            Buffer.BlockCopy(jpegData, 0, packet, 34, jpegData.Length);
+            Buffer.BlockCopy(jpegData, 0, packet, HEADER_SIZE, jpegData.Length);
 
             SendAsync(packet, null);
             dataRates.SendDataToClient(packet.Length);
