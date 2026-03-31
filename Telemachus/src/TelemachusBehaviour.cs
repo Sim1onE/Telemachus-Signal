@@ -76,9 +76,37 @@ namespace Telemachus
                     webDispatcher.AddResponder(apiRoute);
 
                     // Create the server and associate the dispatcher
-                    webServer = new HttpServer(serverConfig.ipAddress, serverConfig.port);
-                    webServer.OnGet += webDispatcher.DispatchRequest;
-                    webServer.OnPost += webDispatcher.DispatchRequest;
+                    // Using the port-only constructor makes the server more permissive with Host headers
+                    if (serverConfig.ipAddress == System.Net.IPAddress.Any) {
+                        webServer = new HttpServer(serverConfig.port);
+                    } else {
+                        webServer = new HttpServer(serverConfig.ipAddress, serverConfig.port);
+                    }
+                    
+                    webServer.OnGet += (sender, e) => {
+                        var request = e.Request;
+                        var response = e.Response;
+                        
+                        PluginLogger.print(string.Format("[Server] {0} {1} (Host: {2})", request.HttpMethod, request.RawUrl, request.UserHostName));
+
+                        // CORS Headers
+                        response.AddHeader("Access-Control-Allow-Origin", "*");
+                        response.AddHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+                        response.AddHeader("Access-Control-Allow-Headers", "Content-Type, X-KSP-UT, X-KSP-Delay");
+
+                        if (request.HttpMethod == "OPTIONS") {
+                            response.StatusCode = 200;
+                            response.Close();
+                            return;
+                        }
+
+                        webDispatcher.DispatchRequest(sender, e);
+                    };
+
+                    webServer.OnPost += (sender, e) => {
+                        e.Response.AddHeader("Access-Control-Allow-Origin", "*");
+                        webDispatcher.DispatchRequest(sender, e);
+                    };
 
                     // Create the websocket server and attach to the web server
                     webServer.AddWebSocketService("/datalink", () => new KSPWebSocketService(apiInstance, rateTracker));

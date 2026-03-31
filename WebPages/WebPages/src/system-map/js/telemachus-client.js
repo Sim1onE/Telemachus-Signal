@@ -18,7 +18,12 @@ class Telemachus {
   }
 
   get url() {
-    return `http://${this.host}:${this.port}/telemachus/datalink`;
+    // Dynamically resolve protocol and host to support secure tunnels (ngrok)
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    const host = this.host === "localhost" || !this.host ? window.location.hostname : this.host;
+    const port = this.port || window.location.port;
+    
+    return `${protocol}//${host}${port ? ':' + port : ''}/telemachus/datalink`;
   }
 
   updateConnection(host, port) {
@@ -160,8 +165,8 @@ class Telemachus {
  */
 class Settings {
   constructor(defaultHost, defaultPort) {
-    this.defaultHost = defaultHost || "localhost";
-    this.defaultPort = defaultPort || "8085";
+    this.defaultHost = defaultHost || window.location.hostname || "localhost";
+    this.defaultPort = defaultPort || window.location.port || "8085";
     
     if (!this.host) this.host = this.defaultHost;
     if (!this.port) this.port = this.defaultPort;

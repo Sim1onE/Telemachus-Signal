@@ -95,6 +95,7 @@ namespace Telemachus
             if (camera.didRender && camera.imageBytes != null)
             {
                 response.ContentType = "image/jpeg";
+                response.AddHeader("Access-Control-Allow-Origin", "*");
                 response.AddHeader("Cache-Control", "no-cache, no-store, must-revalidate");
                 response.AddHeader("Pragma", "no-cache");
                 response.AddHeader("Expires", "0");

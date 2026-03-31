@@ -1,4 +1,4 @@
-﻿//Author: Richard Bunt
+//Author: Richard Bunt
 
 using System;
 using System.Collections.Generic;
@@ -22,32 +22,52 @@ namespace Telemachus
 
         public bool process(HttpListenerRequest request, HttpListenerResponse response)
         {
-            if (request.RawUrl.StartsWith(PAGE_PREFIX))
+            string url = request.RawUrl;
+            
+            // Normalize root and prefix using a REAL 302 redirect
+            if (url == "/" || url == "/telemachus" || url == "/telemachus/") {
+                response.Redirect("/telemachus/index.html");
+                return true;
+            }
+
+            if (url.StartsWith(PAGE_PREFIX))
             {
                 try
                 {
-                    var requestedFile = request.RawUrl.Substring(PAGE_PREFIX.Length);
+                    // Strip query strings (e.g. index.html?v=1)
+                    if (url.Contains("?")) url = url.Split('?')[0];
+
+                    string requestedFile = url.Substring(PAGE_PREFIX.Length);
+                    // Remove leading slash to avoid double-slashes with the PluginData path
+                    if (requestedFile.StartsWith("/")) requestedFile = requestedFile.Substring(1);
+                    if (string.IsNullOrEmpty(requestedFile)) requestedFile = "index.html";
+
                     var contentType = GetContentType(Path.GetExtension(requestedFile));
-                    // Set a mime type, if we have one for this extension
-                    if (!string.IsNullOrEmpty(contentType.mimeType))
+
+                    // CORS for static files
+                    response.AddHeader("Access-Control-Allow-Origin", "*");
+
+                    var localPath = buildPath(escapeFileName(requestedFile));
+                    PluginLogger.print(string.Format("[IO] Serving {0} -> {1}", url, localPath));
+
+                    if (!System.IO.File.Exists(localPath))
                     {
-                        response.ContentType = contentType.mimeType;
+                        PluginLogger.print(string.Format("[IO] ERROR: File NOT Found on Disk: {0}", localPath));
+                        return false;
                     }
 
-                    // Read the data, and set encoding type if text. Assume that any text encoding is UTF-8 (probably).
-                    byte[] contentData = System.IO.File.ReadAllBytes(buildPath(escapeFileName(requestedFile)));
+                    byte[] contentData = System.IO.File.ReadAllBytes(localPath);
                     if (contentType.contentType == HTMLContentType.TextContent)
                     {
                         response.ContentEncoding = Encoding.UTF8;
                     }
-                    // Write out the response to the client
                     response.WriteContent(contentData);
 
                     return true;
                 }
-                catch
+                catch (Exception ex)
                 {
-
+                    PluginLogger.print(string.Format("[IO] ERROR processing {0}: {1}", url, ex.Message));
                 }
             }
             return false;
@@ -73,22 +93,22 @@ namespace Telemachus
         {
             contentTypes ??= new Dictionary<string, HTMLResponseContentType>
             {
-                [".html"]  = new HTMLResponseContentType { contentType = HTMLContentType.TextContent,   mimeType = "text/html" },
-                [".css"]   = new HTMLResponseContentType { contentType = HTMLContentType.TextContent,   mimeType = "text/css" },
-                [".js"]    = new HTMLResponseContentType { contentType = HTMLContentType.TextContent,   mimeType = "application/x-javascript" },
-                [".jpg"]   = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/jpeg" },
-                [".jpeg"]  = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/jpeg" },
-                [".png"]   = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/png" },
-                [".gif"]   = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/gif" },
-                [".svg"]   = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/svg+xml" },
-                [".eot"]   = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "application/vnd.ms-fontobject" },
-                [".ttf"]   = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "application/font-sfnt" },
-                [".woff"]  = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "application/font-woff" },
-                [".otf"]   = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "application/font-sfnt" },
-                [".mp4"]   = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "video/mp4" },
-                [".json"]  = new HTMLResponseContentType { contentType = HTMLContentType.TextContent,   mimeType = "application/json" },
-                [".txt"]   = new HTMLResponseContentType { contentType = HTMLContentType.TextContent,   mimeType = "text/plain" },
-                [""]       = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = null },
+                [".html"] = new HTMLResponseContentType { contentType = HTMLContentType.TextContent, mimeType = "text/html" },
+                [".css"] = new HTMLResponseContentType { contentType = HTMLContentType.TextContent, mimeType = "text/css" },
+                [".js"] = new HTMLResponseContentType { contentType = HTMLContentType.TextContent, mimeType = "application/x-javascript" },
+                [".jpg"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/jpeg" },
+                [".jpeg"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/jpeg" },
+                [".png"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/png" },
+                [".gif"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/gif" },
+                [".svg"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "image/svg+xml" },
+                [".eot"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "application/vnd.ms-fontobject" },
+                [".ttf"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "application/font-sfnt" },
+                [".woff"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "application/font-woff" },
+                [".otf"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "application/font-sfnt" },
+                [".mp4"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "video/mp4" },
+                [".json"] = new HTMLResponseContentType { contentType = HTMLContentType.TextContent, mimeType = "application/json" },
+                [".txt"] = new HTMLResponseContentType { contentType = HTMLContentType.TextContent, mimeType = "text/plain" },
+                [""] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = null },
             };
 
             return contentTypes.TryGetValue(extension, out var ct) ? ct : contentTypes[""];
