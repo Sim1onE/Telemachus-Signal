@@ -63,14 +63,23 @@ namespace Telemachus
                 // Simple JSON Command pattern
                 try {
                     var json = Json.DecodeObject(e.Data) as Dictionary<string, object>;
-                    if (json != null && json.ContainsKey("camera"))
-                    {
-                        cameraName = json["camera"].ToString();
-                        PluginLogger.print($"Client {ID} selected camera: {cameraName}");
+                    if (json != null) {
+                        if (json.ContainsKey("camera")) {
+                            cameraName = json["camera"].ToString().ToLower();
+                            PluginLogger.print($"[Stream] Client {ID} selected camera: {cameraName}");
+                            if (CameraCaptureManager.classedInstance != null) CameraCaptureManager.classedInstance.EnsureFlightCamera();
+                        }
                         
-                        // Force a refresh of the sensor list to be sure
-                        if (CameraCaptureManager.classedInstance != null) {
-                            CameraCaptureManager.classedInstance.EnsureFlightCamera();
+                        // Generic command processing (FOV, Pitch, Yaw, ViewMode, etc.)
+                        CameraCapture sensor = null;
+                        if (!string.IsNullOrEmpty(cameraName) && CameraCaptureManager.classedInstance.cameras.ContainsKey(cameraName)) {
+                            sensor = CameraCaptureManager.classedInstance.cameras[cameraName];
+                        }
+                        
+                        if (sensor != null) {
+                            sensor.ProcessCameraCommand(json);
+                        } else {
+                            PluginLogger.print($"[Stream] WARNING: Received command but no sensor found for '{cameraName}'");
                         }
                     }
                 } catch (Exception ex) {

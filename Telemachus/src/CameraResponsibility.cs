@@ -88,29 +88,6 @@ namespace Telemachus
 
             CameraCapture camera = CameraCaptureManager.classedInstance.cameras[cameraName];
 
-            // Handle FOV Updates via POST
-            if (request.HttpMethod == "POST")
-            {
-                try {
-                    using (var reader = new System.IO.StreamReader(request.InputStream))
-                    {
-                        string body = reader.ReadToEnd();
-                        var json = Telemachus.Json.DecodeObject(body) as Dictionary<string, object>;
-                        if (json != null && json.ContainsKey("fov"))
-                        {
-                            float fovVal = Convert.ToSingle(json["fov"]);
-                            if (fovVal < 0) camera.customFOV = -1f;
-                            else camera.customFOV = Mathf.Clamp(fovVal, camera.minFOV, camera.maxFOV);
-                        }
-                    }
-                    response.StatusCode = 204;
-                    return true;
-                } catch (Exception) {
-                    response.StatusCode = 400;
-                    return true;
-                }
-            }
-
             // Keep renderer active
             camera.lastRequestTick = Environment.TickCount;
 

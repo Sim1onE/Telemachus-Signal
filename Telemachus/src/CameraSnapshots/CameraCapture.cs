@@ -17,7 +17,17 @@ namespace Telemachus.CameraSnapshots
         public byte[] lastSentBytes = null;
         public volatile bool mutex = false;
         public int renderOffsetFactor = 0;
-        public int lastRequestTick = Environment.TickCount - 6000; // Force immediate render on first check
+        public int lastRequestTick = Environment.TickCount - 6000;
+
+        public virtual void ProcessCameraCommand(Dictionary<string, object> cmd)
+        {
+            if (cmd.ContainsKey("fov"))
+            {
+                float fovVal = Convert.ToSingle(cmd["fov"]);
+                if (fovVal < 0) customFOV = -1f;
+                else customFOV = Mathf.Clamp(fovVal, minFOV, maxFOV);
+            }
+        }
         private Texture2D persistentTexture = null;
         private float nextRenderTime = 0f;
         public static float DebugSignalOverride = -1f;

@@ -55,10 +55,8 @@ class AdvancedCameraFeed {
         await this.refreshCameraList();
         this.startTelemetryLoop();
 
-        // Select first camera if available
-        if (this.cameras.length > 0) {
-            this.selectCamera(this.cameras[0]);
-        } else {
+        // NO SIGNAL initial state
+        if (this.cameras.length === 0) {
             this.updateStatus('error', 'NO CAMERAS DETECTED');
         }
 
@@ -100,6 +98,12 @@ class AdvancedCameraFeed {
             const response = await fetch(`${this.baseUrl}/telemachus/cameras`);
             this.cameras = await response.json();
             this.renderCameraList();
+
+            // AUTO-SELECT FIX: If no camera is selected yet, and we just found some, select the first one!
+            if (!this.selectedCamera && this.cameras.length > 0) {
+                console.log("Auto-selecting first available camera:", this.cameras[0].name);
+                this.selectCamera(this.cameras[0]);
+            }
         } catch (err) { console.error('Failed to fetch cameras:', err); }
         setTimeout(() => this.refreshCameraList(), 5000);
     }
@@ -239,16 +243,29 @@ class AdvancedCameraFeed {
     }
 
     forceFovUpdate() {
-        if (!this.selectedCamera) return;
+        if (!this.selectedCamera || !this.cameraStream) return;
+        
         const now = performance.now();
-        if (now - this.lastFovUpdateTick < 100) return; // Debounce
-        this.lastFovUpdateTick = now;
+        const minInterval = 33; // 30 FPS ceiling
 
-        fetch(this.selectedCamera.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fov: this.currentFov })
-        }).catch(e => console.error("FOV Update Error", e));
+        // If we are moving too fast, schedule a one-off update to ensure the final value is sent
+        if (now - this.lastFovUpdateTick < minInterval) {
+            if (this.fovUpdateTimeout) clearTimeout(this.fovUpdateTimeout);
+            this.fovUpdateTimeout = setTimeout(() => {
+                this.fovUpdateTimeout = null;
+                this.forceFovUpdate();
+            }, minInterval + 5);
+            return;
+        }
+
+        // We are on time: clear any pending final update and send now
+        if (this.fovUpdateTimeout) {
+            clearTimeout(this.fovUpdateTimeout);
+            this.fovUpdateTimeout = null;
+        }
+
+        this.lastFovUpdateTick = now;
+        this.cameraStream.sendCameraCommand({ fov: this.currentFov });
     }
 
     updateStatus(type, msg) {
