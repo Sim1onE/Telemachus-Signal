@@ -65,7 +65,8 @@ if ($schemaFile) {
         Set-Content "$root/publish/api-schema.json" $json -NoNewline
         Write-Host "Extracted API schema to publish/api-schema.json"
     }
-} else {
+}
+else {
     Write-Host "Warning: TelemetrySchema.g.cs not found in obj/"
 }
 
@@ -97,11 +98,26 @@ if (Test-Path $kspDir) {
     # Create Junctions for directories and Hard Links for files from src
     $srcPath = "$root/WebPages/WebPages/src"
     if (Test-Path $srcPath) {
-        Write-Host "Creating live links from $srcPath to $devPluginData..."
+        Write-Host "Mirroring assets from $srcPath to $devPluginData..."
+        
+        # 1. CLEANUP ORPHANS: Remove anything in destination that doesn't exist in source
+        # We skip 'houston', 'mkon' and 'test' folders as they are managed separately
+        Get-ChildItem -Path $devPluginData | ForEach-Object {
+            $srcItem = Join-Path $srcPath $_.Name
+            if (-not (Test-Path $srcItem) -and $_.Name -notmatch "houston|mkon|test") {
+                Write-Host "Removing orphan: $($_.Name)"
+                Remove-Item $_.FullName -Recurse -Force
+            }
+        }
+
+        # 2. SYNC: Create/Update links
         Get-ChildItem -Path $srcPath | ForEach-Object {
             $target = Join-Path $devPluginData $_.Name
-            # Ensure target doesn't exist before creating link
-            if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+            # Ensure target doesn't exist before creating link if it points to wrong thing or is a dead file
+            if (Test-Path $target) { 
+                # Check if it's the SAME link, otherwise replace it
+                Remove-Item $target -Recurse -Force 
+            }
             
             if ($_.PSIsContainer) {
                 # Directory -> Junction

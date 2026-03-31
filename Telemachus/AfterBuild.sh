@@ -86,10 +86,29 @@ fi
     # Create symbolic links for all items in src (standard Unix approach)
     srcPath="$ProjectDir/../WebPages/WebPages/src"
     if [ -d "$srcPath" ]; then
-      echo "Creating symbolic links from $srcPath to $devPluginData..."
+      echo "Mirroring symbolic links from $srcPath to $devPluginData..."
+      
+      # 1. CLEANUP ORPHANS: Remove any link in destination that doesn't exist in source
+      # Exclude houston, mkon, and test which are managed elsewhere
+      for target_item in "$devPluginData"/*; do
+        [ -e "$target_item" ] || continue
+        bname=$(basename "$target_item")
+        if [[ ! "$bname" =~ ^(houston|mkon|test)$ ]]; then
+          if [ ! -e "$srcPath/$bname" ]; then
+            echo "Removing orphan link: $bname"
+            rm -rf "$target_item"
+          fi
+        fi
+      done
+
+      # 2. SYNC: Create/Update symbolic links
       for item in "$srcPath"/*; do
         bname=$(basename "$item")
-        ln -s "$item" "$devPluginData/$bname"
+        target="$devPluginData/$bname"
+        if [ -L "$target" ] || [ -e "$target" ]; then
+          rm -rf "$target"
+        fi
+        ln -s "$item" "$target"
       done
     fi
 
