@@ -300,7 +300,10 @@ class AdvancedCameraFeed {
 
     // --- RADIO TRANSMISSION (Independent from Camera) ---
     initRadio() {
-        if (this.radioWs) this.radioWs.close();
+        if (this.radioWs) {
+            this.radioWs.onclose = null; // Prevent recursion
+            this.radioWs.close();
+        }
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const url = `${protocol}//${window.location.host}/radio`;
@@ -308,7 +311,7 @@ class AdvancedCameraFeed {
         this.radioWs = new WebSocket(url);
         this.radioWs.binaryType = 'arraybuffer';
 
-        this.radioWs.onopen = () => console.log("[Radio] Connected to Huston Uplink.");
+        this.radioWs.onopen = () => console.log("[Radio] Connected to Houston Uplink.");
         this.radioWs.onclose = () => {
             console.warn("[Radio] Connection lost, reconnecting...");
             setTimeout(() => this.initRadio(), 2000);
@@ -317,7 +320,7 @@ class AdvancedCameraFeed {
 
     async startTransmission() {
         if (!this.radioWs || this.radioWs.readyState !== WebSocket.OPEN) return;
-        if (this.isTransmitting) return; // Prevent double-trigger
+        if (this.isTransmitting) return; 
 
         try {
             this.isTransmitting = true;
@@ -332,21 +335,69 @@ class AdvancedCameraFeed {
                 throw new Error("Mic access requires HTTPS or localhost");
             }
 
-            this.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 22050 });
-            this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // Create context without explicit rate first, then check what we got
+            // Many mobile browsers (iOS Safari) ignore the constructor rate parameter.
+            this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // Resume context (important for mobile)
+            if (this.audioCtx.state === 'suspended') {
+                await this.audioCtx.resume();
+            }
+
+            const constraints = { 
+                audio: { 
+                    echoCancellation: true, 
+                    noiseSuppression: true, 
+                    autoGainControl: true 
+                } 
+            };
+            
+            this.micStream = await navigator.mediaDevices.getUserMedia(constraints);
             const source = this.audioCtx.createMediaStreamSource(this.micStream);
-            this.micProcessor = this.audioCtx.createScriptProcessor(2048, 1, 1);
+            
+            // ScriptProcessor size 4096 is safer for mobile resampling workloads
+            this.micProcessor = this.audioCtx.createScriptProcessor(4096, 1, 1);
+
+            const targetSampleRate = 22050;
+            const inputSampleRate = this.audioCtx.sampleRate;
+            const resampleRatio = inputSampleRate / targetSampleRate;
+
+            console.log(`[Radio] Mic Active. HW Rate: ${inputSampleRate}Hz -> Target: ${targetSampleRate}Hz (Ratio: ${resampleRatio.toFixed(2)})`);
 
             source.connect(this.micProcessor);
             this.micProcessor.connect(this.audioCtx.destination);
 
             this.micProcessor.onaudioprocess = (e) => {
                 if (!this.isTransmitting) return;
-                const input = e.inputBuffer.getChannelData(0);
-                const pcm = new Int16Array(input.length);
-                for (let i = 0; i < input.length; i++) {
-                    const s = Math.max(-1, Math.min(1, input[i]));
-                    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                
+                const inputData = e.inputBuffer.getChannelData(0);
+                let pcm;
+
+                if (Math.abs(resampleRatio - 1) < 0.01) {
+                    // No resampling needed
+                    pcm = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        const s = Math.max(-1, Math.min(1, inputData[i]));
+                        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+                } else {
+                    // Simple Linear Resampling
+                    const outputLength = Math.floor(inputData.length / resampleRatio);
+                    pcm = new Int16Array(outputLength);
+                    for (let i = 0; i < outputLength; i++) {
+                        const sourceIndex = i * resampleRatio;
+                        const index0 = Math.floor(sourceIndex);
+                        const index1 = Math.min(index0 + 1, inputData.length - 1);
+                        const frac = sourceIndex - index0;
+                        
+                        // Interpolation to avoid jagged static
+                        const s0 = inputData[index0];
+                        const s1 = inputData[index1];
+                        const s = s0 + (s1 - s0) * frac;
+                        
+                        const clamped = Math.max(-1, Math.min(1, s));
+                        pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
+                    }
                 }
 
                 if (this.radioWs.readyState === WebSocket.OPEN) {
@@ -355,8 +406,8 @@ class AdvancedCameraFeed {
             };
         } catch (err) {
             console.error("Mic error:", err);
-            // In case of error (like user denied permission), we reset the button
-            setTimeout(() => this.stopTransmission(), 500);
+            if (this.radioStatusText) this.radioStatusText.innerText = 'MIC ERROR';
+            setTimeout(() => this.stopTransmission(), 2000);
         }
     }
 
@@ -367,10 +418,23 @@ class AdvancedCameraFeed {
             this.radioStatusUI.classList.remove('transmitting');
             this.radioStatusText.innerText = 'STANDBY';
         }
-        if (this.micProcessor) this.micProcessor.disconnect();
-        if (this.micStream) this.micStream.getTracks().forEach(t => t.stop());
-        if (this.audioCtx) this.audioCtx.close();
+        
+        if (this.micProcessor) {
+            this.micProcessor.onaudioprocess = null;
+            this.micProcessor.disconnect();
+        }
+        
+        if (this.micStream) {
+            this.micStream.getTracks().forEach(t => t.stop());
+        }
+        
+        if (this.audioCtx) {
+            this.audioCtx.close().catch(() => {});
+        }
+        
         this.micProcessor = null;
+        this.micStream = null;
+        this.audioCtx = null;
     }
 
     formatMET(seconds) {
