@@ -27,19 +27,35 @@ namespace Telemachus
             {
                 // Check PTT key (Standard RightControl key for communications)
                 pttActive = Input.GetKey(KeyCode.RightControl);
+
+                // Auto-restart if the global device selection changed via Debug Window
+                string targetDevice = AudioCaptureManager.SelectedDevice;
+                if (!string.IsNullOrEmpty(targetDevice) && targetDevice != deviceName && micActive)
+                {
+                    PluginLogger.print($"[Downlink] Switching mic to: {targetDevice}");
+                    StopMic();
+                    StartMic(targetDevice);
+                }
             }
 
             void Start()
+            {
+                AudioCaptureManager.Initialize(); // Ensure manager is ready
+                StartMic(AudioCaptureManager.SelectedDevice);
+            }
+
+            void StartMic(string target)
             {
                 try
                 {
                     if (Microphone.devices.Length > 0)
                     {
-                        deviceName = Microphone.devices[0];
+                        deviceName = string.IsNullOrEmpty(target) ? Microphone.devices[0] : target;
                         // Record a 10s buffer to avoid wrap-around glitcing
                         micClip = Microphone.Start(deviceName, true, 10, 22050);
                         micFreq = micClip.frequency;
                         micActive = true;
+                        lastMicPos = 0;
                         PluginLogger.print($"[Downlink] Started mic capture on: {deviceName} ({micFreq}Hz)");
                     }
                     else {
@@ -49,6 +65,14 @@ namespace Telemachus
                 catch (Exception e) { 
                     PluginLogger.print("[Downlink] Mic Init Failed: " + e.Message);
                     micActive = false; 
+                }
+            }
+
+            void StopMic()
+            {
+                if (micActive) {
+                    Microphone.End(deviceName);
+                    micActive = false;
                 }
             }
 
@@ -120,7 +144,7 @@ namespace Telemachus
 
             void OnDestroy()
             {
-                if (micActive) Microphone.End(null);
+                StopMic();
             }
         }
 

@@ -16,6 +16,9 @@ namespace Telemachus.Debug
         private float delayOverrideValue = 0.0f;
         private bool delayOverrideEnabled = false;
 
+        private int micIdx = 0;
+        private string currentMic = "";
+
         private void Update()
         {
             // Toggle visibility with Alt + T
@@ -71,6 +74,45 @@ namespace Telemachus.Debug
             }
 
             GUILayout.Space(10);
+
+            // --- AUDIO SECTION ---
+            GUILayout.Label("PILOT MICROPHONE (Downlink)");
+            string[] mics = Microphone.devices;
+            
+            if (mics.Length > 0)
+            {
+                if (string.IsNullOrEmpty(currentMic)) {
+                    currentMic = AudioCaptureManager.SelectedDevice ?? mics[0];
+                    micIdx = Array.IndexOf(mics, currentMic);
+                    if (micIdx < 0) micIdx = 0;
+                }
+
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("<", GUILayout.Width(30))) {
+                    micIdx = (micIdx - 1 + mics.Length) % mics.Length;
+                    AudioCaptureManager.SetDevice(mics[micIdx]);
+                    currentMic = mics[micIdx];
+                }
+                
+                GUILayout.Label(mics[micIdx], GUILayout.ExpandWidth(true));
+
+                if (GUILayout.Button(">", GUILayout.Width(30))) {
+                    micIdx = (micIdx + 1) % mics.Length;
+                    AudioCaptureManager.SetDevice(mics[micIdx]);
+                    currentMic = mics[micIdx];
+                }
+                GUILayout.EndHorizontal();
+
+                if (GUILayout.Button("FORCE RESET MIC", GUILayout.Height(25))) {
+                    AudioCaptureManager.SetDevice(mics[micIdx]);
+                }
+            }
+            else
+            {
+                GUILayout.Label("No Mics Found", GUILayout.ExpandWidth(true));
+            }
+
+            GUILayout.Space(15);
             if (GUILayout.Button("CLOSE (Alt+T)")) isVisible = false;
 
             GUILayout.EndVertical();
