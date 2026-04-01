@@ -22,6 +22,9 @@ namespace Telemachus
 
             private float[] resampleBuffer;
             private float resamplePos = 0;
+            
+            private int lastSeenPos = -1;
+            private float stallTimer = 0;
 
             void Update()
             {
@@ -35,6 +38,24 @@ namespace Telemachus
                     PluginLogger.print($"[Downlink] Switching mic to: {targetDevice}");
                     StopMic();
                     StartMic(targetDevice);
+                    return;
+                }
+
+                // WATCHDOG: Detect if the Mic driver position is stalled (frozen circular buffer)
+                if (micActive) {
+                    int curr = Microphone.GetPosition(deviceName);
+                    if (curr == lastSeenPos) {
+                        stallTimer += Time.unscaledDeltaTime;
+                        if (stallTimer > 1.5f) {
+                            PluginLogger.print("[Downlink] Mic STALL detected. Resetting driver...");
+                            StopMic();
+                            StartMic(deviceName);
+                            stallTimer = 0;
+                        }
+                    } else {
+                        stallTimer = 0;
+                        lastSeenPos = curr;
+                    }
                 }
             }
 
@@ -58,19 +79,22 @@ namespace Telemachus
                         lastMicPos = 0;
                         PluginLogger.print($"[Downlink] Started mic capture on: {deviceName} ({micFreq}Hz)");
                     }
-                    else {
+                    else
+                    {
                         PluginLogger.print("[Downlink] No microphone devices found.");
                     }
                 }
-                catch (Exception e) { 
+                catch (Exception e)
+                {
                     PluginLogger.print("[Downlink] Mic Init Failed: " + e.Message);
-                    micActive = false; 
+                    micActive = false;
                 }
             }
 
             void StopMic()
             {
-                if (micActive) {
+                if (micActive)
+                {
                     Microphone.End(deviceName);
                     micActive = false;
                 }
@@ -99,7 +123,7 @@ namespace Telemachus
                     int micLenNeeded = Mathf.CeilToInt(gameLen * ratio);
 
                     int available = (currPos >= lastMicPos) ? (currPos - lastMicPos) : (micClip.samples - lastMicPos + currPos);
-                    
+
                     if (available >= micLenNeeded)
                     {
                         float[] temp = new float[micLenNeeded];

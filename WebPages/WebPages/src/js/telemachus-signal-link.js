@@ -19,7 +19,15 @@ class DownlinkSynchronizer {
     popReady(masterTimecode) {
         let readyPackets = [];
         while (this.queue.length > 0 && this.queue[0].ut <= masterTimecode) {
-            readyPackets.push(this.queue.shift());
+            const p = this.queue.shift(); // The packet is now GONE from the queue forever.
+            
+            // ANTI-LOOP BARRIER: Never play the same (or older) UT twice in one session.
+            if (this.lastPoppedUT !== undefined && p.ut <= this.lastPoppedUT) {
+                continue; 
+            }
+            
+            this.lastPoppedUT = p.ut;
+            readyPackets.push(p);
         }
         return readyPackets;
     }
@@ -46,7 +54,7 @@ class UplinkSynchronizer {
     startQueueProcessing() {
         setInterval(() => {
             if (!this.signalLink.ws || this.signalLink.ws.readyState !== WebSocket.OPEN) return;
-            
+
             const currentUT = this.signalLink.getEstimatedFlightUT();
             const instantDelay = this.signalLink.latestNetworkDelay;
 
@@ -54,7 +62,7 @@ class UplinkSynchronizer {
             while (i--) {
                 const packet = this.queue[i];
                 if (currentUT >= packet.creationUT + instantDelay) {
-                    
+
                     if (typeof packet.payload === 'string') {
                         // 1. JSON String (Delayed Flight Command)
                         this.signalLink.ws.send(packet.payload);
@@ -106,8 +114,8 @@ class TelemachusSignalLink {
         this.ws.binaryType = 'arraybuffer';
 
         this.ws.onopen = () => {
-             console.log("[SignalLink] Unified Data Stream Hub Active");
-             this.requestCameraList();
+            console.log("[SignalLink] Unified Data Stream Hub Active");
+            this.requestCameraList();
         };
 
         this.ws.onmessage = (e) => {
@@ -146,14 +154,14 @@ class TelemachusSignalLink {
 
     // Sends specific JSON commands immediately (Ignoring delay logic)
     sendSystemCommand(cmdObject) {
-         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-             this.ws.send(JSON.stringify(cmdObject));
-         }
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify(cmdObject));
+        }
     }
 
     // Delays binary payloads (Audio)
     queueUplink(type, payloadUint8Array) {
-         this.uplink.queuePacket(type, payloadUint8Array);
+        this.uplink.queuePacket(type, payloadUint8Array);
     }
 
     // Delays JSON commands through the string-synchronizer

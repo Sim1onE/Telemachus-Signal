@@ -101,13 +101,8 @@ class RadioTransmitter {
             this.micStream.getTracks().forEach(t => t.stop());
         }
         
-        if (this.audioCtx) {
-            this.audioCtx.close().catch(() => {});
-        }
-        
         this.micProcessor = null;
         this.micStream = null;
-        this.audioCtx = null;
     }
 }
 
