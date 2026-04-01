@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kerbal Space Program - Standalone 3D Orbital Map</title>
+    <title>Kerbal Space Program - Mission Control Map</title>
     
     <!-- Modern Styling -->
     <link rel="stylesheet" href="css/style.css">
@@ -59,27 +59,50 @@
         </div>
 
         <div class="hud-section maneuvers">
-            <div class="hud-label">NAV COMMANDS</div>
-            <div class="maneuver-grid">
-                <button class="nav-btn pro" data-cmd="prograde" title="Prograde">+</button>
-                <button class="nav-btn retro" data-cmd="retrograde" title="Retrograde">-</button>
-                <div class="spacer"></div>
-                <button class="nav-btn norm-p" data-cmd="normal-plus" title="Normal">+</button>
-                <button class="nav-btn norm-m" data-cmd="normal-minus" title="Normal">-</button>
-                <div class="spacer"></div>
-                <button class="nav-btn rad-p" data-cmd="radial-plus" title="Radial In">+</button>
-                <button class="nav-btn rad-m" data-cmd="radial-minus" title="Radial Out">-</button>
+            <div class="hud-label" id="maneuver-node-label">MANEUVERS (NODE 1)</div>
+            <div class="control-group" style="margin-bottom: 5px;">
+                <label>NODE</label>
+                <select id="node-selector" class="custom-select">
+                    <option value="0">NODE 1 (NEXT)</option>
+                    <option value="1">NODE 2</option>
+                    <option value="2">NODE 3</option>
+                </select>
             </div>
-            <div id="node-actions">
-                <button class="action-btn" id="btn-add-node">ADD NODE</button>
-                <button class="action-btn secondary" id="btn-del-node">DEL NODE</button>
+            <div class="maneuver-editor">
+                <div class="slider-group pro">
+                    <label>PRO</label>
+                    <input type="range" id="slider-pro" min="-1" max="1" step="0.01" value="0">
+                    <span id="dv-pro" class="dv-val">0.0</span>
+                </div>
+                <div class="slider-group norm">
+                    <label>NORM</label>
+                    <input type="range" id="slider-norm" min="-1" max="1" step="0.01" value="0">
+                    <span id="dv-norm" class="dv-val">0.0</span>
+                </div>
+                <div class="slider-group rad">
+                    <label>RAD</label>
+                    <input type="range" id="slider-rad" min="-1" max="1" step="0.01" value="0">
+                    <span id="dv-rad" class="dv-val">0.0</span>
+                </div>
+            </div>
+            <div id="pred-stats" style="margin-top: 5px; font-size: 0.75rem; color: #00ffff; display: flex; gap: 10px; justify-content: center; font-family: 'Consolas', monospace; text-shadow: 0 0 5px rgba(0,255,255,0.5);">
+                PRED AP: --km | PE: --km
+            </div>
+            <div id="node-actions" style="margin-top: 5px;">
+                <div class="placement-controls" style="display: flex; gap: 5px; margin-bottom: 5px;">
+                    <input type="number" id="node-ut-offset" value="60" class="custom-input" title="Seconds from now" style="width: 50px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: white; padding: 2px 5px; font-size: 0.65rem;">
+                    <button class="action-btn" id="btn-add-at-ut" style="flex: 1; padding: 2px 5px;">+ AT</button>
+                    <button class="action-btn" id="btn-add-at-ap" style="flex: 1; padding: 2px 5px;">AP</button>
+                    <button class="action-btn" id="btn-add-at-pe" style="flex: 1; padding: 2px 5px;">PE</button>
+                    <button class="action-btn secondary" id="btn-del-node" style="padding: 2px 8px;">DEL</button>
+                </div>
             </div>
         </div>
 
         <div class="hud-section transfer">
-            <div class="hud-label">ASTROGATOR TRANSFER</div>
+            <div class="hud-label">ASTROGATOR</div>
             <div class="hud-data" id="transfer-info">
-                DEST: NONE | BURN: --:--:-- | dV: 0 m/s
+                DEST: NONE | Burn dV: 0 m/s
             </div>
         </div>
     </div>
@@ -96,13 +119,12 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const settings = new Settings();
+            const settings = window.Settings ? new Settings() : { host: 'localhost', port: '8085' };
             const datalink = new Telemachus(settings.host, settings.port);
             const dataManager = new SystemOrbitalPositionData(datalink);
             const formatter = new SystemPositionDataFormatter(dataManager, datalink);
             const map = new SystemOrbitalMap(formatter, datalink, 'map-container');
             
-            // Global access for UI logic
             window.SystemMap = map;
 
             // Math Extension
