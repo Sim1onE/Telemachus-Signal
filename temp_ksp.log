@@ -1,0 +1,50 @@
+[LOG 00:35:59.962] PartLoader: Compiling Part 'Telemachus/Parts/Telemach_Fustek/Telemach_Fustek/Telemach_Fustek'
+[LOG 00:35:59.966] PartLoader: Compiling Part 'Telemachus/Parts/Telemach_Yagi/Telemach_Yagi/TeleMach_Yagi'
+[LOG 00:36:00.090] [Telemachus Debug] Flight globals was null during start up; skipping update of vessel change.
+[LOG 00:36:00.238] [Telemachus Debug] Flight globals was null during start up; skipping update of vessel change.
+[LOG 00:36:01.714] [Telemachus] Unified Stream Session f8a4128236d946f18f111a8b24a6e8a3 opened. Awaiting camera selection...
+[LOG 00:36:01.720] [Telemachus] [Stream] WARNING: Received command but no sensor found for ''
+[LOG 00:36:02.041] [AddonLoader]: Instantiating addon 'TelemachusHarmonyLoader' from assembly 'Telemachus'
+[LOG 00:36:02.041] [Telemachus] *** UI SYNC ENGINE v8.0-PNG (Scene: Awake) ***
+[LOG 00:36:02.868] [AddonLoader]: Instantiating addon 'TelemachusHarmonyLoader' from assembly 'Telemachus'
+[LOG 00:36:02.868] [Telemachus] *** UI SYNC ENGINE v8.0-PNG (Scene: Awake) ***
+[WRN 00:36:03.132] File 'D:/Users/Smit2/Documents/repositories/Telemachus-Signal/ksp-telemachus-dev/KSP_x64_Data/../Missions/MissionScoreInfo.cfg' does not exist
+[LOG 00:36:03.887] [AddonLoader]: Instantiating addon 'TelemachusHarmonyLoader' from assembly 'Telemachus'
+[LOG 00:36:03.888] [Telemachus] *** UI SYNC ENGINE v8.0-PNG (Scene: Awake) ***
+[LOG 00:36:06.811] MovieTime: LoadTextureFile exception: Could not find file "D:\Users\Smit2\Documents\repositories\Telemachus-Signal\ksp-telemachus-dev\GameData\HullCameraVDS\Textures\dockingdisplay"
+[LOG 00:36:06.904] [AddonLoader]: Instantiating addon 'TelemachusHarmonyLoader' from assembly 'Telemachus'
+[LOG 00:36:06.904] [Telemachus] *** UI SYNC ENGINE v8.0-PNG (Scene: Awake) ***
+[LOG 00:36:06.909] [AddonLoader]: Instantiating addon 'TelemachusDebugToolbar' from assembly 'Telemachus'
+[LOG 00:36:07.435] [Telemachus Debug] RPM CAMERA LOADED: JSIPrimitiveExternalCamera.v2 ; NAME: ExtCam1 ; POS: (-49.5, 0.9, 183.6); ROTATION: (0.0, 0.0, 180.0) ; TRANSLATE: (0.0, 0.0, 0.0)
+[LOG 00:36:07.460] [Telemachus Debug] RPM CAMERA LOADED: JSIPrimitiveExternalCamera.v2 ; NAME: ExtCam2 ; POS: (-52.4, -0.4, 177.6); ROTATION: (0.0, 0.0, 180.0) ; TRANSLATE: (0.0, 0.0, 0.0)
+[LOG 00:36:07.640] [Telemachus] UI Sync Status: KerbalismLinked=False, StockStrength=0.000, ActualStrength=0.000, Overridden=False
+[LOG 00:36:07.640] [Telemachus] UI State: Selecting NULL (Kerbalism OFFLINE)
+[LOG 00:36:07.641] [Telemachus] Loaded custom sprite: SS0_Null_Comm_Bars_None.png
+[LOG 00:36:07.718] [Telemachus] UI Sync Status: KerbalismLinked=False, StockStrength=0.009, ActualStrength=0.000, Overridden=True
+[LOG 00:36:07.718] [Telemachus] UI State: Selecting NULL (Kerbalism OFFLINE)
+[LOG 00:36:07.718] [Telemachus] Loaded custom sprite: SS1_Null_Comm_Bars_Red.png
+[LOG 00:36:07.768] [Telemachus] UI Sync Status: KerbalismLinked=False, StockStrength=0.009, ActualStrength=0.000, Overridden=True
+[LOG 00:36:07.768] [Telemachus] UI State: Selecting NULL (Kerbalism OFFLINE)
+[LOG 00:36:07.776] [Telemachus] UI Sync Status: KerbalismLinked=False, StockStrength=0.009, ActualStrength=0.000, Overridden=True
+[LOG 00:36:07.776] [Telemachus] UI State: Selecting NULL (Kerbalism OFFLINE)
+[LOG 00:36:07.849] [Telemachus] UI Sync Status: KerbalismLinked=True, StockStrength=0.009, ActualStrength=0.009, Overridden=True
+[LOG 00:36:07.849] [Telemachus] UI State: RESTORING Stock (Healthy Sync)
+[LOG 00:36:07.881] [Telemachus] UI Sync Status: KerbalismLinked=True, StockStrength=0.009, ActualStrength=0.009, Overridden=False
+[LOG 00:36:07.891] [Telemachus] UI Sync Status: KerbalismLinked=True, StockStrength=0.009, ActualStrength=0.009, Overridden=False
+[LOG 00:36:07.898] [Telemachus] UI Sync Status: KerbalismLinked=True, StockStrength=0.009, ActualStrength=0.009, Overridden=False
+[LOG 00:36:07.915] [Telemachus] UI Sync Status: KerbalismLinked=True, StockStrength=0.009, ActualStrength=0.009, Overridden=False
+[LOG 00:36:07.916] [Telemachus] [Server] GET /telemachus/advanced-camera-feed/index.html (Host: localhost:8085)
+[LOG 00:36:07.920] [Telemachus] [IO] Serving /telemachus/advanced-camera-feed/index.html -> D:\Users\Smit2\Documents\repositories\Telemachus-Signal\ksp-telemachus-dev\GameData\Telemachus\Plugins\PluginData/Telemachus/advanced-camera-feed/index.html
+[LOG 00:36:07.941] [Telemachus] UI Sync Status: KerbalismLinked=True, StockStrength=0.009, ActualStrength=0.009, Overridden=False
+[LOG 00:36:07.946] [Telemachus] [Server] GET /.well-known/appspecific/com.chrome.devtools.json (Host: localhost:8085)
+[LOG 00:36:07.947] [Telemachus] Falling back on default handler
+[LOG 00:36:07.952] [Telemachus] [Server] GET /telemachus/advanced-camera-feed/style.css (Host: localhost:8085)
+[LOG 00:36:07.952] [Telemachus] [IO] Serving /telemachus/advanced-camera-feed/style.css -> D:\Users\Smit2\Documents\repositories\Telemachus-Signal\ksp-telemachus-dev\GameData\Telemachus\Plugins\PluginData/Telemachus/advanced-camera-feed/style.css
+[LOG 00:36:07.953] [Telemachus] [Server] GET /telemachus/js/telemachus-signal-link.js (Host: localhost:8085)
+[LOG 00:36:07.954] [Telemachus] [IO] Serving /telemachus/js/telemachus-signal-link.js -> D:\Users\Smit2\Documents\repositories\Telemachus-Signal\ksp-telemachus-dev\GameData\Telemachus\Plugins\PluginData/Telemachus/js/telemachus-signal-link.js
+[LOG 00:36:07.955] [Telemachus] [Server] GET /telemachus/js/consumers/camera-receiver.js (Host: localhost:8085)
+[LOG 00:36:07.955] [Telemachus] [IO] Serving /telemachus/js/consumers/camera-receiver.js -> D:\Users\Smit2\Documents\repositories\Telemachus-Signal\ksp-telemachus-dev\GameData\Telemachus\Plugins\PluginData/Telemachus/js/consumers/camera-receiver.js
+[LOG 00:36:07.956] [Telemachus] [Server] GET /telemachus/js/providers/radio-transmitter.js (Host: localhost:8085)
+[LOG 00:36:07.956] [Telemachus] [IO] Serving /telemachus/js/providers/radio-transmitter.js -> D:\Users\Smit2\Documents\repositories\Telemachus-Signal\ksp-telemachus-dev\GameData\Telemachus\Plugins\PluginData/Telemachus/js/providers/radio-transmitter.js
+[LOG 00:36:07.957] [Telemachus] [Server] GET /telemachus/advanced-camera-feed/app.js (Host: localhost:8085)
+[LOG 00:36:07.958] [Telemachus] [IO] Serving /telemachus/advanced-camera-feed/app.js -> D:\Users\Smit2\Documents\repositories\Telemachus-Signal\ksp-telemachus-dev\GameData\Telemachus\Plugins\PluginData/Telemachus/advanced-camera-feed/app.js
