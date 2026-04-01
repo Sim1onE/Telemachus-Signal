@@ -6,6 +6,8 @@ class AdvancedCameraFeed {
         this.baseUrl = window.location.origin;
         this.signalLink = null;
         this.cameraReceiver = null;
+        this.radioReceiver = null;
+        this.audioCtx = null;
         this.telemetryData = {};
         this.lastFovUpdateTick = 0;
         this.fovUpdateTimeout = null;
@@ -70,7 +72,12 @@ class AdvancedCameraFeed {
             this.signalLink.connect();
         }
 
-        this.radioTransmitter = new RadioTransmitter(this.signalLink);
+        this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        this.radioTransmitter = new RadioTransmitter(this.signalLink, this.audioCtx);
+        this.radioReceiver = new RadioReceiver(this.signalLink, this.audioCtx);
+        this.radioReceiver.start(); // Start listening for game audio automatically
+        
         this.startSignalWatchdog();
     }
 
@@ -100,6 +107,7 @@ class AdvancedCameraFeed {
                 this.radioBtn.classList.add('active');
                 if (this.radioStatusUI) this.radioStatusUI.classList.add('transmitting');
                 try {
+                    if (this.audioCtx.state === 'suspended') await this.audioCtx.resume();
                     await this.radioTransmitter.startTransmission();
                 } catch(err) {
                     this.stopRadioUI();

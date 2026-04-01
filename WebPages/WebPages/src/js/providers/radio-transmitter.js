@@ -5,9 +5,9 @@
  * decoupling the DOM from the Data.
  */
 class RadioTransmitter {
-    constructor(signalLink) {
+    constructor(signalLink, audioCtx) {
         this.signalLink = signalLink;
-        this.audioCtx = null;
+        this.audioCtx = audioCtx;
         this.micStream = null;
         this.micProcessor = null;
         this.isTransmitting = false;
@@ -24,7 +24,6 @@ class RadioTransmitter {
         try {
             this.isTransmitting = true;
 
-            this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (this.audioCtx.state === 'suspended') {
                 await this.audioCtx.resume();
             }

@@ -10,8 +10,123 @@ namespace Telemachus
 {
     public class KSPUnifiedStreamService : WebSocketBehavior
     {
-        public enum PacketType : byte { 
-            VideoDownlink = 0, VideoUplink = 1, 
+        private class KSPAudioDownlink : MonoBehaviour
+        {
+            public Action<float[]> OnAudioBuffer;
+            private AudioClip micClip;
+            private string deviceName = null;
+            private int lastMicPos = 0;
+            private bool micActive = false;
+            private int micFreq = 22050;
+            private volatile bool pttActive = false;
+
+            private float[] resampleBuffer;
+            private float resamplePos = 0;
+
+            void Update()
+            {
+                // Check PTT key (Standard RightControl key for communications)
+                pttActive = Input.GetKey(KeyCode.RightControl);
+            }
+
+            void Start()
+            {
+                try
+                {
+                    if (Microphone.devices.Length > 0)
+                    {
+                        deviceName = Microphone.devices[0];
+                        // Record a 10s buffer to avoid wrap-around glitcing
+                        micClip = Microphone.Start(deviceName, true, 10, 22050);
+                        micFreq = micClip.frequency;
+                        micActive = true;
+                        PluginLogger.print($"[Downlink] Started mic capture on: {deviceName} ({micFreq}Hz)");
+                    }
+                    else {
+                        PluginLogger.print("[Downlink] No microphone devices found.");
+                    }
+                }
+                catch (Exception e) { 
+                    PluginLogger.print("[Downlink] Mic Init Failed: " + e.Message);
+                    micActive = false; 
+                }
+            }
+
+            void OnAudioFilterRead(float[] data, int channels)
+            {
+                if (OnAudioBuffer == null) return;
+
+                int gameLen = data.Length / channels;
+                float[] gameMono = new float[gameLen];
+
+                // 1. Process Game FX (Downmix to Mono)
+                for (int i = 0; i < gameLen; i++)
+                {
+                    float sum = 0;
+                    for (int c = 0; c < channels; c++) sum += data[i * channels + c];
+                    gameMono[i] = sum / channels;
+                }
+
+                // 2. Mix Pilot Mic (if PTT is active)
+                if (micActive && micClip != null && pttActive)
+                {
+                    int currPos = Microphone.GetPosition(deviceName);
+                    float ratio = (float)micFreq / (float)AudioSettings.outputSampleRate;
+                    int micLenNeeded = Mathf.CeilToInt(gameLen * ratio);
+
+                    int available = (currPos >= lastMicPos) ? (currPos - lastMicPos) : (micClip.samples - lastMicPos + currPos);
+                    
+                    if (available >= micLenNeeded)
+                    {
+                        float[] temp = new float[micLenNeeded];
+                        micClip.GetData(temp, lastMicPos);
+                        lastMicPos = (lastMicPos + micLenNeeded) % micClip.samples;
+
+                        // Mix into gameMono (Resampled Mic -> Game Rate)
+                        for (int i = 0; i < gameLen; i++)
+                        {
+                            float srcIdx = i * ratio;
+                            int i0 = (int)srcIdx;
+                            int i1 = Math.Min(i0 + 1, temp.Length - 1);
+                            float frac = srcIdx - i0;
+                            float micV = (temp[i0] + (temp[i1] - temp[i0]) * frac) * 3.5f; // Boost Pilot
+                            gameMono[i] = Mathf.Clamp(gameMono[i] * 0.7f + micV, -1f, 1f); // Duck game slightly when talking
+                        }
+                    }
+                }
+                else if (micActive)
+                {
+                    // Sync Head even when silent
+                    lastMicPos = Microphone.GetPosition(deviceName);
+                }
+
+                // 3. Resample Final Mix (GameRate -> 22050Hz for transmission)
+                float targetRate = 22050f;
+                float downRatio = (float)AudioSettings.outputSampleRate / targetRate;
+                int targetLen = Mathf.FloorToInt(gameLen / downRatio);
+                float[] finalSamples = new float[targetLen];
+
+                for (int i = 0; i < targetLen; i++)
+                {
+                    float srcIdx = i * downRatio;
+                    int i0 = (int)srcIdx;
+                    int i1 = Math.Min(i0 + 1, gameLen - 1);
+                    float frac = srcIdx - i0;
+                    finalSamples[i] = gameMono[i0] + (gameMono[i1] - gameMono[i0]) * frac;
+                }
+
+                OnAudioBuffer(finalSamples);
+            }
+
+            void OnDestroy()
+            {
+                if (micActive) Microphone.End(null);
+            }
+        }
+
+        public enum PacketType : byte
+        {
+            VideoDownlink = 0, VideoUplink = 1,
             AudioDownlink = 2, AudioUplink = 3
         }
         public const int HEADER_SIZE = 34;
@@ -21,6 +136,8 @@ namespace Telemachus
         private GameObject audioHost;
         private string cameraName = null;
         private long lastSentFrameId = -1;
+        private long lastHeartbeatTick = 0;
+        private KSPAudioDownlink audioDownlink;
 
         private const int AUDIO_SAMPLE_RATE = 22050;
 
@@ -33,19 +150,30 @@ namespace Telemachus
         {
             base.OnOpen();
             // We'll wait for a "select" message from the client to set cameraName
-            MainThreadDispatcher.Enqueue(() => {
+            MainThreadDispatcher.Enqueue(() =>
+            {
                 audioHost = new GameObject("RadioProxy_" + ID);
                 audioSource = audioHost.AddComponent<AudioSource>();
                 audioSource.spatialBlend = 0f;
                 UnityEngine.Object.DontDestroyOnLoad(audioHost);
+
+                // Add Audio Downlink Capture
+                AudioListener listener = UnityEngine.Object.FindObjectOfType<AudioListener>();
+                if (listener != null)
+                {
+                    audioDownlink = listener.gameObject.AddComponent<KSPAudioDownlink>();
+                    audioDownlink.OnAudioBuffer = HandleGameAudio;
+                }
             });
-            
+
             PluginLogger.print($"Unified Stream Session {ID} opened. Awaiting camera selection...");
         }
 
         protected override void OnClose(CloseEventArgs e)
         {
-            MainThreadDispatcher.Enqueue(() => {
+            MainThreadDispatcher.Enqueue(() =>
+            {
+                if (audioDownlink != null) UnityEngine.Object.Destroy(audioDownlink);
                 if (audioHost != null) UnityEngine.Object.Destroy(audioHost);
             });
             base.OnClose(e);
@@ -69,16 +197,22 @@ namespace Telemachus
             else if (e.IsText)
             {
                 // JSON Protocol for Metadata and Immediate Actions
-                try {
+                try
+                {
                     var json = Json.DecodeObject(e.Data) as Dictionary<string, object>;
                     if (json == null) return;
 
-                    if (json.ContainsKey("list")) {
+                    if (json.ContainsKey("list"))
+                    {
                         SendCameraList();
-                    } else {
+                    }
+                    else
+                    {
                         HandleCommand(json);
                     }
-                } catch (Exception ex) {
+                }
+                catch (Exception ex)
+                {
                     PluginLogger.print("[Stream] JSON Parse Error: " + ex.Message);
                 }
             }
@@ -86,16 +220,18 @@ namespace Telemachus
 
         private void HandleCommand(Dictionary<string, object> json)
         {
-            if (json.ContainsKey("camera")) {
+            if (json.ContainsKey("camera"))
+            {
                 cameraName = json["camera"].ToString(); // Case-sensitive or insensitive (now handled by GetSensor)
                 PluginLogger.print($"[Stream] Client {ID} requested camera: {cameraName}");
                 if (CameraCaptureManager.classedInstance != null) CameraCaptureManager.classedInstance.EnsureFlightCamera();
             }
-            
+
             // Generic command processing (FOV, etc.)
             CameraCapture sensor = GetSensor(cameraName);
-            
-            if (sensor != null) {
+
+            if (sensor != null)
+            {
                 sensor.ProcessCameraCommand(json);
             }
         }
@@ -103,22 +239,43 @@ namespace Telemachus
         private CameraCapture GetSensor(string name)
         {
             if (string.IsNullOrEmpty(name) || CameraCaptureManager.classedInstance == null) return null;
-            
+
             var cameras = CameraCaptureManager.classedInstance.cameras;
             if (cameras.ContainsKey(name)) return cameras[name];
-            
+
             var key = cameras.Keys.FirstOrDefault(k => k.Equals(name, StringComparison.OrdinalIgnoreCase));
             if (key != null) return cameras[key];
-            
+
             return null;
+        }
+
+        private void HandleGameAudio(float[] samples)
+        {
+            // Simple 16-bit PCM conversion
+            byte[] pcm = new byte[samples.Length * 2];
+            for (int i = 0; i < samples.Length; i++)
+            {
+                short s = (short)Mathf.Clamp(samples[i] * 32767f, -32768, 32767);
+                byte[] bytes = BitConverter.GetBytes(s);
+                pcm[i * 2] = bytes[0];
+                pcm[i * 2 + 1] = bytes[1];
+            }
+
+            byte[] packet = new byte[HEADER_SIZE + pcm.Length];
+            FillHeader(packet, (byte)PacketType.AudioDownlink, Planetarium.GetUniversalTime(), 0);
+            Buffer.BlockCopy(pcm, 0, packet, HEADER_SIZE, pcm.Length);
+
+            SendAsync(packet, null);
         }
 
         private void HandleIncomingAudio(byte[] pcmData)
         {
             float quality = (float)TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
 
-            MainThreadDispatcher.Enqueue(() => {
-                if (audioSource != null) {
+            MainThreadDispatcher.Enqueue(() =>
+            {
+                if (audioSource != null)
+                {
                     PlayAudioChunk(pcmData, quality);
                 }
             });
@@ -129,7 +286,8 @@ namespace Telemachus
             // Always send Heartbeat to keep client clock in sync even when camera is off
             SendHeartbeat();
 
-            if (!string.IsNullOrEmpty(cameraName)) {
+            if (!string.IsNullOrEmpty(cameraName))
+            {
                 PushVideoFrame();
             }
         }
@@ -139,7 +297,7 @@ namespace Telemachus
             CameraCapture sensor = GetSensor(cameraName);
 
             if (sensor == null) return;
-            
+
             // CRITICAL FIX: Tell the camera it's being watched BEFORE checking if imageBytes is null.
             // Otherwise, it refuses to render the first frame, creating an endless deadlock!
             sensor.lastRequestTick = Environment.TickCount;
@@ -149,10 +307,10 @@ namespace Telemachus
 
             byte[] jpegData = sensor.imageBytes;
             byte[] packet = new byte[HEADER_SIZE + jpegData.Length];
-            
+
             // Build header
             FillHeader(packet, (byte)PacketType.VideoDownlink, sensor.lastFrameUT, sensor.interpolatedFOV);
-            
+
             Buffer.BlockCopy(jpegData, 0, packet, HEADER_SIZE, jpegData.Length);
 
             SendAsync(packet, null);
@@ -161,14 +319,20 @@ namespace Telemachus
 
         private void SendHeartbeat()
         {
-            try {
+            try
+            {
+                // Throttle heartbeat to ~30Hz (33ms) to avoid flooding the client at high FPS
+                long now = Environment.TickCount;
+                if (now - lastHeartbeatTick < 33 && now >= lastHeartbeatTick) return;
+                lastHeartbeatTick = now;
+
                 Vessel v = FlightGlobals.ActiveVessel;
                 if (v == null) return;
 
                 double currentUT = Planetarium.GetUniversalTime();
                 double warp = TimeWarp.fetch != null ? TimeWarp.CurrentRate : 1.0;
                 double delay = TelemachusSignalManager.GetSignalDelay(v);
-                
+
                 // CRITICAL FIX: MiniJSON crashes on `byte`, must cast to `int`
                 int quality = (int)(TelemachusSignalManager.GetSignalQuality(v) * 100);
 
@@ -184,7 +348,9 @@ namespace Telemachus
                 };
 
                 SendAsync(Json.Encode(status), null);
-            } catch (Exception ex) {
+            }
+            catch (Exception ex)
+            {
                 PluginLogger.print("[Stream] SendHeartbeat Crash: " + ex.Message + "\n" + ex.StackTrace);
             }
         }
@@ -205,11 +371,13 @@ namespace Telemachus
 
         private void SendCameraList()
         {
-            try {
+            try
+            {
                 if (CameraCaptureManager.classedInstance == null) return;
-                
+
                 var cameraList = new List<Dictionary<string, object>>();
-                foreach (var c in CameraCaptureManager.classedInstance.cameras.Values) {
+                foreach (var c in CameraCaptureManager.classedInstance.cameras.Values)
+                {
                     cameraList.Add(new Dictionary<string, object> {
                         { "name", c.cameraManagerName() ?? "Unknown" },
                         { "type", c.cameraType() ?? "Unknown" },
@@ -226,7 +394,9 @@ namespace Telemachus
                 };
 
                 SendAsync(Json.Encode(response), null);
-            } catch (Exception ex) {
+            }
+            catch (Exception ex)
+            {
                 PluginLogger.print("[Stream] SendCameraList Crash: " + ex.Message + "\n" + ex.StackTrace);
             }
         }
@@ -234,7 +404,8 @@ namespace Telemachus
         private void PlayAudioChunk(byte[] data, float quality)
         {
             float[] samples = new float[data.Length / 2];
-            for (int i = 0; i < samples.Length; i++) {
+            for (int i = 0; i < samples.Length; i++)
+            {
                 samples[i] = BitConverter.ToInt16(data, i * 2) / 32768f;
                 if (quality < 0.95f) samples[i] += (UnityEngine.Random.value * 2f - 1f) * (1.0f - quality) * 0.15f;
             }
