@@ -244,6 +244,8 @@ class SystemPositionDataFormatter {
       var patch = {};
       Object.keys(orbitPatchOptions).forEach(function (k) { patch[k] = orbitPatchOptions[k]; });
       patch.truePositions = positions;
+      patch.startUT = sortedTimes[0];
+      patch.endUT = sortedTimes[sortedTimes.length - 1];
       patch.ApA = orbitPatch.ApA;
       patch.PeA = orbitPatch.PeA;
       formattedOrbitPatches.push(patch);

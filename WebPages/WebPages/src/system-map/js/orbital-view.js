@@ -41,10 +41,6 @@ class SystemOrbitalMap {
     this.activeNodeIndex = 0;
     this.maneuverInterval = null;
 
-    this.scaleFactor = 1.0;
-    this.isScaleSet = false;
-    this.lastFocusBody = 'current vessel';
-
     this.buildSceneCameraAndRenderer();
     this.setupCustomUI();
     
@@ -86,14 +82,18 @@ class SystemOrbitalMap {
     const btnAddAtUt = document.getElementById('btn-add-at-ut');
     if (btnAddAtUt) btnAddAtUt.addEventListener('click', () => this.addNodeAt('UT'));
 
-    const btnAddAtAp = document.getElementById('btn-add-at-ap');
-    if (btnAddAtAp) btnAddAtAp.addEventListener('click', () => this.addNodeAt('AP'));
-
-    const btnAddAtPe = document.getElementById('btn-add-at-pe');
-    if (btnAddAtPe) btnAddAtPe.addEventListener('click', () => this.addNodeAt('PE'));
+    const utInput = document.getElementById('node-ut-offset');
+    if (utInput) {
+      utInput.addEventListener('input', () => this.triggerRender());
+    }
     
     const btnDel = document.getElementById('btn-del-node');
-    if (btnDel) btnDel.addEventListener('click', () => this.datalink.sendNodeAction('del'));
+    if (btnDel) btnDel.addEventListener('click', () => {
+      this.datalink.sendNodeAction('del', this.activeNodeIndex);
+      if (this.activeNodeIndex > 0) this.activeNodeIndex--;
+      const selector = document.getElementById('node-selector');
+      if (selector) selector.value = this.activeNodeIndex;
+    });
 
     // Spring-Loaded Sliders
     const sliders = ['pro', 'norm', 'rad'];
@@ -141,15 +141,16 @@ class SystemOrbitalMap {
     if (!this.lastFormattedData) return;
     const currentUT = this.lastFormattedData.currentUniversalTime;
     const d = this.datalink.lastData;
-    let targetUT = currentUT + 60;
-
-    if (type === 'AP' && d['o.timeToAp'] !== undefined) {
-      targetUT = currentUT + d['o.timeToAp'];
-    } else if (type === 'PE' && d['o.timeToPe'] !== undefined) {
-      targetUT = currentUT + d['o.timeToPe'];
-    } else if (type === 'UT') {
-      const offset = parseFloat(document.getElementById('node-ut-offset').value) || 60;
-      targetUT = currentUT + offset;
+    const offset = parseFloat(document.getElementById('node-ut-offset').value) || 60;
+    
+    // Logic for Stacking: we want the node to be at (currentBurnUT + offset)
+    // If no nodes, currentBurnUT = vesselCurrentUT
+    let targetUT = currentUT + offset;
+    const nodes = d['o.maneuverNodes'] || [];
+    if (nodes.length > 0) {
+      // Find the UT of the LAST created node to 'stack' the new one after it
+      const lastNode = nodes[nodes.length - 1];
+      targetUT = lastNode.UT + offset;
     }
 
     const cmd = `o.addManeuverNode[${targetUT},0,0,0]`;
@@ -194,19 +195,16 @@ class SystemOrbitalMap {
   }
 
   buildSceneCameraAndRenderer() {
-    // Singleton Guard: Clear existing canvas to prevent duplicate renderer conflict
-    if (this.container) {
-      while (this.container.firstChild) {
-        this.container.removeChild(this.container.firstChild);
-      }
+    while (this.container.firstChild) {
+      this.container.removeChild(this.container.firstChild);
     }
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, logarithmicDepthBuffer: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     this.renderer.setClearColor(0x000000, 0); 
     this.container.appendChild(this.renderer.domElement);
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(45, this.container.clientWidth / this.container.clientHeight, 10, 10000000);
+    this.camera = new THREE.PerspectiveCamera(75, this.container.clientWidth / this.container.clientHeight, 0.1, 10000000);
     this.camera.up.set(0, -1, 0); 
     this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -247,25 +245,57 @@ class SystemOrbitalMap {
     const ut = formattedData.currentUniversalTime;
     const timeElem = document.getElementById('time-readout');
     if (timeElem) timeElem.innerText = 'UT: ' + (ut || 0).toFixed(0);
-    const statsElem = document.getElementById('vessel-stats');
-    if (statsElem && this.datalink.lastData) {
+
+    const statsGrid = document.getElementById('vessel-stats-grid');
+    if (statsGrid && this.datalink.lastData) {
       const d = this.datalink.lastData;
       const ap = (d['o.ApA'] / 1000).toFixed(1);
       const pe = (d['o.PeA'] / 1000).toFixed(1);
       const inc = (d['o.inclination'] || 0).toFixed(2);
       const ecc = (d['o.eccentricity'] || 0).toFixed(4);
       const alt = (d['v.altitude'] / 1000).toFixed(1);
-      const body = d['v.body'] || 'NONE';
-      statsElem.innerText = `${body.toUpperCase()} | ALT: ${alt}km | AP: ${ap}km | PE: ${pe}km | INC: ${inc}° | ECC: ${ecc}`;
+      const body = (d['v.body'] || 'NONE').toUpperCase();
+
+      statsGrid.innerHTML = `
+        <div class="data-row"><span>BODY</span><span>${body}</span></div>
+        <div class="data-row"><span>ALT</span><span>${alt}km</span></div>
+        <div class="data-row"><span>AP/PE</span><span>${ap}/${pe}km</span></div>
+        <div class="data-row"><span>INC/ECC</span><span>${inc}°/${ecc}</span></div>
+      `;
+
+      // Encounter Info
+      const encElem = document.getElementById('encounter-info');
+      if (encElem) {
+        const encBody = d['o.encounterBody'];
+        if (encBody && encBody !== 'None' && encBody !== '') {
+          const encTime = d['o.encounterTime'] || 0;
+          encElem.innerText = `${encBody.toUpperCase()} ENCOUNTER: T-${(encTime/3600).toFixed(1)}h`;
+        } else {
+          encElem.innerText = '';
+        }
+      }
+
+      // Astrogator Delta-V (No countdown)
+      const astgElem = document.getElementById('astrogator-dv');
+      if (astgElem) {
+        const dest = d['astg.nextDestination'] || 'NONE';
+        const dv = d['astg.nextDeltaV'] ? d['astg.nextDeltaV'].toFixed(1) : '0';
+        astgElem.innerText = dest !== 'NONE' ? `ASTROGATOR: ${dest.toUpperCase()} (${dv} m/s)` : '';
+      }
+
       if (this.navball && d['n.pitch'] !== undefined) this.navball.updateOrientation(d['n.pitch'], d['n.roll'], d['n.heading']);
     }
+
     if (this.datalink.lastData && this.datalink.lastData['o.maneuverNodes']) {
       const nodes = this.datalink.lastData['o.maneuverNodes'];
-      if (nodes.length > this.activeNodeIndex) {
+      
+      // Predicted Stats for Node
+      const predElem = document.getElementById('pred-stats');
+      if (this.activeNodeIndex < nodes.length) {
         this.lastNodeData = nodes[this.activeNodeIndex];
         this.activeNodePosition = this.lastNodeData.truePosition;
         
-        // Numerical Readouts
+        // Sliders Update (dv labels)
         const proLabel = document.getElementById('dv-pro');
         const normLabel = document.getElementById('dv-norm');
         const radLabel = document.getElementById('dv-rad');
@@ -273,31 +303,26 @@ class SystemOrbitalMap {
         if (normLabel) normLabel.innerText = this.lastNodeData.deltaV[1].toFixed(1);
         if (radLabel) radLabel.innerText = this.lastNodeData.deltaV[0].toFixed(1);
 
-        const nodeLabel = document.getElementById('maneuver-node-label');
-        if (nodeLabel) nodeLabel.innerText = 'MANEUVERS (NODE ' + (this.activeNodeIndex + 1) + ')';
-
-        // Predicted Stats for Node
-        const predElem = document.getElementById('pred-stats');
         if (predElem && formattedData.maneuverNodes[this.activeNodeIndex]) {
           const node = formattedData.maneuverNodes[this.activeNodeIndex];
           const lastPatch = node.orbitPatches[node.orbitPatches.length - 1];
           if (lastPatch && lastPatch.ApA !== undefined) {
-            const pAp = (lastPatch.ApA / 1000).toFixed(1);
-            const pPe = (lastPatch.PeA / 1000).toFixed(1);
-            predElem.innerText = `PRED AP: ${pAp}km | PE: ${pPe}km`;
-          } else {
-            predElem.innerText = `PRED AP: --km | PE: --km`;
+             predElem.innerText = `PRED AP: ${(lastPatch.ApA / 1000).toFixed(1)}km | PE: ${(lastPatch.PeA / 1000).toFixed(1)}km`;
           }
         }
       }
-    }
-    const transElem = document.getElementById('transfer-info');
-    if (transElem && this.datalink.lastData) {
-      const d = this.datalink.lastData;
-      const dest = d['astg.nextDestination'] || 'NONE';
-      const burn = d['astg.nextBurnCountdown'] ? d['astg.nextBurnCountdown'].toFixed(0) : '--';
-      const dv = d['astg.nextDeltaV'] ? d['astg.nextDeltaV'].toFixed(0) : '0';
-      transElem.innerText = `DEST: ${dest.toUpperCase()} | BURN: T-${burn}s | dV: ${dv} m/s`;
+
+      // Multi-Node Summary
+      const summaryElem = document.getElementById('node-list-summary');
+      if (summaryElem) {
+        let summaryHTML = '';
+        nodes.forEach((n, idx) => {
+          const totalDV = Math.sqrt(Math.pow(n.deltaV[0], 2) + Math.pow(n.deltaV[1], 2) + Math.pow(n.deltaV[2], 2)).toFixed(1);
+          const activeStyle = (idx === this.activeNodeIndex) ? 'color: #00ffff; font-weight: bold;' : '';
+          summaryHTML += `<div style="${activeStyle}">NODE ${idx+1}: ${totalDV} m/s</div>`;
+        });
+        summaryElem.innerHTML = summaryHTML;
+      }
     }
   }
 
@@ -418,6 +443,59 @@ class SystemOrbitalMap {
             }
         }
     }
+
+    // Ghost Preview Sphere with Multi-Patch Support
+    const utInput = document.getElementById('node-ut-offset');
+    if (utInput) {
+        const offset = parseFloat(utInput.value) || 0;
+        const targetUT = formattedData.currentUniversalTime + offset;
+        const ghostId = "ghost-node";
+        let ghost = this.registry.nodes[ghostId];
+        
+        if (!ghost) {
+            ghost = new THREE.Mesh(new THREE.SphereGeometry(this.vehicleLength * 0.4, 32, 32), new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 }));
+            this.group.add(ghost);
+            this.registry.nodes[ghostId] = ghost;
+        }
+
+        // Target the ACTIVE maneuver node's patches for stacked planning
+        let targetPatches = formattedData.orbitPatches || [];
+        if (formattedData.maneuverNodes && formattedData.maneuverNodes[this.activeNodeIndex]) {
+            const activeNode = formattedData.maneuverNodes[this.activeNodeIndex];
+            if (activeNode.orbitPatches && activeNode.orbitPatches.length > 0) {
+                targetPatches = activeNode.orbitPatches;
+            }
+        }
+
+        // Find the correct orbit patch for targetUT across all available paths
+        let foundPoint = null;
+        let selectedPatch = null;
+
+        // Traverse patches to find where targetUT fits temporally
+        for (let patch of targetPatches) {
+            if (targetUT >= patch.startUT && targetUT <= patch.endUT) {
+                selectedPatch = patch;
+                break;
+            }
+        }
+
+        // Fallback to first patch if outside range (e.g. initial setup)
+        if (!selectedPatch && targetPatches.length > 0) selectedPatch = targetPatches[0];
+
+        if (selectedPatch && selectedPatch.truePositions) {
+            const points = selectedPatch.truePositions;
+            const duration = selectedPatch.endUT - selectedPatch.startUT;
+            const progress = (targetUT - selectedPatch.startUT) / (duration || 1);
+            const index = Math.min(points.length - 1, Math.max(0, Math.floor(progress * points.length)));
+            foundPoint = points[index];
+        }
+
+        if (foundPoint) {
+            ghost.position.set(foundPoint[0], foundPoint[1], foundPoint[2]);
+            seenNodes[ghostId] = true;
+        }
+    }
+
     // Cleanup
     for (var key in this.registry.nodes) { if (!seenNodes[key]) { this.group.remove(this.registry.nodes[key]); delete this.registry.nodes[key]; } }
     for (var key in this.registry.patches) { if (!seenNodes[key]) { this.group.remove(this.registry.patches[key]); delete this.registry.patches[key]; } }
@@ -472,19 +550,16 @@ class SystemOrbitalMap {
   }
 
   updateCamera(formattedData) {
-    var boundingBox = new THREE.Box3().setFromObject(this.group);
-    if (boundingBox.isEmpty()) return;
-    
-    // Stable Scaling: Only recalculate if focus changed or first run
-    var focusBody = this.GUIParameters.focusBody;
-    if (!this.isScaleSet || focusBody !== this.lastFocusBody) {
-      var size = boundingBox.size(new THREE.Vector3());
-      this.scaleFactor = this.maxLengthInThreeJS / (Math.max(size.x, size.y, size.z) || 1);
-      this.isScaleSet = true;
-      this.lastFocusBody = focusBody;
+    if (this.lastFocusBody !== this.GUIParameters.focusBody) {
+      var boundingBox = new THREE.Box3().setFromObject(this.group);
+      if (!boundingBox.isEmpty()) {
+        var size = boundingBox.size(new THREE.Vector3());
+        this.mapScaleFactor = this.maxLengthInThreeJS / (Math.max(size.x, size.y, size.z) || 1);
+        this.group.scale.set(this.mapScaleFactor, this.mapScaleFactor, this.mapScaleFactor);
+      }
+      this.lastFocusBody = this.GUIParameters.focusBody;
     }
-    
-    this.group.scale.set(this.scaleFactor, this.scaleFactor, this.scaleFactor);
+
     var focusPos = new THREE.Vector3(), focusRadius = 600000;
     if (this.GUIParameters.focusBody === 'current vessel' && this.currentVesselMesh) {
       if (this.isSliderInteracting && this.activeNodePosition) {
@@ -494,17 +569,15 @@ class SystemOrbitalMap {
         focusPos.copy(this.currentVesselMesh.position);
         focusRadius = 25000;
       }
-    } else if (this.bodyMeshes[this.GUIParameters.focusBody]) {
-      focusPos.copy(this.bodyMeshes[this.GUIParameters.focusBody].position);
-      focusRadius = this.bodyRadii[this.GUIParameters.focusBody] || 600000;
     } else if (this.registry.bodies[this.GUIParameters.focusBody]) {
       focusPos.copy(this.registry.bodies[this.GUIParameters.focusBody].position);
       focusRadius = this.bodyRadii[this.GUIParameters.focusBody] || 600000;
     }
-    var scaledTarget = focusPos.clone().multiplyScalar(this.scaleFactor);
+
+    var scaledTarget = focusPos.clone().multiplyScalar(this.mapScaleFactor);
     this.controls.target.copy(scaledTarget);
     if (!this.cameraSet) {
-      var offset = (focusRadius * 8 + this.vehicleLength * 15) * this.scaleFactor;
+      var offset = (focusRadius * 10 + this.vehicleLength * 20) * this.mapScaleFactor;
       this.camera.position.set(scaledTarget.x + offset, scaledTarget.y + offset/2, scaledTarget.z + offset);
       this.camera.lookAt(scaledTarget);
       this.cameraSet = true;
@@ -513,7 +586,7 @@ class SystemOrbitalMap {
 
   resetPosition() { 
     this.cameraSet = false; 
-    this.isScaleSet = false; 
+    this.lastFocusBody = null; // Force rescale
   }
 }
 

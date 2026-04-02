@@ -8,14 +8,18 @@ function Navball(containerID) {
   this.container = document.getElementById(containerID);
   if (!this.container) return;
 
-  this.scene = new THREE.Scene();
+  const w = this.container.clientWidth;
+  const h = this.container.clientHeight;
 
-  // Adjusted FOV and distance to match Houston's clarity
-  this.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 1000);
-  this.camera.position.z = 190; // Houston distance
+  this.scene = new THREE.Scene();
+  this.camera = new THREE.PerspectiveCamera(32, w / h, 0.1, 1000);
+  this.camera.position.z = 190; 
+
+  // Lighting with enhanced instrument visibility
+  this.addLights();
 
   this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+  this.renderer.setSize(w, h);
   this.container.appendChild(this.renderer.domElement);
 
   this.pitch = 0;
@@ -23,68 +27,119 @@ function Navball(containerID) {
   this.heading = 0;
 
   this.createSphere();
-  this.addLights();
   this.animate();
 }
 
 Navball.prototype.createSphere = function() {
-  // Generate a procedural Navball texture (Blue for Sky, Brown for Ground)
-  var canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 256;
-  var ctx = canvas.getContext('2d');
+  const canvas = document.createElement('canvas');
+  canvas.width = 2048;
+  canvas.height = 1024;
+  const ctx = canvas.getContext('2d');
 
-  // Sky (Top half)
-  ctx.fillStyle = '#0066cc';
-  ctx.fillRect(0, 0, 512, 128);
-  // Ground (Bottom half)
-  ctx.fillStyle = '#663300';
-  ctx.fillRect(0, 128, 512, 128);
+  // Brighter Sky: Horizon to Zenith
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, 512);
+  skyGrad.addColorStop(0, '#00264d'); 
+  skyGrad.addColorStop(0.5, '#004d99');
+  skyGrad.addColorStop(1, '#00b3ff'); 
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, 2048, 512);
 
-  // Horizon line
-  ctx.strokeStyle = 'white';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, 128);
-  ctx.lineTo(512, 128);
-  ctx.stroke();
+  // Brighter Ground: Horizon to Nadir
+  const gndGrad = ctx.createLinearGradient(0, 512, 0, 1024);
+  gndGrad.addColorStop(0, '#663300'); 
+  gndGrad.addColorStop(1, '#331a00'); 
+  ctx.fillStyle = gndGrad;
+  ctx.fillRect(0, 512, 2048, 512);
 
-  // Pitch lines & Numbers
+  // Glowing Horizon Line
+  ctx.shadowBlur = 15;
+  ctx.shadowColor = 'rgba(255,255,255,0.5)';
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(0, 512); ctx.lineTo(2048, 512); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Precision Pitch and Ticks
   ctx.textAlign = 'center';
-  ctx.font = 'bold 14px Roboto Mono';
-  ctx.fillStyle = 'white';
-  for (var i = -8; i <= 8; i++) {
-    if (i === 0) continue;
-    var y = 128 - (i * 12.8);
+  ctx.textBaseline = 'middle';
+  
+  for (let p = -80; p <= 80; p += 5) { // 5 degree increments
+    if (p === 0) continue;
+    const y = 512 - (p * 5.68); // Rescaled for 1024 height
+    const pRad = p * (Math.PI / 180);
+    const isMajor = (p % 10 === 0);
+    
+    // Proportional Length
+    const lineHalfWidth = Math.cos(pRad) * (isMajor ? 80 : 40);
+    
+    ctx.strokeStyle = isMajor ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = isMajor ? 4 : 2;
+    
     ctx.beginPath();
-    ctx.moveTo(230, y);
-    ctx.lineTo(282, y);
+    ctx.moveTo(1024 - lineHalfWidth, y);
+    ctx.lineTo(1024 + lineHalfWidth, y);
     ctx.stroke();
-    ctx.fillText(i * 10, 215, y + 5);
-    ctx.fillText(i * 10, 297, y + 5);
+
+    if (isMajor && Math.abs(p) <= 70) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 36px Orbitron, sans-serif';
+      // Offset text slightly more for readability
+      const textOffset = lineHalfWidth + 60;
+      ctx.fillText(Math.abs(p), 1024 - textOffset, y);
+      ctx.fillText(Math.abs(p), 1024 + textOffset, y);
+    }
   }
 
-  var texture = new THREE.CanvasTexture(canvas);
-  var geometry = new THREE.SphereGeometry(50, 48, 48); // Radius 50 like Houston
-  var material = new THREE.MeshPhongMaterial({
-    map: texture,
-    shininess: 80,
-    specular: 0x222222
+  // Stylish Cardinal Headings & North Marker
+  const labels = [['N', 0, '#ff3333'], ['E', 512, '#ffffff'], ['S', 1024, '#ffffff'], ['W', 1536, '#ffffff']];
+  labels.forEach(l => {
+    ctx.fillStyle = l[2];
+    ctx.font = 'bold 60px Orbitron';
+    ctx.fillText(l[0], l[1], 505);
+    
+    if (l[0] === 'N') {
+      // Draw Red North Triangle
+      ctx.beginPath();
+      ctx.moveTo(l[1], 440);
+      ctx.lineTo(l[1]-20, 480);
+      ctx.lineTo(l[1]+20, 480);
+      ctx.closePath();
+      ctx.fill();
+    }
   });
+
+  // Use high-fidelity texture if available, fallback to procedural
+  const loader = new THREE.TextureLoader();
+  const texture = loader.load('assets/images/navball.png', function() {
+    // Loaded successfully
+    material.map = texture;
+    material.needsUpdate = true;
+  }, undefined, function() {
+    // Error loading, keep procedural canvas texture
+  });
+
+  const canvasTexture = new THREE.CanvasTexture(canvas);
+  canvasTexture.anisotropy = 16;
+  canvasTexture.minFilter = THREE.LinearMipMapLinearFilter;
+
+  const geometry = new THREE.SphereGeometry(50, 128, 128);
+  const material = new THREE.MeshLambertMaterial({
+    map: canvasTexture,
+    shading: THREE.SmoothShading
+  });
+
+  // Global High-Fidelity Lighting
+  this.scene.add(new THREE.AmbientLight(0xffffff, 1.1)); 
+  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+  hemiLight.position.set(0, 500, 0);
+  this.scene.add(hemiLight);
 
   this.sphere = new THREE.Mesh(geometry, material);
   this.scene.add(this.sphere);
 };
 
-Navball.prototype.addLights = function() {
-  this.scene.add(new THREE.AmbientLight(0xaaaaaa));
-  var light1 = new THREE.DirectionalLight(0xffffff, 1);
-  light1.position.set(1500, 1500, 500);
-  var light2 = new THREE.DirectionalLight(0xffffff, 0.5);
-  light2.position.set(-1500, -1500, 500);
-  this.scene.add(light1);
-  this.scene.add(light2);
-};
+// Navball lighting is now handled during sphere creation
+Navball.prototype.addLights = function() {};
 
 /**
  * Update orientation from Telemachus data.

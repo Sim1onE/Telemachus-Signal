@@ -11,7 +11,7 @@ class Telemachus {
     this.receiverFunctions = [];
     this.subscribedFields = {};
     this.orbitingBodies = this.getOrbitalBodies();
-    this.rate = 100;
+    this.rate = 500;
     this.loopTimeout = null;
 
     // Start the polling loop
@@ -69,7 +69,7 @@ class Telemachus {
     this.sendMessage({ [cmd]: cmd });
   }
 
-  sendNodeAction(action, utOffset = 1000) {
+  sendNodeAction(action, nodeIndex = 0, utOffset = 1000) {
     if (action === 'add') {
       // We need current UT to place the node
       this.sendMessage({ "t.universalTime": "t.universalTime" }, (data) => {
@@ -78,7 +78,7 @@ class Telemachus {
         this.sendMessage({ [cmd]: cmd });
       });
     } else {
-      const cmd = `o.removeManeuverNode[0]`; // Remove first/active node
+      const cmd = `o.removeManeuverNode[${nodeIndex}]`; 
       this.sendMessage({ [cmd]: cmd });
     }
   }

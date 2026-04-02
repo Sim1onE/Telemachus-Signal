@@ -15,7 +15,8 @@
     --border-color: rgba(0, 255, 204, 0.2);
 }
 
-body, html {
+body,
+html {
     margin: 0;
     padding: 0;
     width: 100%;
@@ -34,17 +35,29 @@ body, html {
     width: 100%;
     height: 100%;
     z-index: -1;
-    background: 
-        radial-gradient(1px 1px at 20% 30%, #fff, rgba(0,0,0,0)),
-        radial-gradient(1px 1px at 40% 70%, #fff, rgba(0,0,0,0)),
-        radial-gradient(1px 1px at 50% 10%, #fff, rgba(0,0,0,0));
+    background:
+        radial-gradient(1px 1px at 20% 30%, #fff, rgba(0, 0, 0, 0)),
+        radial-gradient(1px 1px at 40% 70%, #fff, rgba(0, 0, 0, 0)),
+        radial-gradient(1px 1px at 50% 10%, #fff, rgba(0, 0, 0, 0));
     background-size: 550px 550px;
     opacity: 0.4;
 }
 
-#map-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+#map-container {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
 
-#ui-overlay { position: absolute; top: 20px; left: 20px; pointer-events: none; z-index: 10; }
+#ui-overlay {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    pointer-events: none;
+    z-index: 10;
+}
 
 #vessel-name {
     margin: 0;
@@ -58,7 +71,12 @@ body, html {
     padding-left: 12px;
 }
 
-#time-readout { font-size: 0.8rem; color: #888; margin-top: 5px; padding-left: 15px; }
+#time-readout {
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 5px;
+    padding-left: 15px;
+}
 
 /* Sidebar Overview */
 #sidebar {
@@ -86,7 +104,7 @@ body, html {
 
 .control-group {
     padding: 10px 15px;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .control-group label {
@@ -100,7 +118,7 @@ body, html {
 .custom-select {
     width: 100%;
     background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255,255,255,0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     color: var(--text-color);
     padding: 4px;
     font-size: 0.75rem;
@@ -120,7 +138,9 @@ body, html {
     transition: all 0.2s;
 }
 
-.action-btn:hover { background: var(--btn-hover); }
+.action-btn:hover {
+    background: var(--btn-hover);
+}
 
 .action-btn.secondary {
     border-color: #555;
@@ -131,16 +151,25 @@ body, html {
 /* Navball Container */
 #navball-container {
     position: absolute;
-    bottom: 180px;
-    left: 20px;
-    width: 160px;
-    height: 160px;
-    background: rgba(0,0,0,0.5);
-    border: 1px solid var(--border-color);
+    bottom: 22px;
+    right: 32px;
+    width: 170px;
+    height: 170px;
+    z-index: 150;
+    pointer-events: none;
+    border: 2px solid rgba(0, 255, 204, 0.4);
     border-radius: 50%;
-    overflow: hidden;
-    z-index: 30;
-    backdrop-filter: blur(5px);
+    background: radial-gradient(circle, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.8) 100%);
+    box-shadow: 0 0 40px rgba(0, 255, 204, 0.3);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-sizing: border-box;
+}
+
+#navball-container canvas {
+    border-radius: 50%;
+    /* Ensuring the sphere fits the HUD circle */
 }
 
 /* Bottom HUD Styling - Stabilized Responsive Layout */
@@ -149,23 +178,17 @@ body, html {
     bottom: 15px;
     left: 15px;
     right: 15px;
-    min-height: 120px;
-    background: rgba(10, 10, 15, 0.85);
-    backdrop-filter: blur(25px) saturate(200%);
-    -webkit-backdrop-filter: blur(25px) saturate(200%);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    height: 200px;
+    background: rgba(10, 10, 15, 0.9);
+    backdrop-filter: blur(25px);
+    border: 1px solid rgba(0, 255, 204, 0.3);
     border-radius: 12px;
     display: flex;
-    flex-wrap: wrap; /* Allows wrapping on smaller screens */
-    align-items: center;
-    padding: 5px 0;
     z-index: 100;
-    box-shadow: 0 8px 64px 0 rgba(0, 0, 0, 0.9);
 }
 
 .hud-section {
     flex: 1;
-    min-width: 250px; /* Minimum width before wrapping */
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -190,11 +213,22 @@ body, html {
 
 .hud-data {
     font-family: 'Roboto Mono', monospace;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     color: var(--accent-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.4;
+}
+
+.data-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 2px 0;
+}
+
+.data-row span:last-child {
+    color: #fff;
+    font-weight: bold;
 }
 
 /* Maneuver Sliders - Spring Loaded */
@@ -218,9 +252,17 @@ body, html {
     text-align: right;
 }
 
-.slider-group.pro label { color: #00ff44; }
-.slider-group.norm label { color: #cc00ff; }
-.slider-group.rad label { color: #0088ff; }
+.slider-group.pro label {
+    color: #00ff44;
+}
+
+.slider-group.norm label {
+    color: #cc00ff;
+}
+
+.slider-group.rad label {
+    color: #0088ff;
+}
 
 .slider-group input[type=range] {
     flex: 1;
@@ -244,9 +286,17 @@ body, html {
     border-radius: 2px;
 }
 
-.slider-group.pro input[type=range]::-webkit-slider-thumb { background: #00ff44; }
-.slider-group.norm input[type=range]::-webkit-slider-thumb { background: #cc00ff; }
-.slider-group.rad input[type=range]::-webkit-slider-thumb { background: #0088ff; }
+.slider-group.pro input[type=range]::-webkit-slider-thumb {
+    background: #00ff44;
+}
+
+.slider-group.norm input[type=range]::-webkit-slider-thumb {
+    background: #cc00ff;
+}
+
+.slider-group.rad input[type=range]::-webkit-slider-thumb {
+    background: #0088ff;
+}
 
 .placement-controls {
     display: flex;
@@ -254,7 +304,7 @@ body, html {
 }
 
 .placement-controls .custom-input {
-    background: rgba(0,0,0,0.4);
+    background: rgba(0, 0, 0, 0.4);
     border: 1px solid var(--border-color);
     color: white;
     font-family: 'Roboto Mono', monospace;
