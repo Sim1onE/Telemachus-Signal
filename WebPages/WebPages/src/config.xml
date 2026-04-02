@@ -1,6 +1,8 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <config>
-  <int name="PORT">8085</int>
-  <string name="IPADDRESS">-1</string>
-<int name="PARTLESS">1</int>
+    <int name="PORT">8085</int>
+    <string name="IPADDRESS">0.0.0.0</string>
+    <int name="PARTLESS">1</int>
+    <int name="USE_SSL">1</int>
+    <int name="HAS_PROMPTED_SSL">0</int>
 </config>

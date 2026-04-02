@@ -9,6 +9,7 @@ using System.Text;
 using System.Timers;
 using UnityEngine;
 using WebSocketSharp.Server;
+using System.Security.Cryptography.X509Certificates;
 
 namespace Telemachus
 {
@@ -45,6 +46,32 @@ namespace Telemachus
             return serverConfig.ValidIpAddresses.First().ToString();
         }
 
+        public static ServerConfiguration GetServerConfig() => serverConfig;
+        public static bool IsServerRunning() => webServer != null && webServer.IsListening;
+
+        static public void SaveConfig()
+        {
+            config.SetValue("PORT", serverConfig.port);
+            config.SetValue("IPADDRESS", serverConfig.ipAddress.ToString());
+            config.SetValue("USE_SSL", serverConfig.UseSsl ? 1 : 0);
+            config.SetValue("HAS_PROMPTED_SSL", serverConfig.HasPromptedSsl ? 1 : 0);
+            config.save();
+        }
+
+        static public void StartServer() => startDataLink();
+        
+        static public void SetSslPreference(bool useSsl)
+        {
+            serverConfig.UseSsl = useSsl;
+            serverConfig.HasPromptedSsl = true;
+            SaveConfig();
+            
+            if (IsServerRunning()) {
+                StopServer();
+                StartServer();
+            }
+        }
+
         static public string getServerPort()
         {
             return serverConfig.port.ToString();
@@ -75,12 +102,30 @@ namespace Telemachus
                     var apiRoute = new APIRouteResponsibility(apiInstance, rateTracker);
                     webDispatcher.AddResponder(apiRoute);
 
+                    // --- SSL CONFIGURATION PRE-CHECK ---
+                    X509Certificate2 cert = null;
+                    if (serverConfig.UseSsl)
+                    {
+                        cert = TelemachusCertificateManager.GetServerCertificate(serverConfig);
+                        if (cert == null)
+                        {
+                            PluginLogger.print("[SSL] Failed to load certificate. Falling back to HTTP.");
+                            serverConfig.UseSsl = false;
+                        }
+                    }
+
                     // Create the server and associate the dispatcher
-                    // Using the port-only constructor makes the server more permissive with Host headers
                     if (serverConfig.ipAddress == System.Net.IPAddress.Any) {
-                        webServer = new HttpServer(serverConfig.port);
+                        webServer = serverConfig.UseSsl ? new HttpServer(serverConfig.port, true) : new HttpServer(serverConfig.port);
                     } else {
-                        webServer = new HttpServer(serverConfig.ipAddress, serverConfig.port);
+                        webServer = serverConfig.UseSsl ? new HttpServer(serverConfig.ipAddress, serverConfig.port, true) : new HttpServer(serverConfig.ipAddress, serverConfig.port);
+                    }
+
+                    if (serverConfig.UseSsl && cert != null)
+                    {
+                        webServer.SslConfiguration.ServerCertificate = cert;
+                        webServer.SslConfiguration.EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12;
+                        PluginLogger.print("[SSL] HTTPS Enabled with certificate: " + cert.Subject);
                     }
                     
                     webServer.OnGet += (sender, e) => {
@@ -145,6 +190,8 @@ namespace Telemachus
         static private void readConfiguration()
         {
             config.load();
+            serverConfig.ValidIpAddresses.Clear();
+            serverConfig.ValidIpAddresses.Add(IPAddress.Loopback);
 
             // Read the port out of the config file
             int port = config.GetValue<int>("PORT");
@@ -179,11 +226,9 @@ namespace Telemachus
                 PluginLogger.print("No IP address in configuration file.");
             }
 
-            // Fill the serverconfig list of addresses.... if IPAddress.Any, then enumerate them
-            if (serverConfig.ipAddress == IPAddress.Any)
+            // Enumerate other interfaces if bound to Any
+            if (serverConfig.ipAddress.Equals(IPAddress.Any))
             {
-                // Build a list of addresses we will be able to recieve at
-                serverConfig.ValidIpAddresses.Add(IPAddress.Loopback);
                 try
                 {
                     foreach (var iface in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
@@ -196,7 +241,8 @@ namespace Telemachus
                                 && !IPAddress.IsLoopback(addr.Address))
                             {
                                 PluginLogger.print("Found LAN address: " + addr.Address + " on " + iface.Name);
-                                serverConfig.ValidIpAddresses.Add(addr.Address);
+                                if (!serverConfig.ValidIpAddresses.Contains(addr.Address))
+                                    serverConfig.ValidIpAddresses.Add(addr.Address);
                             }
                         }
                     }
@@ -209,15 +255,21 @@ namespace Telemachus
             }
             else
             {
-                serverConfig.ValidIpAddresses.Add(serverConfig.ipAddress);
+                if (!serverConfig.ValidIpAddresses.Contains(serverConfig.ipAddress))
+                    serverConfig.ValidIpAddresses.Add(serverConfig.ipAddress);
             }
 
             serverConfig.version = Assembly.GetExecutingAssembly().GetName().Version.ToString();
             serverConfig.name = "Telemachus";
 
+            serverConfig.UseSsl = config.GetValue<int>("USE_SSL") != 0;
+            serverConfig.HasPromptedSsl = config.GetValue<int>("HAS_PROMPTED_SSL") != 0;
             isPartless = config.GetValue<int>("PARTLESS") != 0;
-            PluginLogger.print("Partless:" + isPartless);
+            
+            PluginLogger.print("Partless:" + isPartless + " | SSL:" + serverConfig.UseSsl);
         }
+
+        static public void StopServer() => stopDataLink();
 
         static private void stopDataLink()
         {
