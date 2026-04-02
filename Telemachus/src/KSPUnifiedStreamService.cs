@@ -13,6 +13,7 @@ namespace Telemachus
         private class KSPAudioDownlink : MonoBehaviour
         {
             public Action<float[]> OnAudioBuffer;
+            public KSPUnifiedStreamService Parent;
             private AudioClip micClip;
             private string deviceName = null;
             private int lastMicPos = 0;
@@ -35,23 +36,30 @@ namespace Telemachus
             // --- FINAL RESAMPLE PHASE (Anti-Click v14.7) ---
             private double finalSrcPos = 0;
             private float _lastGameMonoSample = 0f;
+            private bool _isResamplerCold = true; // Cold start flag for PTT gating (v14.21)
             private bool _isMicBuffering = true;
             private float _micFadeGain = 0f;
-            
+
             // --- PACKET ORDERING FIX (v14.11) ---
             private ulong _fmodBlockCount = 0;
 
             void Update()
             {
                 // Check PTT key
-                if (Input.GetKey(KeyCode.RightControl) || Input.GetKey(KeyCode.LeftControl)) {
+                if (Input.GetKey(KeyCode.RightControl) || Input.GetKey(KeyCode.LeftControl))
+                {
                     pttActive = true;
                     pttHangTime = 0.3f;
-                } else {
-                    if (pttHangTime > 0) {
+                }
+                else
+                {
+                    if (pttHangTime > 0)
+                    {
                         pttHangTime -= Time.unscaledDeltaTime;
                         pttActive = true;
-                    } else {
+                    }
+                    else
+                    {
                         pttActive = false;
                     }
                 }
@@ -69,39 +77,51 @@ namespace Telemachus
                 _cachedOutputSampleRate = AudioSettings.outputSampleRate;
 
                 // THREAD SAFETY: Read Mic on Main Thread and Feed Thread-Safe RingBuffer
-                if (micActive) {
+                if (micActive)
+                {
                     int currPos = Microphone.GetPosition(deviceName);
-                    
-                    if (currPos == lastSeenPos) {
+
+                    if (currPos == lastSeenPos)
+                    {
                         stallTimer += Time.unscaledDeltaTime;
-                        if (stallTimer > 1.5f) {
+                        if (stallTimer > 1.5f)
+                        {
                             PluginLogger.print("[Downlink] Mic STALL detected. Resetting driver...");
                             StopMic();
                             StartMic(deviceName);
                             stallTimer = 0;
                         }
-                    } else {
+                    }
+                    else
+                    {
                         stallTimer = 0;
                         lastSeenPos = currPos;
                     }
 
-                    if (pttActive && micClip != null) {
+                    if (pttActive && micClip != null)
+                    {
                         int available = (currPos >= lastMicPos) ? (currPos - lastMicPos) : (micClip.samples - lastMicPos + currPos);
-                        if (available > 0) {
+                        if (available > 0)
+                        {
                             float[] temp = new float[available];
                             micClip.GetData(temp, lastMicPos); // Call Unity API on Main Thread Safe!
                             lastMicPos = (lastMicPos + available) % micClip.samples;
 
-                            lock (_micLock) {
-                                for (int i = 0; i < temp.Length; i++) {
+                            lock (_micLock)
+                            {
+                                for (int i = 0; i < temp.Length; i++)
+                                {
                                     _micRingBuffer[_micWritePtr] = temp[i];
                                     _micWritePtr = (_micWritePtr + 1) % _micRingBuffer.Length;
                                 }
                             }
                         }
-                    } else if (!pttActive) {
+                    }
+                    else if (!pttActive)
+                    {
                         lastMicPos = currPos; // Consume silently
-                        lock (_micLock) {
+                        lock (_micLock)
+                        {
                             _micWritePtr = 0;
                             _micReadPtr = 0;
                         }
@@ -156,8 +176,14 @@ namespace Telemachus
                 int safeSampleRate = _cachedOutputSampleRate > 0 ? _cachedOutputSampleRate : 48000;
                 int gameLen = data.Length / channels;
                 float[] gameMono = new float[gameLen];
-                
-                if (!pttActive) return;
+
+                if (!pttActive) 
+                {
+                    _isResamplerCold = true;
+                    if (Parent != null) Parent._lastAudioCaptureUt = -1.0; // Reset burst timing (v14.21)
+                    return;
+                }
+
 
                 // 1. Process Game FX (Downmix to Mono)
                 for (int i = 0; i < gameLen; i++)
@@ -175,7 +201,7 @@ namespace Telemachus
                     lock (_micLock)
                     {
                         int available = (_micWritePtr - (int)_micReadPtr + _micRingBuffer.Length) % _micRingBuffer.Length;
-                        
+
                         // v14.9 ELASTIC MIC BUFFER
                         // Wait for 50ms of audio (approx 1100 samples) before feeding FMOD to prevent starvation
                         bool hasEnoughCushion = available > (micFreq * 0.05f);
@@ -190,14 +216,16 @@ namespace Telemachus
 
                             float micV = 0f;
                             // Only advance read pointer if we haven't faded out completely to avoid garbage reads
-                            if (_micFadeGain > 0.001f) {
+                            if (_micFadeGain > 0.001f)
+                            {
                                 int i0 = (int)_micReadPtr;
                                 int i1 = (i0 + 1) % _micRingBuffer.Length;
                                 float frac = (float)(_micReadPtr - (int)_micReadPtr);
 
                                 micV = (_micRingBuffer[i0] + (_micRingBuffer[i1] - _micRingBuffer[i0]) * frac) * 3.5f; // Boost Pilot
-                                
-                                if (!_isMicBuffering) {
+
+                                if (!_isMicBuffering)
+                                {
                                     _micReadPtr = (_micReadPtr + ratio) % _micRingBuffer.Length;
                                 }
                             }
@@ -208,24 +236,31 @@ namespace Telemachus
                 }
 
                 // 3. Resample Final Mix (GameRate -> 22050Hz for transmission)
+                if (_isResamplerCold) {
+                    finalSrcPos = 0;
+                    _lastGameMonoSample = gameMono[0];
+                    _isResamplerCold = false;
+                }
+
                 double finalRatio = (double)safeSampleRate / 22050.0;
-                
+
                 int targetLen = 0;
                 double checkPos = finalSrcPos;
-                while (checkPos < gameLen - 1) {
+                while (checkPos < gameLen - 1)
+                {
                     targetLen++;
                     checkPos += finalRatio;
                 }
 
                 float[] finalSamples = new float[targetLen];
                 double currentPos = finalSrcPos;
-                
+
                 for (int i = 0; i < targetLen; i++)
                 {
                     int i0 = (int)Math.Floor(currentPos);
                     int i1 = i0 + 1;
                     float frac = (float)(currentPos - i0);
-                    
+
                     // ANTI-CLICK (v14.7): Phase carry-over
                     float s0 = i0 < 0 ? _lastGameMonoSample : gameMono[i0];
                     float s1 = gameMono[i1]; // i1 is always >= 0
@@ -233,7 +268,7 @@ namespace Telemachus
                     finalSamples[i] = s0 + (s1 - s0) * frac;
                     currentPos += finalRatio;
                 }
-                
+
                 finalSrcPos = currentPos - gameLen;
                 if (gameLen > 0) _lastGameMonoSample = gameMono[gameLen - 1]; // Store phase for next block
 
@@ -289,6 +324,7 @@ namespace Telemachus
                 {
                     audioDownlink = listener.gameObject.AddComponent<KSPAudioDownlink>();
                     audioDownlink.OnAudioBuffer = HandleGameAudio;
+                    audioDownlink.Parent = this;
                 }
             });
 
@@ -317,11 +353,11 @@ namespace Telemachus
                 {
                     // Full 34-byte header support for Uplink Sync
                     if (e.RawData.Length < HEADER_SIZE) return;
-                    
+
                     double creationUT = BitConverter.ToDouble(e.RawData, 1);
                     byte[] pcmData = new byte[e.RawData.Length - HEADER_SIZE];
                     Buffer.BlockCopy(e.RawData, HEADER_SIZE, pcmData, 0, pcmData.Length);
-                    
+
                     HandleIncomingAudio(pcmData, creationUT);
                 }
             }
@@ -388,6 +424,9 @@ namespace Telemachus
             _fmodAudioBlockCount++;
             double currentUt = Planetarium.GetUniversalTime();
 
+            // v14.18/14.21 Fix: Reset timing on first packet of PTT burst to avoid drift snaps
+            if (_lastAudioCaptureUt < 0) _lastAudioCaptureUt = currentUt;
+            
             // v14.18 Fix: Robust Chronological Stamping
             // If KSP physics freezes (asteroids, vessel load), GetUniversalTime stands still.
             // FMOD however continues to flow audio. We MUST increment the timestamp by the 
@@ -421,7 +460,8 @@ namespace Telemachus
 
             // Diagnostics (Capture only)
             _downlinkPacketCount++;
-            if (Time.unscaledTime - _lastDownlinkDiag > 2.0f) {
+            if (Time.unscaledTime - _lastDownlinkDiag > 2.0f)
+            {
                 _pendingDownlinkMsg = $"[Radio-Diag] DOWNLINK Output: {_downlinkPacketCount} packets in 2s (Steady rate = ~40-50)";
                 _downlinkPacketCount = 0;
                 _lastDownlinkDiag = Time.unscaledTime;
@@ -438,9 +478,11 @@ namespace Telemachus
         {
             TelemachusAudioController.EnsureInstance();
 
-            if (_needsAudioInit && audioDownlink == null) {
+            if (_needsAudioInit && audioDownlink == null)
+            {
                 AudioListener listener = UnityEngine.Object.FindObjectOfType<AudioListener>();
-                if (listener != null) {
+                if (listener != null)
+                {
                     audioDownlink = listener.gameObject.AddComponent<KSPAudioDownlink>();
                     audioDownlink.OnAudioBuffer = HandleGameAudio;
                     _needsAudioInit = false;
@@ -448,7 +490,8 @@ namespace Telemachus
                 }
             }
 
-            if (_pendingDownlinkMsg != null) {
+            if (_pendingDownlinkMsg != null)
+            {
                 PluginLogger.print(_pendingDownlinkMsg);
                 _pendingDownlinkMsg = null;
             }
