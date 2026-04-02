@@ -125,23 +125,34 @@ namespace Telemachus
 
         private static void GenerateSelfSignedCerts(ServerConfiguration config, string pfxPath, string rootCerPath)
         {
-            // Build a list of SANs formatted as a PowerShell array: "localhost","127.0.0.1",...
-            var sans = new List<string> { "\"localhost\"", "\"127.0.0.1\"" };
+            // Build a literal SAN text string for the X509v3 Subject Alternative Name extension.
+            // Browsers strictly require IPs to be labeled as "IPAddress=" and not "DNS=".
+            var sanEntries = new List<string> { "DNS=localhost", "IPAddress=127.0.0.1" };
+            
+            // Add local hostname
+            try 
+            { 
+                string hostName = System.Net.Dns.GetHostName();
+                if (!string.IsNullOrEmpty(hostName)) sanEntries.Add($"DNS={hostName}"); 
+            } 
+            catch { }
+
             foreach (var ip in config.ValidIpAddresses)
             {
                 string ipStr = ip.ToString();
-                if (ipStr != "127.0.0.1" && ipStr != "0.0.0.0")
+                if (ipStr != "127.0.0.1" && ipStr != "0.0.0.0" && ipStr != "::1")
                 {
-                    sans.Add($"\"{ipStr}\"");
+                    sanEntries.Add($"IPAddress={ipStr}");
                 }
             }
-            string sanList = string.Join(",", sans);
+            
+            string sanText = "{text}" + string.Join("&", sanEntries);
 
             string psScript = $@"
 $ErrorActionPreference = 'Stop'
 $pwd = ConvertTo-SecureString -String '{config.CertificatePassword}' -Force -AsPlainText
 $root = New-SelfSignedCertificate -Type Custom -Subject '{ROOT_SUBJECT}' -KeyUsage CertSign -KeyExportPolicy Exportable -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.19={{text}}CA=1&pathlength=0')
-$hostCert = New-SelfSignedCertificate -Type Custom -Subject 'CN=Telemachus Host' -Signer $root -KeyExportPolicy Exportable -CertStoreLocation 'Cert:\CurrentUser\My' -DnsName {sanList}
+$hostCert = New-SelfSignedCertificate -Type Custom -Subject 'CN=Telemachus Host' -Signer $root -KeyExportPolicy Exportable -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.17={sanText}')
 Export-PfxCertificate -Cert $hostCert -FilePath '{pfxPath}' -Password $pwd
 Export-Certificate -Cert $root -FilePath '{rootCerPath}'
 $root | Remove-Item
@@ -163,7 +174,7 @@ $hostCert | Remove-Item
                 string error = process.StandardError.ReadToEnd();
                 process.WaitForExit();
                 if (process.ExitCode != 0) throw new Exception("PowerShell Cert Generation Failed: " + error);
-                PluginLogger.print("[SSL] PowerShell cert generation successful with SANs: " + sanList);
+                PluginLogger.print("[SSL] PowerShell cert generation successful with SAN text: " + sanText);
             }
         }
     }
