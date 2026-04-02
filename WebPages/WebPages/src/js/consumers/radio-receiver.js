@@ -22,9 +22,9 @@ class RadioReceiver {
         this.reservoirStatusMs = 0;
         this.isBuffering = true;
 
-        // Sub to Type 2 (Audio Downlink)
+        this.playbackInterval = null;
         this.signalLink.on(PacketType.AUDIO_DOWNLINK, this.handleIncomingAudio.bind(this));
-        console.log("[Radio-v14.17] Receiver Initialized");
+        console.log("[Radio-v14.19] Receiver Initialized");
     }
 
     async start() {
@@ -47,23 +47,27 @@ class RadioReceiver {
                 this.isBuffering = e.data.isBuffering;
                 this._adaptiveRatio = e.data.ratio;
             } else if (e.data.type === 'click-detected') {
-                console.warn(`[Radio-Diag v14.17] ⚠️ DOWNLINK CLICK DETECTED! Phase Jump: ${e.data.delta.toFixed(2)}V`);
+                console.warn(`[Radio-Diag v14.19] ⚠️ DOWNLINK CLICK DETECTED! Phase Jump: ${e.data.delta.toFixed(2)}V`);
             }
         };
 
-        this.playbackLoop();
+        // v14.19: Use high-frequency interval instead of requestAnimationFrame
+        // to decouple audio from rendering frame rate/lag.
+        if (this.playbackInterval) clearInterval(this.playbackInterval);
+        this.playbackInterval = setInterval(() => this.playbackLoop(), 20);
     }
 
     stop() {
         this.isRunning = false;
+        if (this.playbackInterval) {
+            clearInterval(this.playbackInterval);
+            this.playbackInterval = null;
+        }
         this.sync.clear();
         if (this.processor) {
             this.processor.disconnect();
             this.processor = null;
         }
-        this.ringBuffer.fill(0);
-        this.readPtr = 0;
-        this.writePtr = 0;
     }
 
     handleIncomingAudio(metadata, rawData) {
@@ -113,35 +117,19 @@ class RadioReceiver {
                 
                 const now = Date.now();
                 if (now - this._lastLogTime > 2000) {
-                    console.log(`[Radio-Diag v14.17] DOWNLINK (Worklet): Sync=${this._adaptiveRatio ? this._adaptiveRatio.toFixed(3) : 1}x Buffering=${this.isBuffering} Reservoir=${this.reservoirStatusMs.toFixed(1)}ms Packets=${this._packetCount}`);
+                    console.log(`[Radio-Diag v14.19] DOWNLINK (Worklet): Sync=${this._adaptiveRatio ? this._adaptiveRatio.toFixed(3) : 1}x Buffering=${this.isBuffering} Reservoir=${this.reservoirStatusMs.toFixed(1)}ms Packets=${this._packetCount}`);
                     this._packetCount = 0;
                     this._lastLogTime = now;
                 }
                 
-                // Adaptive Sync (P-Controller on Bridge)
-                const errorS = (this.reservoirStatusMs / 1000) - 0.200;
-                const newRatio = Math.max(0.95, Math.min(1.05, 1.0 + (errorS * 0.20)));
-                this.processor.port.postMessage({ type: 'set-sync', ratio: newRatio });
-
                 // CATCH-UP LOGIC:
-                const radioRate = 22050;
                 const tooFarAhead = this.reservoirStatusMs > 660; 
                 if (tooFarAhead) { 
-                    // Snap read pointer forward (Logic moved to main thread for writePtr knowledge)
-                    // Note: Worklet writePtr is ahead. We can use force-snap to re-align.
-                    // But with Worklet isolation, snapping is even easier.
-                    // However, we just let the adaptive ratio handle it if it's moderate.
-                    // If it's extreme (>660ms), we snap.
-                    // To snap, we need to know the writePtr.
-                    // The telemetry gives us reservoirMs. 
-                    // So we can send a 'snap' message that means 'readPtr = writePtr - 250ms'
-                    this.processor.port.postMessage({ type: 'force-snap', readPtr: -1 }); // Special value handled in worklet
-                    console.warn(`[Radio-Diag v14.17] Buffer overflow snap triggered. Reservoir was ${this.reservoirStatusMs.toFixed(1)}ms. Volume ducked to crossfade.`);
+                    this.processor.port.postMessage({ type: 'force-snap', readPtr: -1 }); 
+                    console.warn(`[Radio-Diag v14.19] Buffer overflow snap triggered. Reservoir was ${this.reservoirStatusMs.toFixed(1)}ms. Volume ducked to crossfade.`);
                 }
             }
         }
-
-        requestAnimationFrame(() => this.playbackLoop());
     }
 }
 

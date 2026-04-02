@@ -381,14 +381,27 @@ namespace Telemachus
         }
 
         private ulong _fmodAudioBlockCount = 0;
+        private double _lastAudioCaptureUt = -1.0;
 
         private void HandleGameAudio(float[] samples)
         {
             _fmodAudioBlockCount++;
-            // v14.11 Fix: FMOD runs multiple blocks per Unity Main Thread physics tick.
-            // This leaves Planetarium.GetUniversalTime() frozen during those blocks,
-            // resulting in identical `ut` on consecutive packets and JS sort scrambling.
-            double uniqueUt = Planetarium.GetUniversalTime() + (_fmodAudioBlockCount * 0.00000001);
+            double currentUt = Planetarium.GetUniversalTime();
+
+            // v14.18 Fix: Robust Chronological Stamping
+            // If KSP physics freezes (asteroids, vessel load), GetUniversalTime stands still.
+            // FMOD however continues to flow audio. We MUST increment the timestamp by the 
+            // real duration of the audio block (22050Hz) to prevent a "burst catch-up" at the browser.
+            double blockDuration = (double)samples.Length / 22050.0;
+            if (_lastAudioCaptureUt < 0) _lastAudioCaptureUt = currentUt;
+
+            _lastAudioCaptureUt += blockDuration;
+
+            // Catch-up if the game clock is actually faster than our capture stream
+            if (currentUt > _lastAudioCaptureUt) _lastAudioCaptureUt = currentUt;
+
+            // Add micro-offset to ensure uniqueness even within the same block if necessary
+            double uniqueUt = _lastAudioCaptureUt + (_fmodAudioBlockCount % 100 * 0.00000001);
 
             // Simple 16-bit PCM conversion
             byte[] pcm = new byte[samples.Length * 2];
