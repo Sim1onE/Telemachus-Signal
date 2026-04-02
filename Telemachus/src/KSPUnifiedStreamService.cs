@@ -20,21 +20,28 @@ namespace Telemachus
             private int micFreq = 22050;
             private volatile bool pttActive = false;
 
-            private float[] resampleBuffer;
-            private double micSrcPos = 0;
-            private double finalSrcPos = 0;
-            
+            // --- DIAGNOSTICS & STATE ---
             private int lastSeenPos = -1;
             private float stallTimer = 0;
-
             private float pttHangTime = 0f;
+
+            // --- THREAD SAFETY CACHES & BUFFERS (v14.7) ---
+            private int _cachedOutputSampleRate = 48000;
+            private float[] _micRingBuffer = new float[22050 * 5]; // 5 seconds
+            private int _micWritePtr = 0;
+            private double _micReadPtr = 0;
+            private readonly object _micLock = new object();
+
+            // --- FINAL RESAMPLE PHASE (Anti-Click v14.7) ---
+            private double finalSrcPos = 0;
+            private float _lastGameMonoSample = 0f;
 
             void Update()
             {
-                // Check PTT key (Standard Control keys for communications)
+                // Check PTT key
                 if (Input.GetKey(KeyCode.RightControl) || Input.GetKey(KeyCode.LeftControl)) {
                     pttActive = true;
-                    pttHangTime = 0.3f; // 300ms hang time ensures the last word is not clipped
+                    pttHangTime = 0.3f;
                 } else {
                     if (pttHangTime > 0) {
                         pttHangTime -= Time.unscaledDeltaTime;
@@ -44,7 +51,6 @@ namespace Telemachus
                     }
                 }
 
-                // Auto-restart if the global device selection changed via Debug Window
                 string targetDevice = AudioCaptureManager.SelectedDevice;
                 if (!string.IsNullOrEmpty(targetDevice) && targetDevice != deviceName && micActive)
                 {
@@ -54,10 +60,14 @@ namespace Telemachus
                     return;
                 }
 
-                // WATCHDOG: Detect if the Mic driver position is stalled (frozen circular buffer)
+                // THREAD SAFETY: Cache Unity Settings for Audio Thread
+                _cachedOutputSampleRate = AudioSettings.outputSampleRate;
+
+                // THREAD SAFETY: Read Mic on Main Thread and Feed Thread-Safe RingBuffer
                 if (micActive) {
-                    int curr = Microphone.GetPosition(deviceName);
-                    if (curr == lastSeenPos) {
+                    int currPos = Microphone.GetPosition(deviceName);
+                    
+                    if (currPos == lastSeenPos) {
                         stallTimer += Time.unscaledDeltaTime;
                         if (stallTimer > 1.5f) {
                             PluginLogger.print("[Downlink] Mic STALL detected. Resetting driver...");
@@ -67,14 +77,36 @@ namespace Telemachus
                         }
                     } else {
                         stallTimer = 0;
-                        lastSeenPos = curr;
+                        lastSeenPos = currPos;
+                    }
+
+                    if (pttActive && micClip != null) {
+                        int available = (currPos >= lastMicPos) ? (currPos - lastMicPos) : (micClip.samples - lastMicPos + currPos);
+                        if (available > 0) {
+                            float[] temp = new float[available];
+                            micClip.GetData(temp, lastMicPos); // Call Unity API on Main Thread Safe!
+                            lastMicPos = (lastMicPos + available) % micClip.samples;
+
+                            lock (_micLock) {
+                                for (int i = 0; i < temp.Length; i++) {
+                                    _micRingBuffer[_micWritePtr] = temp[i];
+                                    _micWritePtr = (_micWritePtr + 1) % _micRingBuffer.Length;
+                                }
+                            }
+                        }
+                    } else if (!pttActive) {
+                        lastMicPos = currPos; // Consume silently
+                        lock (_micLock) {
+                            _micWritePtr = 0;
+                            _micReadPtr = 0;
+                        }
                     }
                 }
             }
 
             void Start()
             {
-                AudioCaptureManager.Initialize(); // Ensure manager is ready
+                AudioCaptureManager.Initialize();
                 StartMic(AudioCaptureManager.SelectedDevice);
             }
 
@@ -85,7 +117,6 @@ namespace Telemachus
                     if (Microphone.devices.Length > 0)
                     {
                         deviceName = string.IsNullOrEmpty(target) ? Microphone.devices[0] : target;
-                        // Record a 10s buffer to avoid wrap-around glitcing
                         micClip = Microphone.Start(deviceName, true, 10, 22050);
                         micFreq = micClip.frequency;
                         micActive = true;
@@ -117,17 +148,11 @@ namespace Telemachus
             {
                 if (OnAudioBuffer == null) return;
 
+                int safeSampleRate = _cachedOutputSampleRate > 0 ? _cachedOutputSampleRate : 48000;
                 int gameLen = data.Length / channels;
                 float[] gameMono = new float[gameLen];
-                if (!pttActive)
-                {
-                    // Global MUTE. No audio leaves Kerbal unless the pilot holds PTT.
-                    if (micActive) {
-                        lastMicPos = Microphone.GetPosition(deviceName);
-                        micSrcPos = 0;
-                    }
-                    return;
-                }
+                
+                if (!pttActive) return;
 
                 // 1. Process Game FX (Downmix to Mono)
                 for (int i = 0; i < gameLen; i++)
@@ -137,67 +162,60 @@ namespace Telemachus
                     gameMono[i] = sum / channels;
                 }
 
-                // 2. Mix Pilot Mic (if PTT is active)
-                if (micActive && micClip != null && pttActive)
+                // 2. Mix Pilot Mic (Thread-Safe from Ring Buffer)
+                if (micActive)
                 {
-                    int currPos = Microphone.GetPosition(deviceName);
-                    float ratio = (float)micFreq / (float)AudioSettings.outputSampleRate;
+                    float ratio = (float)micFreq / (float)safeSampleRate;
                     int micLenNeeded = Mathf.CeilToInt(gameLen * ratio);
 
-                    int available = (currPos >= lastMicPos) ? (currPos - lastMicPos) : (micClip.samples - lastMicPos + currPos);
-
-                    if (available >= micLenNeeded)
+                    lock (_micLock)
                     {
-                        float[] temp = new float[micLenNeeded];
-                        micClip.GetData(temp, lastMicPos);
-                        lastMicPos = (lastMicPos + micLenNeeded) % micClip.samples;
-
-                        // Mix into gameMono (Resampled Mic -> Game Rate)
-                        double micPos = micSrcPos;
-                        for (int i = 0; i < gameLen; i++)
+                        int available = (_micWritePtr - (int)_micReadPtr + _micRingBuffer.Length) % _micRingBuffer.Length;
+                        if (available >= micLenNeeded)
                         {
-                            int i0 = (int)micPos;
-                            int i1 = Math.Max(0, Math.Min(i0 + 1, temp.Length - 1));
-                            float frac = (float)(micPos - i0);
-                            float micV = (temp[i0] + (temp[i1] - temp[i0]) * frac) * 3.5f; // Boost Pilot
-                            gameMono[i] = Mathf.Clamp(gameMono[i] * 0.7f + micV, -1f, 1f); // Duck game slightly when talking
-                            micPos += ratio;
+                            for (int i = 0; i < gameLen; i++)
+                            {
+                                int i0 = (int)_micReadPtr;
+                                int i1 = (i0 + 1) % _micRingBuffer.Length;
+                                float frac = (float)(_micReadPtr - (int)_micReadPtr);
+
+                                float micV = (_micRingBuffer[i0] + (_micRingBuffer[i1] - _micRingBuffer[i0]) * frac) * 3.5f; // Boost Pilot
+                                gameMono[i] = Mathf.Clamp(gameMono[i] * 0.7f + micV, -1f, 1f); // Duck game
+                                _micReadPtr = (_micReadPtr + ratio) % _micRingBuffer.Length;
+                            }
                         }
-                        micSrcPos = Math.Max(0, micPos - micLenNeeded);
                     }
-                }
-                else if (micActive)
-                {
-                    // Sync Head even when silent
-                    lastMicPos = Microphone.GetPosition(deviceName);
-                    micSrcPos = 0;
                 }
 
                 // 3. Resample Final Mix (GameRate -> 22050Hz for transmission)
-                double finalRatio = (double)AudioSettings.outputSampleRate / 22050.0;
+                double finalRatio = (double)safeSampleRate / 22050.0;
                 
-                // Calculate how many samples we can DEFINITELY fit starting at finalSrcPos
                 int targetLen = 0;
                 double checkPos = finalSrcPos;
-                while (checkPos < gameLen) {
+                while (checkPos < gameLen - 1) {
                     targetLen++;
                     checkPos += finalRatio;
                 }
 
                 float[] finalSamples = new float[targetLen];
                 double currentPos = finalSrcPos;
+                
                 for (int i = 0; i < targetLen; i++)
                 {
-                    int i0 = (int)currentPos;
-                    int i1 = Math.Max(0, Math.Min(i0 + 1, gameLen - 1));
+                    int i0 = (int)Math.Floor(currentPos);
+                    int i1 = i0 + 1;
                     float frac = (float)(currentPos - i0);
                     
-                    // Boundary safety
-                    int idx0 = Math.Max(0, Math.Min(i0, gameLen - 1));
-                    finalSamples[i] = gameMono[idx0] + (gameMono[i1] - gameMono[idx0]) * frac;
+                    // ANTI-CLICK (v14.7): Phase carry-over
+                    float s0 = i0 < 0 ? _lastGameMonoSample : gameMono[i0];
+                    float s1 = gameMono[i1]; // i1 is always >= 0
+
+                    finalSamples[i] = s0 + (s1 - s0) * frac;
                     currentPos += finalRatio;
                 }
-                finalSrcPos = Math.Max(0, currentPos - gameLen);
+                
+                finalSrcPos = currentPos - gameLen;
+                if (gameLen > 0) _lastGameMonoSample = gameMono[gameLen - 1]; // Store phase for next block
 
                 OnAudioBuffer(finalSamples);
             }
