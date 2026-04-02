@@ -10,7 +10,7 @@ class SystemOrbitalPositionData {
     this.mutexTimestamp = null;
     this.rootReferenceBody = null;
     this.options = Object.assign({
-      numberOfSegments: 4096,
+      numberOfSegments: 256,
       onRecalculate: null
     }, options);
 
@@ -217,15 +217,13 @@ class SystemOrbitalPositionData {
       'o.orbitPatches', 't.universalTime', 'v.body',
       'tar.name', 'tar.type', 'tar.o.orbitingBody',
       'tar.o.orbitPatches', 'o.maneuverNodes',
-      // Vessel Stats & Attitude Indicator
       'v.altitude', 'o.ApA', 'o.PeA', 'o.inclination',
+      'o.eccentricity', 'o.period',
       'n.pitch', 'n.roll', 'n.heading',
-      // Astrogator Transfer Info
-      'a.installed', 'a.nextTransfer.destination', 'a.nextTransfer.burnUT', 'a.nextTransfer.dv'
+      'astg.nextDestination', 'astg.nextBurnCountdown', 'astg.nextDeltaV'
     ]);
     this.datalink.addReceiverFunction(this.recalculate.bind(this));
   }
 }
 
 window.SystemOrbitalPositionData = SystemOrbitalPositionData;
-走

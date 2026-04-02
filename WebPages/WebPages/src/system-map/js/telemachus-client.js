@@ -19,12 +19,7 @@ class Telemachus {
   }
 
   get url() {
-    // Dynamically resolve protocol and host to support secure tunnels (ngrok)
-    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-    const host = this.host === "localhost" || !this.host ? window.location.hostname : this.host;
-    const port = this.port || window.location.port;
-
-    return `${protocol}//${host}${port ? ':' + port : ''}/telemachus/datalink`;
+    return `http://${this.host}:${this.port}/telemachus/datalink`;
   }
 
   updateConnection(host, port) {
@@ -67,44 +62,25 @@ class Telemachus {
 
   /**
    * Command Bridge (SEND commands instead of polling data).
-   * Follows Houston's "command-as-key" pattern.
+   * Houston Parity: o.addManeuverNode, o.updateManeuverNode.
    */
-  async sendCommand(command, callback) {
-    const params = {};
-    params[command] = command;
-
-    try {
-      const response = await fetch(this.url, {
-        method: "POST",
-        body: JSON.stringify(params),
-        headers: {
-          "Content-Type": "application/json"
-        }
-      });
-
-      if (response.ok) {
-        const rawData = await response.json();
-        const data = this.convertData(rawData);
-        if (callback) callback(data);
-      }
-    } catch (e) {
-      console.error("Telemachus Command Error:", e);
-    }
-  }
-
-  addManeuverNode(ut, callback) {
-    const cmd = `o.addManeuverNode[${ut},0,0,0]`;
-    this.sendCommand(cmd, callback);
-  }
-
-  updateManeuverNode(index, ut, radial, normal, prograde, callback) {
+  sendManeuverUpdate(index, ut, radial, normal, prograde) {
     const cmd = `o.updateManeuverNode[${index},${ut},${radial},${normal},${prograde}]`;
-    this.sendCommand(cmd, callback);
+    this.sendMessage({ [cmd]: cmd });
   }
 
-  removeManeuverNode(index, callback) {
-    const cmd = `o.removeManeuverNode[${index}]`;
-    this.sendCommand(cmd, callback);
+  sendNodeAction(action, nodeIndex = 0, utOffset = 1000) {
+    if (action === 'add') {
+      // We need current UT to place the node
+      this.sendMessage({ "t.universalTime": "t.universalTime" }, (data) => {
+        const ut = data["t.universalTime"] + utOffset;
+        const cmd = `o.addManeuverNode[${ut},0,0,0]`;
+        this.sendMessage({ [cmd]: cmd });
+      });
+    } else {
+      const cmd = `o.removeManeuverNode[${nodeIndex}]`; 
+      this.sendMessage({ [cmd]: cmd });
+    }
   }
 
   convertData(rawData) {
@@ -129,6 +105,7 @@ class Telemachus {
       if (response.ok) {
         const rawData = await response.json();
         const data = this.convertData(rawData);
+        this.lastData = data; // Cache for easy access
         this.dispatchMessages(data);
       }
     } catch (e) {
@@ -180,19 +157,14 @@ class Telemachus {
 
 class Settings {
   constructor(defaultHost, defaultPort) {
-    this.defaultHost = defaultHost || window.location.hostname || "localhost";
-    this.defaultPort = defaultPort || window.location.port || "8085";
-
-    if (!this.host) this.host = this.defaultHost;
-    if (!this.port) this.port = this.defaultPort;
+    this.defaultHost = defaultHost || "localhost";
+    this.defaultPort = defaultPort || "8085";
   }
-  get host() { return localStorage.getItem('host') }
+  get host() { return localStorage.getItem('host') || this.defaultHost; }
   set host(value) { localStorage.setItem('host', value); }
-
-  get port() { return localStorage.getItem('port') }
+  get port() { return localStorage.getItem('port') || this.defaultPort; }
   set port(value) { localStorage.setItem('port', value); }
 }
 
 window.Telemachus = Telemachus;
 window.Settings = Settings;
-走

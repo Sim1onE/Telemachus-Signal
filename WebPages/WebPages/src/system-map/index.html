@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kerbal Space Program - Standalone 3D Orbital Map</title>
+    <title>Kerbal Space Program - Mission Control Map</title>
     
     <!-- Modern Styling -->
     <link rel="stylesheet" href="css/style.css">
@@ -51,38 +51,60 @@
 
     <!-- Bottom Maneuver HUD -->
     <div id="bottom-hud">
-        <div class="hud-section telemetry">
-            <div class="hud-label">VESSEL STATE</div>
-            <div class="hud-data" id="vessel-stats">
-                AP: 0km | PE: 0km | INC: 0.0°
+        <!-- LEFT: Combined Telemetry & Encounter -->
+        <div class="hud-section" id="hud-left" style="flex: 1.5;">
+            <div class="hud-label">TACTICAL TELEMETRY</div>
+            <div id="vessel-stats-grid" class="hud-data">
+                <!-- Multi-line grid populated by JS -->
+            </div>
+            <div id="encounter-info" style="margin-top: 5px; color: #ffcc00; font-size: 0.7rem; font-weight: bold;">
+                <!-- Mun/Minmus encounter -->
+            </div>
+            <div id="astrogator-dv" style="margin-top: 5px; color: #00ffff; font-size: 0.7rem;">
+                <!-- Astrogator dV -->
+            </div>
+            <div id="node-list-summary" style="margin-top: 5px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 3px; max-height: 40px; overflow-y: auto;">
+                <!-- Maneuver nodes -->
             </div>
         </div>
 
-        <div class="hud-section maneuvers">
-            <div class="hud-label">NAV COMMANDS</div>
-            <div class="maneuver-grid">
-                <button class="nav-btn pro" data-cmd="prograde" title="Prograde">+</button>
-                <button class="nav-btn retro" data-cmd="retrograde" title="Retrograde">-</button>
-                <div class="spacer"></div>
-                <button class="nav-btn norm-p" data-cmd="normal-plus" title="Normal">+</button>
-                <button class="nav-btn norm-m" data-cmd="normal-minus" title="Normal">-</button>
-                <div class="spacer"></div>
-                <button class="nav-btn rad-p" data-cmd="radial-plus" title="Radial In">+</button>
-                <button class="nav-btn rad-m" data-cmd="radial-minus" title="Radial Out">-</button>
+        <!-- CENTER: Maneuver Editor (Perfected) -->
+        <div class="hud-section maneuvers" style="flex: 2; border-left: 1px solid rgba(0, 255, 204, 0.2); border-right: 1px solid rgba(0, 255, 204, 0.2);">
+            <div class="hud-label" id="maneuver-node-label">MANEUVER DECK</div>
+            <div class="control-group" style="padding: 0 0 5px 0;">
+                <select id="node-selector" class="custom-select" style="background: rgba(0,255,204,0.05); border: 1px solid rgba(0,255,204,0.2);">
+                    <option value="0">NODE 1 (NEXT)</option>
+                    <option value="1">NODE 2</option>
+                    <option value="2">NODE 3</option>
+                </select>
             </div>
-            <div id="node-actions">
-                <button class="action-btn" id="btn-add-node">ADD NODE</button>
-                <button class="action-btn secondary" id="btn-del-node">DEL NODE</button>
+            <div class="maneuver-editor">
+                <div class="slider-group pro"><label>PRO</label><input type="range" id="slider-pro" min="-1" max="1" step="0.01" value="0"><span id="dv-pro" class="dv-val">0.0</span></div>
+                <div class="slider-group norm"><label>NORM</label><input type="range" id="slider-norm" min="-1" max="1" step="0.01" value="0"><span id="dv-norm" class="dv-val">0.0</span></div>
+                <div class="slider-group rad"><label>RAD</label><input type="range" id="slider-rad" min="-1" max="1" step="0.01" value="0"><span id="dv-rad" class="dv-val">0.0</span></div>
+            </div>
+            <div id="pred-stats" style="font-size: 0.65rem; color: #888; text-align: center;">PRED AP: --km | PE: --km</div>
+            <div id="node-actions" style="margin-top: 5px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; gap: 3px; align-items: center;">
+                    <div style="color: #888; font-size: 0.6rem; margin-right: 2px;">SEC:</div>
+                    <input type="number" id="node-ut-offset" value="60" class="custom-input" style="width: 45px;">
+                    <button class="action-btn" id="btn-add-at-ut" style="padding: 2px 10px; font-weight: bold;">+ CREATE NODE</button>
+                </div>
+                <button class="action-btn secondary" id="btn-del-node" style="width: auto; padding: 2px 8px;">DEL</button>
             </div>
         </div>
 
-        <div class="hud-section transfer">
-            <div class="hud-label">ASTROGATOR TRANSFER</div>
-            <div class="hud-data" id="transfer-info">
-                DEST: NONE | BURN: --:--:-- | dV: 0 m/s
+        <!-- RIGHT: Integrated Attitude (Navball) -->
+        <div class="hud-section" id="hud-right" style="flex: 1; border-left: 1px solid rgba(0, 255, 204, 0.2); text-align: right;">
+            <div class="hud-label">ATTITUDE</div>
+            <div id="nav-data-placeholder" style="font-size: 0.65rem; color: #444; margin-top: 20px;">
+                <!-- Navball overlayed atop this section -->
             </div>
         </div>
     </div>
+
+    <!-- Navball Globally Absolute -->
+    <div id="navball-container"></div>
 
     <!-- Scripts -->
     <script src="js/three.min.js"></script>
@@ -96,13 +118,12 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const settings = new Settings();
+            const settings = window.Settings ? new Settings() : { host: 'localhost', port: '8085' };
             const datalink = new Telemachus(settings.host, settings.port);
             const dataManager = new SystemOrbitalPositionData(datalink);
             const formatter = new SystemPositionDataFormatter(dataManager, datalink);
             const map = new SystemOrbitalMap(formatter, datalink, 'map-container');
             
-            // Global access for UI logic
             window.SystemMap = map;
 
             // Math Extension

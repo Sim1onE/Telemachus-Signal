@@ -2,6 +2,7 @@
  * SystemPositionDataFormatter (ES6)
  * The "Bible" of the 3D Map. Handles the transformation of raw Telemachus data
  * into formatted 3D coordinates with perfect axis alignment and body snapping.
+ * Hardened for maneuver node stability.
  */
 class SystemPositionDataFormatter {
   constructor(orbitalPositionData, datalink, options = {}) {
@@ -14,11 +15,12 @@ class SystemPositionDataFormatter {
 
     this.options = Object.assign({
       onFormat: null,
-      numberOfSegments: 4096 // Increased resolution for vessels
+      numberOfSegments: 512 // Resolution for vessel patches
     }, options);
   }
 
   format(positionData) {
+    if (!positionData) return;
     const formattedData = {
       "referenceBodies": [],
       "vessels": [],
@@ -29,7 +31,6 @@ class SystemPositionDataFormatter {
       "currentUniversalTime": positionData.currentUniversalTime
     };
 
-    // Use Kerbin as the center of the world [0,0,0]
     this.rootOrigin = positionData.referenceBodies && positionData.referenceBodies["Kerbin"]
       ? positionData.referenceBodies["Kerbin"].currentTruePosition
       : [0, 0, 0];
@@ -47,9 +48,7 @@ class SystemPositionDataFormatter {
 
   formatReferenceBodies(positionData, formattedData) {
     if (!positionData.referenceBodies) return;
-    const referenceBodyNames = Object.keys(positionData.referenceBodies);
-
-    referenceBodyNames.forEach(name => {
+    Object.keys(positionData.referenceBodies).forEach(name => {
       const info = positionData.referenceBodies[name];
       let type = "currentPosition";
 
@@ -57,14 +56,12 @@ class SystemPositionDataFormatter {
         type = "targetBodyCurrentPosition";
       }
 
-      // 1. Initial true position with Bible inversion
       let truePosition = this.formatTruePositionVector(info.currentTruePosition);
 
-      // 2. ULTIMATE INTERSECTION: Snapping celestial bodies to their generated paths
       if (name !== "Kerbin" && info.sma !== undefined) {
         const rawOrbitPoints = this.generateOrbitFromKeplerian(info.sma, info.eccentricity, info.inclination, info.argPe, info.lan);
         const bInfo = this.datalink.getOrbitalBodyInfo(name);
-        const parentName = bInfo && bInfo.referenceBodyName ? bInfo.referenceBodyName : "Sun";
+        const parentName = bInfo ? bInfo.referenceBodyName : "Sun";
         const parentObj = positionData.referenceBodies[parentName];
         const rawParentPosition = parentObj ? parentObj.currentTruePosition : [0, 0, 0];
 
@@ -75,129 +72,96 @@ class SystemPositionDataFormatter {
         truePosition = this.findClosestPointOnPath(truePosition, worldOrbitPoints);
       }
 
-      const body = this.buildReferenceBody({
-        name: name,
-        type: type,
-        radius: info.radius,
+      formattedData["referenceBodies"].push({
+        name: name, type: type, radius: info.radius,
         truePosition: truePosition,
         atmosphericRadius: this.datalink.getOrbitalBodyInfo(name).atmosphericRadius,
         color: this.datalink.getOrbitalBodyInfo(name).color
       });
-
-      formattedData["referenceBodies"].push(body);
     });
   }
 
   findClosestPointOnPath(targetVector, points) {
-    if (!points || !points.length) return targetVector;
+    if (!targetVector || !points || !points.length) return targetVector;
     let minDistance = Infinity;
     let closestPoint = targetVector;
-
-    for (let i = 0; i < points.length; i++) {
-      const p = points[i];
+    for (const p of points) {
       if (!p) continue;
-      const dist = Math.pow(targetVector[0] - p[0], 2) +
-        Math.pow(targetVector[1] - p[1], 2) +
-        Math.pow(targetVector[2] - p[2], 2);
-      if (dist < minDistance) {
-        minDistance = dist;
-        closestPoint = p;
-      }
+      const dist = Math.pow(targetVector[0] - p[0], 2) + Math.pow(targetVector[1] - p[1], 2) + Math.pow(targetVector[2] - p[2], 2);
+      if (dist < minDistance) { minDistance = dist; closestPoint = p; }
     }
     return closestPoint;
   }
 
   formatReferenceBodyPaths(positionData, formattedData) {
     if (!positionData.referenceBodies) return;
-    const referenceBodyNames = Object.keys(positionData.referenceBodies);
-
-    referenceBodyNames.forEach(name => {
+    Object.keys(positionData.referenceBodies).forEach(name => {
       if (name.startsWith("Parent_") || name === "Kerbin") return;
-
       const info = positionData.referenceBodies[name];
       if (!info || info.sma === undefined) return;
 
       const bInfo = this.datalink.getOrbitalBodyInfo(name);
-      if (bInfo && bInfo.referenceBodyName !== "Kerbin") return;
-
-      const parentName = bInfo && bInfo.referenceBodyName ? bInfo.referenceBodyName : "Sun";
+      const parentName = bInfo ? bInfo.referenceBodyName : "Sun";
       const parentObj = positionData.referenceBodies[parentName];
       const rawParentPosition = parentObj ? parentObj.currentTruePosition : [0, 0, 0];
 
-      // Generate mathematical orbit
       const rawOrbitPoints = this.generateOrbitFromKeplerian(info.sma, info.eccentricity, info.inclination, info.argPe, info.lan);
-
       const transformedPositions = rawOrbitPoints.map(p =>
         this.formatTruePositionVector(Math.matrixAdd(rawParentPosition, p))
       );
 
-      formattedData.referenceBodyPaths.push(this.buildReferenceBodyPath({
+      formattedData.referenceBodyPaths.push({
         referenceBodyName: name,
         truePositions: transformedPositions
-      }));
+      });
     });
   }
 
-  /**
-   * THE KEPLERIAN BIBLE
-   * Generates a 3D orbital path using Keplerian elements with vertical and axis corrections.
-   */
   generateOrbitFromKeplerian(sma, ecc, inc, argPe, lan) {
     if (!sma) return [];
     const points = [];
-    const segments = 16384; // Increased resolution for celestial rings
-
-    const radInc = (inc * Math.PI / 180.0); // No negation here; formatter handles vertical inversion
-    const radArgPe = - (argPe * Math.PI / 180.0); // Bible: Inverse Rotation
-    const radLan = - (lan * Math.PI / 180.0) + (Math.PI / 2.0); // Bible: Inverse Rotation + 90deg Unity Offset
+    const segments = 1024;
+    const radInc = (inc * Math.PI / 180.0);
+    const radArgPe = - (argPe * Math.PI / 180.0);
+    const radLan = - (lan * Math.PI / 180.0) + (Math.PI / 2.0);
 
     for (let i = 0; i <= segments; i++) {
       const trueAnomaly = (i / segments) * 2 * Math.PI;
       const r = (sma * (1 - ecc * ecc)) / (1 + ecc * Math.cos(trueAnomaly));
-
       const theta = radArgPe + trueAnomaly;
-
       const x = r * (Math.cos(radLan) * Math.cos(theta) - Math.sin(radLan) * Math.sin(theta) * Math.cos(radInc));
       const y = r * (Math.sin(radInc) * Math.sin(theta));
       const z = r * (Math.sin(radLan) * Math.cos(theta) + Math.cos(radLan) * Math.sin(theta) * Math.cos(radInc));
-
       points.push([x, y, z]);
     }
     return points;
   }
 
   formatCurrentVessel(positionData, formattedData) {
-    if (!positionData.referenceBodies || !positionData["vesselBody"] || !positionData.referenceBodies[positionData["vesselBody"]]) return;
-    const vesselBody = positionData["vesselBody"];
+    if (!positionData["vesselBody"] || !positionData.referenceBodies[positionData["vesselBody"]] || !positionData["vesselCurrentPosition"]["relativePosition"]) return;
     const currentVesselTruePosition = this.truePositionForRelativePosition(
       positionData["vesselCurrentPosition"]["relativePosition"],
-      this.formatTruePositionVector(positionData.referenceBodies[vesselBody].currentTruePosition)
+      this.formatTruePositionVector(positionData.referenceBodies[positionData["vesselBody"]].currentTruePosition)
     );
-
-    this.rootReferenceBodyName = vesselBody;
-
-    formattedData.vessels.push(this.buildVessel({
-      name: "current vessel",
-      type: "currentVessel",
+    this.rootReferenceBodyName = positionData["vesselBody"];
+    formattedData.vessels.push({
+      name: "current vessel", type: "currentVessel",
       truePosition: currentVesselTruePosition,
-      referenceBodyName: vesselBody
-    }));
+      referenceBodyName: positionData["vesselBody"]
+    });
   }
 
   formatTargetVessel(positionData, formattedData) {
-    if (!positionData['tar.type'] || positionData["tar.type"] !== "Vessel" || !positionData.referenceBodies || !positionData.referenceBodies[positionData["tar.o.orbitingBody"]]) return;
-
+    if (!positionData["tar.type"] || positionData["tar.type"] !== "Vessel" || !positionData.referenceBodies[positionData["tar.o.orbitingBody"]] || !positionData["targetCurrentPosition"]["relativePosition"]) return;
     const targetCurrentTruePosition = this.truePositionForRelativePosition(
       positionData["targetCurrentPosition"]["relativePosition"],
       this.formatTruePositionVector(positionData.referenceBodies[positionData["tar.o.orbitingBody"]].currentTruePosition)
     );
-
-    formattedData.vessels.push(this.buildVessel({
-      name: positionData["tar.name"],
-      type: "targetVessel",
+    formattedData.vessels.push({
+      name: positionData["tar.name"], type: "targetVessel",
       truePosition: targetCurrentTruePosition,
       referenceBodyName: positionData["tar.o.orbitingBody"]
-    }));
+    });
   }
 
   formatOrbitalPatches(positionData, formattedData) {
@@ -206,161 +170,130 @@ class SystemPositionDataFormatter {
     });
   }
 
-  formatTargetOrbitPatches(positionData, formattedData) {
-    if (!positionData['tar.type'] || !positionData["tar.o.orbitPatches"].length) return;
+  formatManeuverNodes(positionData, formattedData) {
+    if (!positionData["o.maneuverNodes"] || !positionData["o.maneuverNodes"].length) return;
+    positionData["o.maneuverNodes"].forEach((node, i) => {
+      // Robustly format patches; skip if empty
+      const orbitPatches = this.formatOrbitPatches(formattedData, positionData, node.orbitPatches || [], {
+        type: "maneuverNode", parentType: "vessel", parentName: "current vessel"
+      });
 
+      if (orbitPatches && orbitPatches.length > 0) {
+        formattedData.maneuverNodes.push({
+          type: "maneuverNode",
+          parentType: "vessel",
+          parentName: "current vessel",
+          orbitPatches: orbitPatches,
+          truePosition: (orbitPatches[0].truePositions && orbitPatches[0].truePositions.length > 0) ? orbitPatches[0].truePositions[0] : null
+        });
+      }
+    });
+  }
+
+  formatTargetOrbitPatches(positionData, formattedData) {
+    if (!positionData["tar.type"] || !positionData["tar.o.orbitPatches"] || !positionData["tar.o.orbitPatches"].length) return;
     const targetPatches = this.formatOrbitPatches(formattedData, positionData, positionData["tar.o.orbitPatches"], {
       type: "orbitPatch", parentType: "targetVessel", parentName: positionData["tar.name"]
     });
     formattedData.orbitPatches = formattedData.orbitPatches.concat(targetPatches);
   }
 
-  formatManeuverNodes(positionData, formattedData) {
-    if (!positionData["o.maneuverNodes"]) return;
-    positionData["o.maneuverNodes"].forEach((node, i) => {
-      const orbitPatches = this.formatOrbitPatches(formattedData, positionData, node.orbitPatches, {
-        type: "maneuverNode", parentType: "vessel", parentName: "current vessel"
-      });
-
-      formattedData.maneuverNodes.push(this.buildManeuverNode({
-        type: "maneuverNode",
-        parentType: "vessel",
-        parentName: "current vessel",
-        orbitPatches: orbitPatches,
-        truePosition: (orbitPatches.length > 0 && orbitPatches[0].truePositions.length > 0) ? orbitPatches[0].truePositions[0] : null
-      }));
-    });
-  }
-
   formatOrbitPatches(formattedData, positionData, rawOrbitPatches, orbitPatchOptions) {
     const formattedOrbitPatches = [];
     let lastPatchesPoint = null;
     let distanceFromLastPatchesPoint = null;
-
-    if (!rawOrbitPatches) return formattedOrbitPatches;
-
-    rawOrbitPatches.forEach((orbitPatch, j) => {
+    var patchIds = Object.keys(rawOrbitPatches || {});
+    for (var i = 0; i < patchIds.length; i++) {
+      var id = patchIds[i];
+      var orbitPatch = rawOrbitPatches[id];
       const referenceBody = positionData.referenceBodies[orbitPatch.referenceBody];
-      if (!referenceBody) return;
+      if (!referenceBody || !orbitPatch.positionData) continue;
 
       const sortedTimes = this.sortedUniversalTimes(orbitPatch.positionData);
+      if (!sortedTimes.length) continue;
       const positions = [];
       const middleUT = sortedTimes[Math.floor((sortedTimes.length - 1) / 2)];
 
       sortedTimes.forEach((key, k) => {
         const utVal = parseFloat(key);
         let frameOfReferenceVector;
-
         if (orbitPatch.referenceBody === this.rootReferenceBodyName || orbitPatch.referenceBody === "Sun") {
           frameOfReferenceVector = this.formatTruePositionVector(referenceBody.currentTruePosition);
         } else {
-          frameOfReferenceVector = this.findProjectedPositionOfReferenceBody(
-            positionData.referenceBodies[this.rootReferenceBodyName], referenceBody, utVal
-          );
+          frameOfReferenceVector = this.findProjectedPositionOfReferenceBody(positionData.referenceBodies[this.rootReferenceBodyName], referenceBody, utVal);
         }
 
         const relativePosition = orbitPatch.positionData[key].relativePosition;
+        if (!relativePosition) return;
         let projectedTruePosition = this.truePositionForRelativePosition(relativePosition, frameOfReferenceVector);
 
-        // Continuation logic for patched orbits
         if (lastPatchesPoint != null) {
-          if (k === 0) {
-            distanceFromLastPatchesPoint = [
-              lastPatchesPoint[0] - projectedTruePosition[0],
-              lastPatchesPoint[1] - projectedTruePosition[1],
-              lastPatchesPoint[2] - projectedTruePosition[2],
-            ];
-          }
-
-          projectedTruePosition = [
-            projectedTruePosition[0] + distanceFromLastPatchesPoint[0],
-            projectedTruePosition[1] + distanceFromLastPatchesPoint[1],
-            projectedTruePosition[2] + distanceFromLastPatchesPoint[2],
-          ];
-
-          // Add projected body markers if in a different reference frame
+          if (k === 0) distanceFromLastPatchesPoint = [lastPatchesPoint[0] - projectedTruePosition[0], lastPatchesPoint[1] - projectedTruePosition[1], lastPatchesPoint[2] - projectedTruePosition[2]];
+          projectedTruePosition = [projectedTruePosition[0] + distanceFromLastPatchesPoint[0], projectedTruePosition[1] + distanceFromLastPatchesPoint[1], projectedTruePosition[2] + distanceFromLastPatchesPoint[2]];
           if (key === middleUT && orbitPatch.referenceBody !== this.rootReferenceBodyName) {
-            const bodyPos = [
-              frameOfReferenceVector[0] + distanceFromLastPatchesPoint[0],
-              frameOfReferenceVector[1] + distanceFromLastPatchesPoint[1],
-              frameOfReferenceVector[2] + distanceFromLastPatchesPoint[2],
-            ];
-
-            formattedData["referenceBodies"].push(this.buildReferenceBody({
-              name: orbitPatch.referenceBody,
-              type: "projected",
-              radius: referenceBody.radius,
-              truePosition: bodyPos,
-              linkedPatchID: j,
+            const bodyPos = [frameOfReferenceVector[0] + distanceFromLastPatchesPoint[0], frameOfReferenceVector[1] + distanceFromLastPatchesPoint[1], frameOfReferenceVector[2] + distanceFromLastPatchesPoint[2]];
+            formattedData["referenceBodies"].push({
+              name: orbitPatch.referenceBody, type: "projected", radius: referenceBody.radius, truePosition: bodyPos, linkedPatchID: i,
               atmosphericRadius: this.datalink.getOrbitalBodyInfo(orbitPatch.referenceBody).atmosphericRadius
-            }));
+            });
           }
         }
-
         positions.push(projectedTruePosition);
       });
-
       if (positions.length) lastPatchesPoint = positions[positions.length - 1];
-      formattedOrbitPatches.push(this.buildOrbitPatch(Object.assign({ truePositions: positions }, orbitPatchOptions)));
-    });
-
+      var patch = {};
+      Object.keys(orbitPatchOptions).forEach(function (k) { patch[k] = orbitPatchOptions[k]; });
+      patch.truePositions = positions;
+      patch.startUT = sortedTimes[0];
+      patch.endUT = sortedTimes[sortedTimes.length - 1];
+      patch.ApA = orbitPatch.ApA;
+      patch.PeA = orbitPatch.PeA;
+      formattedOrbitPatches.push(patch);
+    }
     return formattedOrbitPatches;
   }
 
-  /**
-   * THE BIBLE: Vector Transformation
-   * Map Kerbin-centric world space with the required vertical inversion.
-   */
   formatTruePositionVector(vector) {
-    if (this.rootOrigin && vector) {
-      return [
-        vector[0] - this.rootOrigin[0],
-        -(vector[1] - this.rootOrigin[1]), // BIBLE: Vertical Inversion
-        vector[2] - this.rootOrigin[2]
-      ];
-    }
-    return vector;
+    if (!this.rootOrigin || !vector) return vector;
+    return [vector[0] - this.rootOrigin[0], -(vector[1] - this.rootOrigin[1]), vector[2] - this.rootOrigin[2]];
   }
 
   truePositionForRelativePosition(relativePositionVector, frameOfReferenceVector) {
-    // Telemachus relative is [X, Z, Y] (Z-up), we convert to [X, Y, Z] (Y-up world)
     const transformedRelative = [relativePositionVector[0], relativePositionVector[2], relativePositionVector[1]];
     return Math.matrixAdd(frameOfReferenceVector, transformedRelative);
   }
 
   findProjectedPositionOfReferenceBody(rootReferenceBody, body, universalTime) {
     if (!rootReferenceBody || !body) return [0, 0, 0];
-    const rootPos = rootReferenceBody.positionData[this.findClosestUT(universalTime, rootReferenceBody.positionData)].truePosition;
+    const rootKeys = this.getSortedKeys(rootReferenceBody.positionData);
+    const rootPos = rootReferenceBody.positionData[this.findClosestUTBinary(universalTime, rootKeys)].truePosition;
     const targetPos = body.positionData[universalTime].truePosition;
-
-    return Math.matrixAdd(targetPos, Math.scaleMatrix(-1, rootPos));
+    return [targetPos[0] - rootPos[0], targetPos[1] - rootPos[1], targetPos[2] - rootPos[2]];
   }
 
-  findClosestUT(universalTime, positionData) {
-    const keys = Object.keys(positionData).map(parseFloat).sort((a, b) => a - b);
-    let closest = keys[0];
-    let minDiff = Math.abs(universalTime - closest);
+  getSortedKeys(positionData) {
+    if (!positionData) return [];
+    if (positionData._sortedKeys) return positionData._sortedKeys;
+    positionData._sortedKeys = Object.keys(positionData).map(parseFloat).sort(function(a, b) { return a - b; });
+    return positionData._sortedKeys;
+  }
 
-    for (let time of keys) {
-      let diff = Math.abs(universalTime - time);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closest = time;
-      }
+  findClosestUTBinary(target, keys) {
+    if (!keys || !keys.length) return target;
+    var low = 0, high = keys.length - 1;
+    while (low < high) {
+        var mid = (low + high) / 2 | 0;
+        if (target < keys[mid]) high = mid;
+        else low = mid + 1;
     }
-    return closest;
+    // Check if the previous one is closer
+    if (low > 0 && Math.abs(target - keys[low - 1]) < Math.abs(target - keys[low])) return keys[low - 1];
+    return keys[low];
   }
 
   sortedUniversalTimes(positionData) {
-    return Object.keys(positionData).sort((a, b) => parseFloat(a) - parseFloat(b));
+    return this.getSortedKeys(positionData);
   }
-
-  buildReferenceBody(opts) { return { ...opts }; }
-  buildReferenceBodyPath(opts) { return { ...opts }; }
-  buildVessel(opts) { return { ...opts }; }
-  buildOrbitPatch(opts) { return { ...opts }; }
-  buildManeuverNode(opts) { return { ...opts }; }
 }
 
 window.SystemPositionDataFormatter = SystemPositionDataFormatter;
-走
