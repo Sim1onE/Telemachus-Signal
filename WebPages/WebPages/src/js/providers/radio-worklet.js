@@ -1,3 +1,10 @@
+/**
+ * Radio Upstream Worklet (v14.22)
+ * Handles Microphone capture, Resampling to 22050Hz, and Packetizing.
+ * 
+ * v14.22: Added Cold-Start Phase Reset and 10ms Soft Fade-in to prevent 
+ *         PTT-start clicks and DC-offset 'thumps'.
+ */
 class RadioUpstreamWorklet extends AudioWorkletProcessor {
     constructor() {
         super();
@@ -11,6 +18,8 @@ class RadioUpstreamWorklet extends AudioWorkletProcessor {
         this.lastSample = 0;
         this.baseSampleRate = 48000; // Expected default
         this.ratio = 48000 / this.MIC_TARGET_SAMPLE_RATE;
+        this.isFirstBlock = true;
+        this.currentGain = 0.0; // Soft Fade-in for Cold Start
 
         this.port.onmessage = (e) => {
             if (e.data.ratio) {
@@ -19,18 +28,19 @@ class RadioUpstreamWorklet extends AudioWorkletProcessor {
         };
     }
 
-    // Receive metadata from main thread
-    static get parameterDescriptors() {
-        return [];
-    }
-
     process(inputs, outputs, parameters) {
-        // We only care about the first input and its first channel (mono mic)
         const input = inputs[0];
         if (!input || input.length === 0) return true;
         
         const inputData = input[0]; 
         if (!inputData) return true;
+
+        // v14.22 Cold Start Fix: Reset resampler phase on first block
+        if (this.isFirstBlock) {
+            this.resamplePhase = 0;
+            this.lastSample = inputData[0];
+            this.isFirstBlock = false;
+        }
 
         let currentIdx = this.resamplePhase;
 
@@ -42,18 +52,20 @@ class RadioUpstreamWorklet extends AudioWorkletProcessor {
             const s0 = i0 < 0 ? this.lastSample : inputData[i0];
             const s1 = inputData[i1]; 
             
-            const s = s0 + (s1 - s0) * frac;
+            let s = s0 + (s1 - s0) * frac;
+            
+            // v14.22: Apply tiny 10ms fade-in to mask DC-offset jump at start of mic opening
+            this.currentGain = Math.min(1.0, this.currentGain + (1.0 / (this.MIC_TARGET_SAMPLE_RATE * 0.010))); // 10ms fade
+            s *= this.currentGain;
+
             const clamped = Math.max(-1, Math.min(1, s));
             
             this.accumulator[this.accPtr] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
             this.accPtr++;
 
             if (this.accPtr >= this.accumulator.length) {
-                // Send fully packed 1024-sample packet back to main thread
-                // We slice it to ensure we send a copy across the thread barrier
                 const snapshot = new Uint8Array(this.accumulator.buffer.slice(0));
                 this.port.postMessage({ type: 'audio-packet', payload: snapshot }, [snapshot.buffer]);
-                
                 this.accPtr = 0;
             }
 
