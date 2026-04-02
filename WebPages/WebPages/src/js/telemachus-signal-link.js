@@ -47,7 +47,16 @@ class UplinkSynchronizer {
 
     // binaryType (Number) or null if string
     queuePacket(type, payload) {
-        const creationUT = this.signalLink.getEstimatedFlightUT();
+        let creationUT = this.signalLink.getEstimatedFlightUT();
+        
+        // v14.13 Fix: If KSP physics stalled, `getEstimatedFlightUT` can snap backwards during sync.
+        // If an audio packet timestamp snaps backwards, it gets filtered/sorted out of order!
+        // We rigidly enforce a strictly monotonic progression for all queued packets.
+        if (this._lastCreationUT !== undefined && creationUT <= this._lastCreationUT) {
+            creationUT = this._lastCreationUT + 0.000001;
+        }
+        this._lastCreationUT = creationUT;
+
         this.queue.push({ type, creationUT, payload });
     }
 

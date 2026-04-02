@@ -223,17 +223,16 @@ namespace Telemachus
                     float targetGain = isBuffering ? 0f : 1f;
                     currentGain = Mathf.MoveTowards(currentGain, targetGain, 0.001f); // 20ms Soft Envelope to avoid pops
 
-                    float sampleValue = 0f;
-                    if (!isBuffering) {
-                        int i0 = (int)readPtr;
-                        int i1 = (i0 + 1) % bufSize;
-                        float frac = (float)(readPtr - i0);
+                    int i0 = (int)readPtr;
+                    int i1 = (i0 + 1) % bufSize;
+                    float frac = (float)(readPtr - i0);
 
-                        float s0 = ringBuffer[i0];
-                        float s1 = ringBuffer[i1];
-                        sampleValue = s0 + (s1 - s0) * frac;
-                        
-                        // Apply Adaptive Speed
+                    float s0 = ringBuffer[i0];
+                    float s1 = ringBuffer[i1];
+                    float sampleValue = s0 + (s1 - s0) * frac;
+                    
+                    if (!isBuffering) {
+                        // Apply Adaptive Speed & Advance ONLY when processing active buffering
                         readPtr = (readPtr + (ratio * _adaptiveRatio)) % bufSize;
                     }
 
