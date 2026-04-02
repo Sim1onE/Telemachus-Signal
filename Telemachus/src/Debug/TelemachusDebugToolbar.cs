@@ -22,7 +22,7 @@ namespace Telemachus.Debug
         private void Update()
         {
             // Toggle visibility with Alt + T
-            if (Input.GetKey(KeyCode.LeftAlt) && Input.GetKeyDown(KeyCode.T))
+            if (Input.GetKey(KeyCode.RightAlt) && Input.GetKeyDown(KeyCode.P))
             {
                 isVisible = !isVisible;
             }
@@ -78,32 +78,36 @@ namespace Telemachus.Debug
             // --- AUDIO SECTION ---
             GUILayout.Label("PILOT MICROPHONE (Downlink)");
             string[] mics = Microphone.devices;
-            
+
             if (mics.Length > 0)
             {
-                if (string.IsNullOrEmpty(currentMic)) {
+                if (string.IsNullOrEmpty(currentMic))
+                {
                     currentMic = AudioCaptureManager.SelectedDevice ?? mics[0];
                     micIdx = Array.IndexOf(mics, currentMic);
                     if (micIdx < 0) micIdx = 0;
                 }
 
                 GUILayout.BeginHorizontal();
-                if (GUILayout.Button("<", GUILayout.Width(30))) {
+                if (GUILayout.Button("<", GUILayout.Width(30)))
+                {
                     micIdx = (micIdx - 1 + mics.Length) % mics.Length;
                     AudioCaptureManager.SetDevice(mics[micIdx]);
                     currentMic = mics[micIdx];
                 }
-                
+
                 GUILayout.Label(mics[micIdx], GUILayout.ExpandWidth(true));
 
-                if (GUILayout.Button(">", GUILayout.Width(30))) {
+                if (GUILayout.Button(">", GUILayout.Width(30)))
+                {
                     micIdx = (micIdx + 1) % mics.Length;
                     AudioCaptureManager.SetDevice(mics[micIdx]);
                     currentMic = mics[micIdx];
                 }
                 GUILayout.EndHorizontal();
 
-                if (GUILayout.Button("FORCE RESET MIC", GUILayout.Height(25))) {
+                if (GUILayout.Button("FORCE RESET MIC", GUILayout.Height(25)))
+                {
                     AudioCaptureManager.SetDevice(mics[micIdx]);
                 }
             }
