@@ -56,6 +56,8 @@ class RadioTransmitter {
 
             const inputSampleRate = this.audioCtx.sampleRate;
             this.resamplePhase = 0; 
+            this.lastSample = 0;
+            this.accPtr = 0;
             this._lastPacketTime = performance.now();
 
             source.connect(this.micProcessor);
