@@ -51,6 +51,7 @@ namespace Telemachus
                 // 1. PTT Logic
                 if (Input.GetKey(KeyCode.RightControl) || Input.GetKey(KeyCode.LeftControl))
                 {
+                    if (!pttActive) PluginLogger.print("[Radio-PTT] Downlink OPEN (Pilot Speaking)");
                     pttActive = true;
                     pttHangTime = 0.3f;
                 }
@@ -61,7 +62,11 @@ namespace Telemachus
                         pttHangTime -= Time.unscaledDeltaTime;
                         pttActive = true;
                     }
-                    else pttActive = false;
+                    else 
+                    {
+                        if (pttActive) PluginLogger.print("[Radio-PTT] Downlink CLOSED (Silence)");
+                        pttActive = false;
+                    }
                 }
 
                 // 2. v14.27 Restore: Mic Device Hot-Switching
@@ -157,7 +162,7 @@ namespace Telemachus
                 float[] gameMono = new float[gameLen];
 
                 float targetPacketGain = pttActive ? 1.0f : 0.0f;
-                _packetFadeGain += (targetPacketGain - _packetFadeGain) * 0.004f;
+                _packetFadeGain += (targetPacketGain - _packetFadeGain) * 0.2f;
 
                 if (!pttActive && _packetFadeGain < 0.001f) 
                 {
@@ -186,7 +191,7 @@ namespace Telemachus
 
                         for (int i = 0; i < gameLen; i++)
                         {
-                            _micFadeGain += (targetMicGain - _micFadeGain) * 0.002f;
+                            _micFadeGain += (targetMicGain - _micFadeGain) * 0.15f;
                             float micV = 0f;
                             if (_micFadeGain > 0.001f)
                             {
