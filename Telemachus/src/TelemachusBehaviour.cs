@@ -111,7 +111,6 @@ namespace Telemachus
                     // Create the websocket server and attach to the web server
                     webServer.AddWebSocketService("/datalink", () => new KSPWebSocketService(apiInstance, rateTracker));
                     webServer.AddWebSocketService("/stream", () => new KSPUnifiedStreamService(rateTracker));
-                    webServer.AddWebSocketService("/radio", () => new KSPRadioService(rateTracker));
 
                     // Finally, start serving requests!
                     try

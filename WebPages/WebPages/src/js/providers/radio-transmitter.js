@@ -1,9 +1,15 @@
 /**
  * Isolated Component (Composition Pattern)
- * Responsible entirely for managing microphone input and resampling to 22050Hz.
- * It exposes startTransmission/stopTransmission for the UI to use, completely
- * decoupling the DOM from the Data.
+ * Responsible entirely for managing microphone input and resampling.
+ * Includes v14.5 Math/Physics Fixes.
  */
+
+// --- CONFIGURATION CONSTANTS (v14.5) ---
+const MIC_TARGET_SAMPLE_RATE = 22050; // KSP Audio Loop target frequency
+const BROWSER_AUDIO_CHUNK_SIZE = 1024; // 1024 samples = ~21.3ms at 48000Hz (Smoother flow, no 85ms bursts)
+const UPLINK_PACKET_SIZE = 1024; // Samples per WebSocket uncompressed packet
+const DIAGNOSTIC_PACKET_LOG_INTERVAL = 50; // Log frequency
+
 class RadioTransmitter {
     constructor(signalLink, audioCtx) {
         this.signalLink = signalLink;
@@ -11,15 +17,22 @@ class RadioTransmitter {
         this.micStream = null;
         this.micProcessor = null;
         this.isTransmitting = false;
+        
+        // --- ACCUMULATOR STATE ---
+        this.accumulator = new Int16Array(UPLINK_PACKET_SIZE);
+        this.accPtr = 0;
+        this.resamplePhase = 0;
+
+        // --- DIAGNOSTICS (v14.5) ---
+        this._sentPackets = 0;
+        this._lastPacketTime = performance.now();
+        this._intervalSum = 0;
+        console.log("[Radio-v14.5] Transmitter Initialized");
     }
 
     async startTransmission() {
         if (!this.signalLink || !this.signalLink.ws || this.signalLink.ws.readyState !== WebSocket.OPEN) return;
         if (this.isTransmitting) return; 
-
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            throw new Error("HTTPS REQ.");
-        }
 
         try {
             this.isTransmitting = true;
@@ -38,52 +51,64 @@ class RadioTransmitter {
             
             this.micStream = await navigator.mediaDevices.getUserMedia(constraints);
             const source = this.audioCtx.createMediaStreamSource(this.micStream);
-            this.micProcessor = this.audioCtx.createScriptProcessor(4096, 1, 1);
+            this.micProcessor = this.audioCtx.createScriptProcessor(BROWSER_AUDIO_CHUNK_SIZE, 1, 1);
 
-            const targetSampleRate = 22050;
             const inputSampleRate = this.audioCtx.sampleRate;
-            const resampleRatio = inputSampleRate / targetSampleRate;
+            this.resamplePhase = 0; 
+            this._lastPacketTime = performance.now();
 
             source.connect(this.micProcessor);
             this.micProcessor.connect(this.audioCtx.destination);
+
+            // Compute packet interval target mathematically for diagnostics
+            const targetPacketIntervalMs = (UPLINK_PACKET_SIZE / MIC_TARGET_SAMPLE_RATE) * 1000;
 
             this.micProcessor.onaudioprocess = (e) => {
                 if (!this.isTransmitting) return;
                 
                 const inputData = e.inputBuffer.getChannelData(0);
-                let pcm;
+                const ratio = this.audioCtx.sampleRate / MIC_TARGET_SAMPLE_RATE;
+                
+                let currentIdx = this.resamplePhase;
 
-                // Software resampling (Linear Interpolation)
-                if (Math.abs(resampleRatio - 1) < 0.01) {
-                    pcm = new Int16Array(inputData.length);
-                    for (let i = 0; i < inputData.length; i++) {
-                        const s = Math.max(-1, Math.min(1, inputData[i]));
-                        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                while (currentIdx < inputData.length) {
+                    const i0 = Math.floor(currentIdx);
+                    const i1 = Math.min(i0 + 1, inputData.length - 1);
+                    const frac = currentIdx - i0;
+                    
+                    const s = inputData[i0] + (inputData[i1] - inputData[i0]) * frac;
+                    const clamped = Math.max(-1, Math.min(1, s));
+                    
+                    this.accumulator[this.accPtr] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
+                    this.accPtr++;
+
+                    if (this.accPtr >= this.accumulator.length) {
+                        const snapshot = new Uint8Array(this.accumulator.buffer.slice(0));
+                        this.signalLink.queueUplink(PacketType.AUDIO_UPLINK, snapshot);
+                        this.accPtr = 0;
+
+                        // Precise Telemetry
+                        this._sentPackets++;
+                        const now = performance.now();
+                        const interval = now - this._lastPacketTime;
+                        this._intervalSum += interval;
+                        this._lastPacketTime = now;
+
+                        if (this._sentPackets >= DIAGNOSTIC_PACKET_LOG_INTERVAL) {
+                            const avg = this._intervalSum / this._sentPackets;
+                            console.log(`[Radio-v14.5] UPLINK Transmit: Avg Interval = ${avg.toFixed(2)}ms (Target: ${targetPacketIntervalMs.toFixed(2)}ms)`);
+                            this._sentPackets = 0;
+                            this._intervalSum = 0;
+                        }
                     }
-                } else {
-                    const outputLength = Math.floor(inputData.length / resampleRatio);
-                    pcm = new Int16Array(outputLength);
-                    for (let i = 0; i < outputLength; i++) {
-                        const sourceIndex = i * resampleRatio;
-                        const index0 = Math.floor(sourceIndex);
-                        const index1 = Math.min(index0 + 1, inputData.length - 1);
-                        const frac = sourceIndex - index0;
-                        
-                        const s0 = inputData[index0];
-                        const s1 = inputData[index1];
-                        const s = s0 + (s1 - s0) * frac;
-                        
-                        const clamped = Math.max(-1, Math.min(1, s));
-                        pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
-                    }
+
+                    currentIdx += ratio;
                 }
-
-                // Push to the Unified Uplink Queue 
-                // The Synchronizer will handle delaying it by N seconds 
-                // before dropping it on the wire.
-                this.signalLink.queueUplink(PacketType.AUDIO_UPLINK, new Uint8Array(pcm.buffer));
+                
+                this.resamplePhase = currentIdx - inputData.length;
             };
         } catch (err) {
+            console.error("[Radio-v14.5] Transmission Error:", err);
             this.stopTransmission();
             throw err;
         }

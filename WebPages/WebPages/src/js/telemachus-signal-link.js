@@ -68,9 +68,18 @@ class UplinkSynchronizer {
                         this.signalLink.ws.send(packet.payload);
                     } else {
                         // 2. Binary Buffer (Delayed Audio)
-                        const finalBuffer = new Uint8Array(1 + packet.payload.length);
-                        finalBuffer[0] = packet.type;
-                        finalBuffer.set(packet.payload, 1);
+                        const finalBuffer = new Uint8Array(StreamConstants.HEADER_SIZE + packet.payload.length);
+                        const view = new DataView(finalBuffer.buffer);
+                        
+                        // Fill 34-byte Header
+                        view.setUint8(0, packet.type);
+                        view.setFloat64(1, packet.creationUT, true);
+                        view.setFloat64(9, this.signalLink.lastPacketWarp || 1.0, true);
+                        view.setFloat64(17, instantDelay, true);
+                        view.setFloat64(25, 0, true); // No FOV for audio
+                        view.setUint8(33, 100); // 100% Signal (Uplink is assumed clear)
+
+                        finalBuffer.set(packet.payload, StreamConstants.HEADER_SIZE);
                         this.signalLink.ws.send(finalBuffer.buffer);
                     }
 

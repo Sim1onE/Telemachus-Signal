@@ -21,15 +21,28 @@ namespace Telemachus
             private volatile bool pttActive = false;
 
             private float[] resampleBuffer;
-            private float resamplePos = 0;
+            private double micSrcPos = 0;
+            private double finalSrcPos = 0;
             
             private int lastSeenPos = -1;
             private float stallTimer = 0;
 
+            private float pttHangTime = 0f;
+
             void Update()
             {
-                // Check PTT key (Standard RightControl key for communications)
-                pttActive = Input.GetKey(KeyCode.RightControl);
+                // Check PTT key (Standard Control keys for communications)
+                if (Input.GetKey(KeyCode.RightControl) || Input.GetKey(KeyCode.LeftControl)) {
+                    pttActive = true;
+                    pttHangTime = 0.3f; // 300ms hang time ensures the last word is not clipped
+                } else {
+                    if (pttHangTime > 0) {
+                        pttHangTime -= Time.unscaledDeltaTime;
+                        pttActive = true;
+                    } else {
+                        pttActive = false;
+                    }
+                }
 
                 // Auto-restart if the global device selection changed via Debug Window
                 string targetDevice = AudioCaptureManager.SelectedDevice;
@@ -106,6 +119,15 @@ namespace Telemachus
 
                 int gameLen = data.Length / channels;
                 float[] gameMono = new float[gameLen];
+                if (!pttActive)
+                {
+                    // Global MUTE. No audio leaves Kerbal unless the pilot holds PTT.
+                    if (micActive) {
+                        lastMicPos = Microphone.GetPosition(deviceName);
+                        micSrcPos = 0;
+                    }
+                    return;
+                }
 
                 // 1. Process Game FX (Downmix to Mono)
                 for (int i = 0; i < gameLen; i++)
@@ -131,37 +153,51 @@ namespace Telemachus
                         lastMicPos = (lastMicPos + micLenNeeded) % micClip.samples;
 
                         // Mix into gameMono (Resampled Mic -> Game Rate)
+                        double micPos = micSrcPos;
                         for (int i = 0; i < gameLen; i++)
                         {
-                            float srcIdx = i * ratio;
-                            int i0 = (int)srcIdx;
-                            int i1 = Math.Min(i0 + 1, temp.Length - 1);
-                            float frac = srcIdx - i0;
+                            int i0 = (int)micPos;
+                            int i1 = Math.Max(0, Math.Min(i0 + 1, temp.Length - 1));
+                            float frac = (float)(micPos - i0);
                             float micV = (temp[i0] + (temp[i1] - temp[i0]) * frac) * 3.5f; // Boost Pilot
                             gameMono[i] = Mathf.Clamp(gameMono[i] * 0.7f + micV, -1f, 1f); // Duck game slightly when talking
+                            micPos += ratio;
                         }
+                        micSrcPos = Math.Max(0, micPos - micLenNeeded);
                     }
                 }
                 else if (micActive)
                 {
                     // Sync Head even when silent
                     lastMicPos = Microphone.GetPosition(deviceName);
+                    micSrcPos = 0;
                 }
 
                 // 3. Resample Final Mix (GameRate -> 22050Hz for transmission)
-                float targetRate = 22050f;
-                float downRatio = (float)AudioSettings.outputSampleRate / targetRate;
-                int targetLen = Mathf.FloorToInt(gameLen / downRatio);
-                float[] finalSamples = new float[targetLen];
+                double finalRatio = (double)AudioSettings.outputSampleRate / 22050.0;
+                
+                // Calculate how many samples we can DEFINITELY fit starting at finalSrcPos
+                int targetLen = 0;
+                double checkPos = finalSrcPos;
+                while (checkPos < gameLen) {
+                    targetLen++;
+                    checkPos += finalRatio;
+                }
 
+                float[] finalSamples = new float[targetLen];
+                double currentPos = finalSrcPos;
                 for (int i = 0; i < targetLen; i++)
                 {
-                    float srcIdx = i * downRatio;
-                    int i0 = (int)srcIdx;
-                    int i1 = Math.Min(i0 + 1, gameLen - 1);
-                    float frac = srcIdx - i0;
-                    finalSamples[i] = gameMono[i0] + (gameMono[i1] - gameMono[i0]) * frac;
+                    int i0 = (int)currentPos;
+                    int i1 = Math.Max(0, Math.Min(i0 + 1, gameLen - 1));
+                    float frac = (float)(currentPos - i0);
+                    
+                    // Boundary safety
+                    int idx0 = Math.Max(0, Math.Min(i0, gameLen - 1));
+                    finalSamples[i] = gameMono[idx0] + (gameMono[i1] - gameMono[idx0]) * frac;
+                    currentPos += finalRatio;
                 }
+                finalSrcPos = Math.Max(0, currentPos - gameLen);
 
                 OnAudioBuffer(finalSamples);
             }
@@ -186,6 +222,10 @@ namespace Telemachus
         private long lastSentFrameId = -1;
         private long lastHeartbeatTick = 0;
         private KSPAudioDownlink audioDownlink;
+        private int _downlinkPacketCount = 0;
+        private float _lastDownlinkDiag = 0;
+        private string _pendingDownlinkMsg = null;
+        private bool _needsAudioInit = false;
 
         private const int AUDIO_SAMPLE_RATE = 22050;
 
@@ -237,9 +277,14 @@ namespace Telemachus
                 byte type = e.RawData[0];
                 if (type == (byte)PacketType.AudioUplink) // Voice In
                 {
-                    byte[] pcmData = new byte[e.RawData.Length - 1];
-                    Buffer.BlockCopy(e.RawData, 1, pcmData, 0, pcmData.Length);
-                    HandleIncomingAudio(pcmData);
+                    // Full 34-byte header support for Uplink Sync
+                    if (e.RawData.Length < HEADER_SIZE) return;
+                    
+                    double creationUT = BitConverter.ToDouble(e.RawData, 1);
+                    byte[] pcmData = new byte[e.RawData.Length - HEADER_SIZE];
+                    Buffer.BlockCopy(e.RawData, HEADER_SIZE, pcmData, 0, pcmData.Length);
+                    
+                    HandleIncomingAudio(pcmData, creationUT);
                 }
             }
             else if (e.IsText)
@@ -314,23 +359,41 @@ namespace Telemachus
             Buffer.BlockCopy(pcm, 0, packet, HEADER_SIZE, pcm.Length);
 
             SendAsync(packet, null);
+
+            // Diagnostics (Capture only)
+            _downlinkPacketCount++;
+            if (Time.unscaledTime - _lastDownlinkDiag > 2.0f) {
+                _pendingDownlinkMsg = $"[Radio-Diag] DOWNLINK Output: {_downlinkPacketCount} packets in 2s (Steady rate = ~40-50)";
+                _downlinkPacketCount = 0;
+                _lastDownlinkDiag = Time.unscaledTime;
+            }
         }
 
-        private void HandleIncomingAudio(byte[] pcmData)
+        private void HandleIncomingAudio(byte[] pcmData, double creationUT)
         {
-            float quality = (float)TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
-
-            MainThreadDispatcher.Enqueue(() =>
-            {
-                if (audioSource != null)
-                {
-                    PlayAudioChunk(pcmData, quality);
-                }
-            });
+            // Direct Link to the High-Fidelity Ring Buffer
+            TelemachusAudioController.Instance.PlayVoiceUplink(pcmData, creationUT);
         }
 
         public void ProcessUpdate()
         {
+            TelemachusAudioController.EnsureInstance();
+
+            if (_needsAudioInit && audioDownlink == null) {
+                AudioListener listener = UnityEngine.Object.FindObjectOfType<AudioListener>();
+                if (listener != null) {
+                    audioDownlink = listener.gameObject.AddComponent<KSPAudioDownlink>();
+                    audioDownlink.OnAudioBuffer = HandleGameAudio;
+                    _needsAudioInit = false;
+                    PluginLogger.print("[Downlink v14.4] Active Audio Link established on: " + listener.name);
+                }
+            }
+
+            if (_pendingDownlinkMsg != null) {
+                PluginLogger.print(_pendingDownlinkMsg);
+                _pendingDownlinkMsg = null;
+            }
+
             // Always send Heartbeat to keep client clock in sync even when camera is off
             SendHeartbeat();
 
@@ -449,17 +512,5 @@ namespace Telemachus
             }
         }
 
-        private void PlayAudioChunk(byte[] data, float quality)
-        {
-            float[] samples = new float[data.Length / 2];
-            for (int i = 0; i < samples.Length; i++)
-            {
-                samples[i] = BitConverter.ToInt16(data, i * 2) / 32768f;
-                if (quality < 0.95f) samples[i] += (UnityEngine.Random.value * 2f - 1f) * (1.0f - quality) * 0.15f;
-            }
-            AudioClip clip = AudioClip.Create("Radio", samples.Length, 1, AUDIO_SAMPLE_RATE, false);
-            clip.SetData(samples, 0);
-            audioSource.PlayOneShot(clip);
-        }
     }
 }
