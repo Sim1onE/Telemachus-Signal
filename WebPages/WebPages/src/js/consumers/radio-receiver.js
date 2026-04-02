@@ -15,6 +15,7 @@ class RadioReceiver {
         this._lastLogTime = Date.now();
         this._packetCount = 0;
         this._creationUT = 0;
+        this.isMuted = true; // Default to muted for Autoplay safety
         
         // --- RING BUFFER STATE ---
         this.workletInitted = false;
@@ -24,7 +25,27 @@ class RadioReceiver {
 
         this.playbackInterval = null;
         this.signalLink.on(PacketType.AUDIO_DOWNLINK, this.handleIncomingAudio.bind(this));
-        console.log("[Radio-v14.19] Receiver Initialized");
+        
+        // v14.31: Mobile-Enhanced Autoplay Fix.
+        const resume = async () => {
+            if (this.audioCtx.state === 'suspended') {
+                await this.audioCtx.resume();
+                // Play a micro-sound to 'wake up' the audio hardware on iOS
+                const osc = this.audioCtx.createOscillator();
+                const gain = this.audioCtx.createGain();
+                gain.gain.value = 0.001; 
+                osc.connect(gain);
+                gain.connect(this.audioCtx.destination);
+                osc.start(0);
+                osc.stop(this.audioCtx.currentTime + 0.01);
+            }
+            ['click', 'keydown', 'touchstart', 'touchend', 'mousedown'].forEach(e => 
+                document.removeEventListener(e, resume));
+        };
+        ['click', 'keydown', 'touchstart', 'touchend', 'mousedown'].forEach(e => 
+            document.addEventListener(e, resume));
+
+        console.log("[Radio-v14.31] Receiver Initialized (Mobile-Ready)");
     }
 
     async start() {
@@ -55,6 +76,45 @@ class RadioReceiver {
         // to decouple audio from rendering frame rate/lag.
         if (this.playbackInterval) clearInterval(this.playbackInterval);
         this.playbackInterval = setInterval(() => this.playbackLoop(), 20);
+    }
+
+    setMuted(isMuted) {
+        this.isMuted = isMuted;
+        if (this.processor) {
+            this.processor.port.postMessage({
+                type: 'set-mute',
+                payload: isMuted
+            });
+        }
+        
+        // v14.32: Play feedback sound when unmuting (also helps wake up Mobile Audio)
+        if (!isMuted) {
+            this.playActivationSound();
+        }
+    }
+
+    playActivationSound() {
+        if (!this.audioCtx) return;
+        const now = this.audioCtx.currentTime;
+        
+        // Professional NASA 'Quindar' tone (Intro style)
+        // 250ms at 2525Hz
+        const osc = this.audioCtx.createOscillator();
+        const gain = this.audioCtx.createGain();
+        
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(2525, now);
+        
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.2, now + 0.005);
+        gain.gain.setValueAtTime(0.2, now + 0.150);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.200);
+        
+        osc.connect(gain);
+        gain.connect(this.audioCtx.destination);
+        
+        osc.start(now);
+        osc.stop(now + 0.25);
     }
 
     stop() {

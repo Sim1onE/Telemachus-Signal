@@ -44,8 +44,11 @@ class RadioDownstreamWorklet extends AudioWorkletProcessor {
                 this.readPtr = targetReadPtr;
                 this.currentGain = 0.0;
                 this.isBuffering = false;
+            } else if (msg.type === 'set-mute') {
+                this.isApplicationMuted = msg.payload;
             }
         };
+        this.isApplicationMuted = true; // Initial state matches RadioReceiver
     }
 
     process(inputs, outputs, parameters) {
@@ -96,7 +99,7 @@ class RadioDownstreamWorklet extends AudioWorkletProcessor {
                 }
             }
 
-            const targetGain = this.isBuffering ? 0.0 : 1.0;
+            const targetGain = (this.isBuffering || this.isApplicationMuted) ? 0.0 : 1.0;
             this.currentGain = Math.max(0, Math.min(1, this.currentGain + (targetGain - this.currentGain) * 0.002));
 
             // Phase matched extraction

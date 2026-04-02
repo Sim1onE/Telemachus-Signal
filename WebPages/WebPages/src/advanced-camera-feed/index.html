@@ -65,10 +65,15 @@
                 <h3>Communication</h3>
             </div>
             <div class="comms-panel">
-                <button id="radio-ptt-btn" class="radio-btn">
-                    <span class="icon">🎙️</span>
-                    <span class="label">RADIO UPLINK</span>
-                </button>
+                <div style="display: flex; gap: 8px;">
+                    <button id="radio-ptt-btn" class="radio-btn" style="flex: 1;">
+                        <span class="icon">🎙️</span>
+                        <span class="label">RADIO UPLINK</span>
+                    </button>
+                    <button id="radio-speaker-btn" class="radio-speaker-btn muted">
+                        <span class="icon">🔇</span>
+                    </button>
+                </div>
                 <div id="radio-status" class="radio-status">
                     <span class="status-dot"></span>
                     <span class="status-text">DISCONNECTED</span>
