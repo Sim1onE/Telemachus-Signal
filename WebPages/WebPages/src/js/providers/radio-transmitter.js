@@ -23,11 +23,12 @@ class RadioTransmitter {
         this.accPtr = 0;
         this.resamplePhase = 0;
 
-        // --- DIAGNOSTICS (v14.5) ---
+        // --- DIAGNOSTICS (v14.6) ---
         this._sentPackets = 0;
         this._lastPacketTime = performance.now();
         this._intervalSum = 0;
-        console.log("[Radio-v14.5] Transmitter Initialized");
+        this.lastSample = 0; // Phase matching state
+        console.log("[Radio-v14.6] Transmitter Initialized");
     }
 
     async startTransmission() {
@@ -71,12 +72,15 @@ class RadioTransmitter {
                 
                 let currentIdx = this.resamplePhase;
 
-                while (currentIdx < inputData.length) {
+                while (currentIdx < inputData.length - 1) {
                     const i0 = Math.floor(currentIdx);
-                    const i1 = Math.min(i0 + 1, inputData.length - 1);
+                    const i1 = i0 + 1;
                     const frac = currentIdx - i0;
                     
-                    const s = inputData[i0] + (inputData[i1] - inputData[i0]) * frac;
+                    const s0 = i0 < 0 ? this.lastSample : inputData[i0];
+                    const s1 = inputData[i1]; // Safe because i0 is at least -1, so i1 >= 0
+                    
+                    const s = s0 + (s1 - s0) * frac;
                     const clamped = Math.max(-1, Math.min(1, s));
                     
                     this.accumulator[this.accPtr] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
@@ -96,7 +100,7 @@ class RadioTransmitter {
 
                         if (this._sentPackets >= DIAGNOSTIC_PACKET_LOG_INTERVAL) {
                             const avg = this._intervalSum / this._sentPackets;
-                            console.log(`[Radio-v14.5] UPLINK Transmit: Avg Interval = ${avg.toFixed(2)}ms (Target: ${targetPacketIntervalMs.toFixed(2)}ms)`);
+                            console.log(`[Radio-v14.6] UPLINK Transmit: Avg Interval = ${avg.toFixed(2)}ms (Target: ${targetPacketIntervalMs.toFixed(2)}ms)`);
                             this._sentPackets = 0;
                             this._intervalSum = 0;
                         }
@@ -106,9 +110,10 @@ class RadioTransmitter {
                 }
                 
                 this.resamplePhase = currentIdx - inputData.length;
+                this.lastSample = inputData[inputData.length - 1]; // Store real last sample for next block interpolation
             };
         } catch (err) {
-            console.error("[Radio-v14.5] Transmission Error:", err);
+            console.error("[Radio-v14.6] Transmission Error:", err);
             this.stopTransmission();
             throw err;
         }

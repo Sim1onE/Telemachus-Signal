@@ -136,9 +136,10 @@ namespace Telemachus
                 samples[i] = s / 32768.0f;
             }
 
-            // Apply Volume Boost (x3.5)
+            // Apply Volume Boost with Soft Saturation Clipper (Anti-Click v14.6)
             for (int i = 0; i < samples.Length; i++) {
-                samples[i] = Mathf.Clamp(samples[i] * 3.5f, -1f, 1f);
+                // Soft Knee: Atan gently rounds peaks to prevent square-wave harmonic distortion (crackling)
+                samples[i] = Mathf.Atan(samples[i] * 4.0f) / (Mathf.PI / 2f);
             }
 
             if (_cachedQuality < 1.0f)
@@ -173,7 +174,7 @@ namespace Telemachus
                 float avgJitter = _jitterCount > 0 ? (_jitterSum / _jitterCount) : 0;
 
                 // Queue for Main-Thread Update() to print safely
-                _pendingDiagMsg = $"[Radio-Diag v14.5] UPLINK: Sync={_adaptiveRatio:F3}x Reservoir={availMs:F1}ms Drift={drift:F2}s AvgJitter={avgJitter:F1}ms Packets={_packetsSinceLastDiag}";
+                _pendingDiagMsg = $"[Radio-Diag v14.6] UPLINK: Sync={_adaptiveRatio:F3}x Reservoir={availMs:F1}ms Drift={drift:F2}s AvgJitter={avgJitter:F1}ms Packets={_packetsSinceLastDiag}";
                 
                 _lastDiagTick = _cachedUnscaledTime;
                 _packetsSinceLastDiag = 0;
