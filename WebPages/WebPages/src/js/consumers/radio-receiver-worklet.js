@@ -57,7 +57,7 @@ class RadioDownstreamWorklet extends AudioWorkletProcessor {
         const hardwareRate = sampleRate;
         const baseRatio = radioRate / hardwareRate;
 
-        const TARGET_RESERVOIR_S = 0.200;
+        const TARGET_RESERVOIR_S = 0.250; // Aligned to user request (250ms) for v14.25 stability tuning
 
         // Monitor for stall
         if (this.writePtr === this.lastWritePtr) {

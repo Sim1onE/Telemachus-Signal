@@ -29,11 +29,23 @@ class RadioTransmitter {
 
     async startTransmission() {
         if (!this.signalLink || !this.signalLink.ws || this.signalLink.ws.readyState !== WebSocket.OPEN) return;
+        
+        // v14.23: Warm Mic Logic. Initialize hardware once and keep it alive 
+        // to prevent OS/Browser AGC recalibration issues during fast PTT toggling.
+        if (!this.micSource) {
+            await this.initMic();
+        }
+
         if (this.isTransmitting) return; 
+        this.isTransmitting = true;
+        
+        if (this.micProcessor) {
+            this.micProcessor.port.postMessage({ type: 'set-mute', muted: false });
+        }
+    }
 
+    async initMic() {
         try {
-            this.isTransmitting = true;
-
             if (this.audioCtx.state === 'suspended') {
                 await this.audioCtx.resume();
             }
@@ -48,32 +60,30 @@ class RadioTransmitter {
             
             this.micStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-            // --- v14.16: AUDIO WORKLET IMPLEMENTATION (Zero Jitter + Lifecycle Fix) ---
             if (!this.workletInitted) {
                 await this.audioCtx.audioWorklet.addModule('../js/providers/radio-worklet.js');
                 this.workletInitted = true;
             }
 
             this.micProcessor = new AudioWorkletNode(this.audioCtx, 'radio-upstream-worklet');
-            
-            // Set Dynamic Ratio for Resampling
-            this.micProcessor.port.postMessage({ ratio: this.audioCtx.sampleRate / MIC_TARGET_SAMPLE_RATE });
+            this.micProcessor.port.postMessage({ 
+                type: 'init', 
+                ratio: this.audioCtx.sampleRate / MIC_TARGET_SAMPLE_RATE 
+            });
 
             this.micSource = this.audioCtx.createMediaStreamSource(this.micStream);
             this.micSource.connect(this.micProcessor);
-            this.micProcessor.connect(this.audioCtx.destination);
-
-            const targetPacketIntervalMs = (UPLINK_PACKET_SIZE / MIC_TARGET_SAMPLE_RATE) * 1000;
-            this._lastPacketTime = performance.now();
+            // Connect to destination at 0 gain just to keep the worklet clock running reliably
+            const silentGain = this.audioCtx.createGain();
+            silentGain.gain.value = 0;
+            this.micProcessor.connect(silentGain);
+            silentGain.connect(this.audioCtx.destination);
 
             this.micProcessor.port.onmessage = (e) => {
-                if (!this.isTransmitting) return;
-
                 if (e.data.type === 'audio-packet') {
-                    // Send Binary Audio Snapshot via Websocket Ring
+                    if (!this.isTransmitting) return; // Guard
                     this.signalLink.queueUplink(PacketType.AUDIO_UPLINK, e.data.payload);
 
-                    // Precise Telemetry
                     this._sentPackets++;
                     const now = performance.now();
                     const interval = now - this._lastPacketTime;
@@ -82,38 +92,23 @@ class RadioTransmitter {
 
                     if (this._sentPackets >= DIAGNOSTIC_PACKET_LOG_INTERVAL) {
                         const avg = this._intervalSum / this._sentPackets;
-                        console.log(`[Radio-v14.16] UPLINK Transmit (Worklet): Avg Interval = ${avg.toFixed(2)}ms (Target: ${targetPacketIntervalMs.toFixed(2)}ms)`);
+                        console.log(`[Radio-v14.23] UPLINK Transmit (Warm): Avg Interval = ${avg.toFixed(2)}ms`);
                         this._sentPackets = 0;
                         this._intervalSum = 0;
                     }
                 }
             };
         } catch (err) {
-            console.error("[Radio-v14.6] Transmission Error:", err);
-            this.stopTransmission();
+            console.error("[Radio-v14.23] Mic Init Error:", err);
             throw err;
         }
     }
 
     stopTransmission() {
         this.isTransmitting = false;
-        
         if (this.micProcessor) {
-            this.micProcessor.port.onmessage = null; // v14.16: Explicitly kill the listener!
-            this.micProcessor.disconnect();
+            this.micProcessor.port.postMessage({ type: 'set-mute', muted: true });
         }
-
-        if (this.micSource) {
-            this.micSource.disconnect();
-        }
-        
-        if (this.micStream) {
-            this.micStream.getTracks().forEach(t => t.stop());
-        }
-        
-        this.micSource = null;
-        this.micProcessor = null;
-        this.micStream = null;
     }
 }
 

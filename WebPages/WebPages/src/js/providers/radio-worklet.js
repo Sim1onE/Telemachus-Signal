@@ -1,9 +1,11 @@
 /**
- * Radio Upstream Worklet (v14.22)
+ * Radio Upstream Worklet (v14.23)
  * Handles Microphone capture, Resampling to 22050Hz, and Packetizing.
  * 
- * v14.22: Added Cold-Start Phase Reset and 10ms Soft Fade-in to prevent 
- *         PTT-start clicks and DC-offset 'thumps'.
+ * v14.23: Added 'Warm Mic' support with Internal Gating.
+ *         The worklet now handles PTT via 'set-mute' messages.
+ *         When muted, it continues to 'consume' audio to keep Browser AGC stable
+ *         but discards all packets and resets resampler phase.
  */
 class RadioUpstreamWorklet extends AudioWorkletProcessor {
     constructor() {
@@ -16,14 +18,24 @@ class RadioUpstreamWorklet extends AudioWorkletProcessor {
         
         this.resamplePhase = 0;
         this.lastSample = 0;
-        this.baseSampleRate = 48000; // Expected default
         this.ratio = 48000 / this.MIC_TARGET_SAMPLE_RATE;
+        
         this.isFirstBlock = true;
-        this.currentGain = 0.0; // Soft Fade-in for Cold Start
+        this.currentGain = 0.0;
+        this.muted = true; // Gated by default (v14.23)
 
         this.port.onmessage = (e) => {
-            if (e.data.ratio) {
+            if (e.data.type === 'init') {
                 this.ratio = e.data.ratio;
+            }
+            if (e.data.type === 'set-mute') {
+                this.muted = e.data.muted;
+                if (this.muted) {
+                    // Reset internal resampler state when stopping to ensure next burst is clean
+                    this.isFirstBlock = true;
+                    this.currentGain = 0.0;
+                    this.accPtr = 0;
+                }
             }
         };
     }
@@ -35,8 +47,8 @@ class RadioUpstreamWorklet extends AudioWorkletProcessor {
         const inputData = input[0]; 
         if (!inputData) return true;
 
-        // v14.22 Cold Start Fix: Reset resampler phase on first block
-        if (this.isFirstBlock) {
+        // v14.22 Cold Start Fix: Reset resampler phase on first block of a burst
+        if (this.isFirstBlock && !this.muted) {
             this.resamplePhase = 0;
             this.lastSample = inputData[0];
             this.isFirstBlock = false;
@@ -54,19 +66,25 @@ class RadioUpstreamWorklet extends AudioWorkletProcessor {
             
             let s = s0 + (s1 - s0) * frac;
             
-            // v14.22: Apply tiny 10ms fade-in to mask DC-offset jump at start of mic opening
-            this.currentGain = Math.min(1.0, this.currentGain + (1.0 / (this.MIC_TARGET_SAMPLE_RATE * 0.010))); // 10ms fade
-            s *= this.currentGain;
-
-            const clamped = Math.max(-1, Math.min(1, s));
-            
-            this.accumulator[this.accPtr] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
-            this.accPtr++;
-
-            if (this.accPtr >= this.accumulator.length) {
-                const snapshot = new Uint8Array(this.accumulator.buffer.slice(0));
-                this.port.postMessage({ type: 'audio-packet', payload: snapshot }, [snapshot.buffer]);
+            if (this.muted) {
+                // Keep consuming samples to maintain resampler sync/timing but don't output anything.
+                // Resetting accPtr here ensures no leaked audio.
                 this.accPtr = 0;
+            } else {
+                // v14.22: Apply tiny 10ms fade-in to mask DC-offset jump at start of mic opening
+                this.currentGain = Math.min(1.0, this.currentGain + (1.0 / (this.MIC_TARGET_SAMPLE_RATE * 0.010))); // 10ms fade
+                s *= this.currentGain;
+
+                const clamped = Math.max(-1, Math.min(1, s));
+                this.accumulator[this.accPtr] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
+                this.accPtr++;
+
+                if (this.accPtr >= this.accumulator.length) {
+                    const snapshot = new Uint8Array(this.accumulator.buffer.slice(0));
+                    this.port.postMessage({ type: 'audio-packet', payload: snapshot }, [snapshot.buffer]);
+                    this._sentPackets++;
+                    this.accPtr = 0;
+                }
             }
 
             currentIdx += this.ratio;
