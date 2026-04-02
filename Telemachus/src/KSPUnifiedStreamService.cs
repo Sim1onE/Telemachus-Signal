@@ -35,6 +35,8 @@ namespace Telemachus
             // --- FINAL RESAMPLE PHASE (Anti-Click v14.7) ---
             private double finalSrcPos = 0;
             private float _lastGameMonoSample = 0f;
+            private bool _isMicBuffering = true;
+            private float _micFadeGain = 0f;
 
             void Update()
             {
@@ -166,23 +168,38 @@ namespace Telemachus
                 if (micActive)
                 {
                     float ratio = (float)micFreq / (float)safeSampleRate;
-                    int micLenNeeded = Mathf.CeilToInt(gameLen * ratio);
 
                     lock (_micLock)
                     {
                         int available = (_micWritePtr - (int)_micReadPtr + _micRingBuffer.Length) % _micRingBuffer.Length;
-                        if (available >= micLenNeeded)
+                        
+                        // v14.9 ELASTIC MIC BUFFER
+                        // Wait for 50ms of audio (approx 1100 samples) before feeding FMOD to prevent starvation
+                        bool hasEnoughCushion = available > (micFreq * 0.05f);
+                        if (hasEnoughCushion) _isMicBuffering = false;
+                        if (available < 50) _isMicBuffering = true;
+
+                        float targetMicGain = _isMicBuffering ? 0.0f : 1.0f;
+
+                        for (int i = 0; i < gameLen; i++)
                         {
-                            for (int i = 0; i < gameLen; i++)
-                            {
+                            _micFadeGain += (targetMicGain - _micFadeGain) * 0.002f; // Soft 20ms fade-in/out to avoid snapping
+
+                            float micV = 0f;
+                            // Only advance read pointer if we haven't faded out completely to avoid garbage reads
+                            if (_micFadeGain > 0.001f) {
                                 int i0 = (int)_micReadPtr;
                                 int i1 = (i0 + 1) % _micRingBuffer.Length;
                                 float frac = (float)(_micReadPtr - (int)_micReadPtr);
 
-                                float micV = (_micRingBuffer[i0] + (_micRingBuffer[i1] - _micRingBuffer[i0]) * frac) * 3.5f; // Boost Pilot
-                                gameMono[i] = Mathf.Clamp(gameMono[i] * 0.7f + micV, -1f, 1f); // Duck game
-                                _micReadPtr = (_micReadPtr + ratio) % _micRingBuffer.Length;
+                                micV = (_micRingBuffer[i0] + (_micRingBuffer[i1] - _micRingBuffer[i0]) * frac) * 3.5f; // Boost Pilot
+                                
+                                if (!_isMicBuffering) {
+                                    _micReadPtr = (_micReadPtr + ratio) % _micRingBuffer.Length;
+                                }
                             }
+
+                            gameMono[i] = Mathf.Clamp(gameMono[i] * 0.7f + (micV * _micFadeGain), -1f, 1f); // Duck game smoothly
                         }
                     }
                 }

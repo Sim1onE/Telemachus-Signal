@@ -48,6 +48,10 @@ namespace Telemachus
         private double _cachedUT = 0;
         private float _cachedUnscaledTime = 0;
 
+        // --- CLICK DETECTION (v14.8) ---
+        private float _lastOutputSample = 0f;
+        private int _clickWarningCount = 0;
+
         private readonly int RADIO_RATE = 22050;
         private const int BUFFER_SECONDS = 5;
 
@@ -174,12 +178,17 @@ namespace Telemachus
                 float avgJitter = _jitterCount > 0 ? (_jitterSum / _jitterCount) : 0;
 
                 // Queue for Main-Thread Update() to print safely
-                _pendingDiagMsg = $"[Radio-Diag v14.6] UPLINK: Sync={_adaptiveRatio:F3}x Reservoir={availMs:F1}ms Drift={drift:F2}s AvgJitter={avgJitter:F1}ms Packets={_packetsSinceLastDiag}";
+                _pendingDiagMsg = $"[Radio-Diag v14.8] UPLINK: Sync={_adaptiveRatio:F3}x Reservoir={availMs:F1}ms Drift={drift:F2}s AvgJitter={avgJitter:F1}ms Packets={_packetsSinceLastDiag}";
                 
+                if (_clickWarningCount > 0) {
+                    _pendingDiagMsg += $"\n⚠️ [Radio-Diag] UPLINK CLICK DETECTED: {_clickWarningCount} Phase Fractures (>0.4V) in the last 2s!";
+                }
+
                 _lastDiagTick = _cachedUnscaledTime;
                 _packetsSinceLastDiag = 0;
                 _jitterSum = 0;
                 _jitterCount = 0;
+                _clickWarningCount = 0;
             }
         }
 
@@ -212,7 +221,7 @@ namespace Telemachus
                 for (int i = 0; i < frames; i++)
                 {
                     float targetGain = isBuffering ? 0f : 1f;
-                    currentGain = Mathf.MoveTowards(currentGain, targetGain, 0.02f); // Gentle gain ramp
+                    currentGain = Mathf.MoveTowards(currentGain, targetGain, 0.001f); // 20ms Soft Envelope to avoid pops
 
                     float sampleValue = 0f;
                     if (!isBuffering) {
@@ -227,6 +236,15 @@ namespace Telemachus
                         // Apply Adaptive Speed
                         readPtr = (readPtr + (ratio * _adaptiveRatio)) % bufSize;
                     }
+
+                    // CLICK DETECTION (Server-side)
+                    if (currentGain > 0.9f) {
+                        float delta = Mathf.Abs(sampleValue - _lastOutputSample);
+                        if (delta > 0.4f) { // Sharp discontinuity (40% physical envelope instant change)
+                            _clickWarningCount++;
+                        }
+                    }
+                    _lastOutputSample = sampleValue;
 
                     for (int c = 0; c < channels; c++) {
                         data[i * channels + c] += sampleValue * currentGain; 
