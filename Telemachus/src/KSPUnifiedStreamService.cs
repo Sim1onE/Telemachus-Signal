@@ -37,6 +37,9 @@ namespace Telemachus
             private float _lastGameMonoSample = 0f;
             private bool _isMicBuffering = true;
             private float _micFadeGain = 0f;
+            
+            // --- PACKET ORDERING FIX (v14.11) ---
+            private ulong _fmodBlockCount = 0;
 
             void Update()
             {
@@ -377,8 +380,16 @@ namespace Telemachus
             return null;
         }
 
+        private ulong _fmodAudioBlockCount = 0;
+
         private void HandleGameAudio(float[] samples)
         {
+            _fmodAudioBlockCount++;
+            // v14.11 Fix: FMOD runs multiple blocks per Unity Main Thread physics tick.
+            // This leaves Planetarium.GetUniversalTime() frozen during those blocks,
+            // resulting in identical `ut` on consecutive packets and JS sort scrambling.
+            double uniqueUt = Planetarium.GetUniversalTime() + (_fmodAudioBlockCount * 0.00000001);
+
             // Simple 16-bit PCM conversion
             byte[] pcm = new byte[samples.Length * 2];
             for (int i = 0; i < samples.Length; i++)
@@ -390,7 +401,7 @@ namespace Telemachus
             }
 
             byte[] packet = new byte[HEADER_SIZE + pcm.Length];
-            FillHeader(packet, (byte)PacketType.AudioDownlink, Planetarium.GetUniversalTime(), 0);
+            FillHeader(packet, (byte)PacketType.AudioDownlink, uniqueUt, 0);
             Buffer.BlockCopy(pcm, 0, packet, HEADER_SIZE, pcm.Length);
 
             SendAsync(packet, null);
