@@ -15,20 +15,16 @@ class RadioTransmitter {
         this.signalLink = signalLink;
         this.audioCtx = audioCtx;
         this.micStream = null;
+        this.micSource = null;
         this.micProcessor = null;
         this.isTransmitting = false;
+        this.workletInitted = false;
         
-        // --- ACCUMULATOR STATE ---
-        this.accumulator = new Int16Array(UPLINK_PACKET_SIZE);
-        this.accPtr = 0;
-        this.resamplePhase = 0;
-
-        // --- DIAGNOSTICS (v14.6) ---
+        // --- DIAGNOSTICS (v14.16 - Lifecycle Fix) ---
         this._sentPackets = 0;
         this._lastPacketTime = performance.now();
         this._intervalSum = 0;
-        this.lastSample = 0; // Phase matching state
-        console.log("[Radio-v14.6] Transmitter Initialized");
+        console.log("[Radio-v14.16] Transmitter Initialized");
     }
 
     async startTransmission() {
@@ -51,68 +47,46 @@ class RadioTransmitter {
             };
             
             this.micStream = await navigator.mediaDevices.getUserMedia(constraints);
-            const source = this.audioCtx.createMediaStreamSource(this.micStream);
-            this.micProcessor = this.audioCtx.createScriptProcessor(BROWSER_AUDIO_CHUNK_SIZE, 1, 1);
 
-            const inputSampleRate = this.audioCtx.sampleRate;
-            this.resamplePhase = 0; 
-            this.lastSample = 0;
-            this.accPtr = 0;
-            this._lastPacketTime = performance.now();
+            // --- v14.16: AUDIO WORKLET IMPLEMENTATION (Zero Jitter + Lifecycle Fix) ---
+            if (!this.workletInitted) {
+                await this.audioCtx.audioWorklet.addModule('../js/providers/radio-worklet.js');
+                this.workletInitted = true;
+            }
 
-            source.connect(this.micProcessor);
+            this.micProcessor = new AudioWorkletNode(this.audioCtx, 'radio-upstream-worklet');
+            
+            // Set Dynamic Ratio for Resampling
+            this.micProcessor.port.postMessage({ ratio: this.audioCtx.sampleRate / MIC_TARGET_SAMPLE_RATE });
+
+            this.micSource = this.audioCtx.createMediaStreamSource(this.micStream);
+            this.micSource.connect(this.micProcessor);
             this.micProcessor.connect(this.audioCtx.destination);
 
-            // Compute packet interval target mathematically for diagnostics
             const targetPacketIntervalMs = (UPLINK_PACKET_SIZE / MIC_TARGET_SAMPLE_RATE) * 1000;
+            this._lastPacketTime = performance.now();
 
-            this.micProcessor.onaudioprocess = (e) => {
+            this.micProcessor.port.onmessage = (e) => {
                 if (!this.isTransmitting) return;
-                
-                const inputData = e.inputBuffer.getChannelData(0);
-                const ratio = this.audioCtx.sampleRate / MIC_TARGET_SAMPLE_RATE;
-                
-                let currentIdx = this.resamplePhase;
 
-                while (currentIdx < inputData.length - 1) {
-                    const i0 = Math.floor(currentIdx);
-                    const i1 = i0 + 1;
-                    const frac = currentIdx - i0;
-                    
-                    const s0 = i0 < 0 ? this.lastSample : inputData[i0];
-                    const s1 = inputData[i1]; // Safe because i0 is at least -1, so i1 >= 0
-                    
-                    const s = s0 + (s1 - s0) * frac;
-                    const clamped = Math.max(-1, Math.min(1, s));
-                    
-                    this.accumulator[this.accPtr] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
-                    this.accPtr++;
+                if (e.data.type === 'audio-packet') {
+                    // Send Binary Audio Snapshot via Websocket Ring
+                    this.signalLink.queueUplink(PacketType.AUDIO_UPLINK, e.data.payload);
 
-                    if (this.accPtr >= this.accumulator.length) {
-                        const snapshot = new Uint8Array(this.accumulator.buffer.slice(0));
-                        this.signalLink.queueUplink(PacketType.AUDIO_UPLINK, snapshot);
-                        this.accPtr = 0;
+                    // Precise Telemetry
+                    this._sentPackets++;
+                    const now = performance.now();
+                    const interval = now - this._lastPacketTime;
+                    this._intervalSum += interval;
+                    this._lastPacketTime = now;
 
-                        // Precise Telemetry
-                        this._sentPackets++;
-                        const now = performance.now();
-                        const interval = now - this._lastPacketTime;
-                        this._intervalSum += interval;
-                        this._lastPacketTime = now;
-
-                        if (this._sentPackets >= DIAGNOSTIC_PACKET_LOG_INTERVAL) {
-                            const avg = this._intervalSum / this._sentPackets;
-                            console.log(`[Radio-v14.6] UPLINK Transmit: Avg Interval = ${avg.toFixed(2)}ms (Target: ${targetPacketIntervalMs.toFixed(2)}ms)`);
-                            this._sentPackets = 0;
-                            this._intervalSum = 0;
-                        }
+                    if (this._sentPackets >= DIAGNOSTIC_PACKET_LOG_INTERVAL) {
+                        const avg = this._intervalSum / this._sentPackets;
+                        console.log(`[Radio-v14.16] UPLINK Transmit (Worklet): Avg Interval = ${avg.toFixed(2)}ms (Target: ${targetPacketIntervalMs.toFixed(2)}ms)`);
+                        this._sentPackets = 0;
+                        this._intervalSum = 0;
                     }
-
-                    currentIdx += ratio;
                 }
-                
-                this.resamplePhase = currentIdx - inputData.length;
-                this.lastSample = inputData[inputData.length - 1]; // Store real last sample for next block interpolation
             };
         } catch (err) {
             console.error("[Radio-v14.6] Transmission Error:", err);
@@ -125,14 +99,19 @@ class RadioTransmitter {
         this.isTransmitting = false;
         
         if (this.micProcessor) {
-            this.micProcessor.onaudioprocess = null;
+            this.micProcessor.port.onmessage = null; // v14.16: Explicitly kill the listener!
             this.micProcessor.disconnect();
+        }
+
+        if (this.micSource) {
+            this.micSource.disconnect();
         }
         
         if (this.micStream) {
             this.micStream.getTracks().forEach(t => t.stop());
         }
         
+        this.micSource = null;
         this.micProcessor = null;
         this.micStream = null;
     }
