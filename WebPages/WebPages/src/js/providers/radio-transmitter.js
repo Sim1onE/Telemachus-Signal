@@ -52,9 +52,9 @@ class RadioTransmitter {
 
             const constraints = { 
                 audio: { 
-                    echoCancellation: true, 
-                    noiseSuppression: true, 
-                    autoGainControl: true 
+                    echoCancellation: false, 
+                    noiseSuppression: false, 
+                    autoGainControl: false 
                 } 
             };
             
