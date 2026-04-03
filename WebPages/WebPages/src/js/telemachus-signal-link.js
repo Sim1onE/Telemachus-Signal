@@ -31,7 +31,10 @@ class DownlinkSynchronizer {
         }
         return readyPackets;
     }
-    clear() { this.queue = []; }
+    clear() { 
+        this.queue = []; 
+        this.lastPoppedUT = undefined; // v15.04: Reset epoch barrier on clean
+    }
 }
 
 /**
@@ -142,6 +145,7 @@ class TelemachusSignalLink {
         this.ws.onopen = () => {
             console.log("[SignalLink] Unified Data Stream Hub Active");
             this.requestCameraList();
+            if (this.listeners.has('open')) this.listeners.get('open').forEach(cb => cb());
         };
 
         this.ws.onmessage = (e) => {
@@ -174,6 +178,13 @@ class TelemachusSignalLink {
 
         this.ws.onclose = () => {
             this.isRunning = false;
+            
+            // v15.05 Reset internal flight clock state on disconnect
+            this.lastPacketUT = 0;
+            this.lastPacketReceivedAt = 0;
+            this.latestNetworkDelay = 0;
+            this.lastPacketWarp = 1;
+
             setTimeout(() => this.connect(), 2000);
         };
     }

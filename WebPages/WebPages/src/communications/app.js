@@ -66,8 +66,22 @@ class CommunicationsConsole {
                 this.cameras = msg.cameras;
                 this.renderCameraList();
                 
-                if (!this.selectedCamera && this.cameras.length > 0) {
+                if (this.selectedCamera) {
+                    // v15.08 Recovery: Try to find the same camera by name if server restarts
+                    const existing = this.cameras.find(c => c.name === this.selectedCamera.name);
+                    if (existing) this.selectCamera(existing);
+                } else if (this.cameras.length > 0) {
                     this.selectCamera(this.cameras[0]);
+                }
+            });
+
+            // Connection Re-established (v15.07)
+            this.signalLink.on('open', () => {
+                if (this.cameraReceiver) {
+                    this.cameraReceiver.sync.clear(); // Reset buffers for new epoch
+                    if (this.selectedCamera) {
+                        this.cameraReceiver.start(this.selectedCamera.name);
+                    }
                 }
             });
 

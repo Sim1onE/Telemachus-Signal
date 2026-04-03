@@ -23,8 +23,13 @@ class CameraReceiver {
     }
 
     start(sensorName) {
+        // v15.06: Re-send command if already running (reconnection)
+        if (this.isRunning) {
+            this.signalLink.sendSystemCommand({ camera: sensorName });
+            return;
+        }
+        
         this.isRunning = true;
-        // Ask KSP to start streaming video for this sensor
         this.signalLink.sendSystemCommand({ camera: sensorName });
         this.playbackLoop();
     }
