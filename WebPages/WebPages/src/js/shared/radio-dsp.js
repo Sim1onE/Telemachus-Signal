@@ -35,15 +35,16 @@ export class RadioDSP {
         const lossChance = Math.pow(1.0 - q, 4.0);
         if (this.dropoutCounter > 0) {
             this.dropoutCounter--;
-            s = 0; // Mute sample during dropout
-        } else if (q < 0.5 && Math.random() < lossChance * 0.05) {
-            // Start a new dropout burst (5ms to 40ms)
-            this.dropoutCounter = Math.floor(Math.random() * 800) + 100;
+            s = 0; 
+        } else if (q < 0.4 && Math.random() < lossChance * 0.005) { // v17.5: Rarer dropouts
+            // Start a new dropout burst (10ms to 60ms)
+            this.dropoutCounter = Math.floor(Math.random() * 1200) + 200;
             s = 0;
         }
 
         // 5. Mix
-        const dryLevel = Math.max(0, q * 1.1 - 0.1);
+        // v17.5: Root curve for volume to maintain intelligibility at low quality
+        const dryLevel = Math.sqrt(q); 
         const hissScale = Math.pow(1.0 - q, 1.2); 
         const hiss = (Math.random() * 2 - 1) * this.staticHissLevel * hissScale;
         
