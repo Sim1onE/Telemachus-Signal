@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -17,6 +17,12 @@ namespace Telemachus
         public IPAddress ipAddress { get; set; } = IPAddress.Any;
         /// <summary>A list of IP Addresses that the server should be accessible at</summary>
         public List<IPAddress> ValidIpAddresses { get; set; } = new();
+
+        // --- SSL / HTTPS ---
+        public bool UseSsl { get; set; } = false;
+        public string CertificatePath { get; set; } = "";
+        public string CertificatePassword { get; set; } = "telemachus";
+        public bool HasPromptedSsl { get; set; } = false;
     }
 
     internal static class ServerConfigExtensions

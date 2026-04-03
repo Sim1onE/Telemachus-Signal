@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telemachus SSL Setup</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0b0f1a;
+            --surface: #161b2c;
+            --surface-accent: #1e253d;
+            --primary: #4361ee;
+            --primary-hover: #3a56d4;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --text-main: #f8f9fa;
+            --text-muted: #94a3b8;
+            --accent: #4cc9f0;
+            --border: #2d3748;
+            --glass: rgba(22, 27, 44, 0.8);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            line-height: 1.6;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            background-image:
+                radial-gradient(circle at 10% 20%, rgba(67, 97, 238, 0.1) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(76, 201, 240, 0.1) 0%, transparent 40%);
+        }
+
+        .container {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 700px;
+            width: 100%;
+            box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(12px);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 35px;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: 800;
+            margin-bottom: 12px;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            color: var(--text-muted);
+            font-size: 16px;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        /* Connection Pulse */
+        .status-banner {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            background: var(--surface-accent);
+            padding: 12px 20px;
+            border-radius: 30px;
+            margin-bottom: 30px;
+            border: 1px solid var(--border);
+        }
+
+        .pulse {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--warning);
+            box-shadow: 0 0 0 rgba(245, 158, 11, 0.4);
+            animation: pulse-yellow 2s infinite;
+        }
+
+        .pulse.trusted {
+            background: var(--success);
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
+            animation: pulse-green 1.5s infinite;
+        }
+
+        @keyframes pulse-yellow {
+            0% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7);
+            }
+
+            70% {
+                transform: scale(1);
+                box-shadow: 0 0 0 10px rgba(245, 158, 11, 0);
+            }
+
+            100% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+            }
+        }
+
+        @keyframes pulse-green {
+            0% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            }
+
+            70% {
+                transform: scale(1);
+                box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+            }
+
+            100% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+            }
+        }
+
+        .status-text {
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+
+        .status-text.trusted {
+            color: var(--success);
+        }
+
+        /* Action Buttons */
+        .actions {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        @media (min-width: 600px) {
+            .actions {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 16px 24px;
+            border-radius: 14px;
+            font-size: 16px;
+            font-weight: 700;
+            text-decoration: none;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 4px 15px rgba(67, 97, 238, 0.3);
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(67, 97, 238, 0.4);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border-color: var(--border);
+            color: var(--text-main);
+        }
+
+        .btn-outline:hover {
+            background: var(--surface-accent);
+            border-color: var(--text-muted);
+        }
+
+        .btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* OS Badge */
+        .os-info {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .os-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 16px;
+            background: rgba(76, 201, 240, 0.1);
+            border: 1px solid rgba(76, 201, 240, 0.2);
+            border-radius: 20px;
+            color: var(--accent);
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        /* Safety Warning Alert */
+        .safety-alert {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 15px;
+            margin-top: 15px;
+            margin-bottom: 30px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            text-align: left;
+        }
+
+        .safety-alert svg {
+            color: var(--warning);
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .safety-alert p {
+            font-size: 13px;
+            color: #fcd34d;
+            line-height: 1.4;
+        }
+
+        .safety-alert b {
+            color: #fff;
+        }
+
+        /* Step Instructions */
+        .instructions-card {
+            background: var(--surface-accent);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .instructions-card h3 {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        ol.steps {
+            list-style: none;
+            counter-reset: os-counter;
+        }
+
+        ol.steps li {
+            counter-increment: os-counter;
+            margin-bottom: 18px;
+            padding-left: 45px;
+            position: relative;
+            font-size: 15px;
+            color: #d1d5db;
+        }
+
+        ol.steps li:last-child {
+            margin-bottom: 0;
+        }
+
+        ol.steps li::before {
+            content: counter(os-counter);
+            position: absolute;
+            left: 0;
+            top: -2px;
+            width: 28px;
+            height: 28px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--accent);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        ol.steps b {
+            color: var(--text-main);
+            font-weight: 700;
+        }
+
+        ol.steps code {
+            background: #000;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: var(--accent);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Success State */
+        #success-panel {
+            text-align: center;
+            margin-top: 20px;
+            padding: 25px;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            border-radius: 16px;
+            animation: slideUp 0.5s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        #success-panel h2 {
+            color: var(--success);
+            font-size: 24px;
+            font-weight: 800;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        #redirect-timer {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-main);
+            margin: 15px 0;
+            padding: 10px;
+            background: rgba(16, 185, 129, 0.15);
+            border-radius: 10px;
+        }
+
+        .secure-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: transparent;
+            color: var(--text-muted);
+            text-decoration: underline;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            margin-top: 5px;
+            transition: all 0.2s ease;
+            opacity: 0.7;
+        }
+
+        .secure-btn:hover {
+            color: var(--text-main);
+            opacity: 1;
+        }
+
+        .footer-note {
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="header">
+            <div class="os-info">
+                <span id="os-badge" class="os-badge">Analyzing System...</span>
+            </div>
+            <h1>Security Protocol Setup</h1>
+            <p>Establish a trusted connection to enable high-fidelity Audio and encrypted telemetry for your flight
+                mission.</p>
+        </div>
+
+        <div class="status-banner">
+            <div id="status-pulse" class="pulse"></div>
+            <div id="status-text" class="status-text">Scanning for Trust Store...</div>
+        </div>
+
+        <div id="setup-panel">
+            <div class="actions">
+                <a id="auto-install-btn" href="#" class="btn btn-primary">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                    1-Click Automated Install
+                </a>
+                <a href="/telemachus_root.cer" download class="btn btn-outline">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                    </svg>
+                    Manual Certificate (.cer)
+                </a>
+            </div>
+
+            <div id="safety-notice" class="safety-alert">
+                <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
+                    </path>
+                </svg>
+                <p>
+                    <b>Security Note:</b> Since these scripts interact with system certificates, your browser may flag
+                    the download as "potentially harmful".
+                    Don't worry—it's safe! Click <b>"Keep"</b> or <b>"Allow Anyway"</b> to proceed.
+                </p>
+            </div>
+
+            <div class="instructions-card">
+                <h3 id="instr-title">Mission Protocol Instructions</h3>
+
+                <!-- WINDOWS -->
+                <ol id="steps-windows" class="steps hidden">
+                    <li>Download the <b>1-Click Installer</b> using the blue button above.</li>
+                    <li>Open the <b>trust-win.bat</b> file from your browser's download bar.</li>
+                    <li>Click <b>Yes</b> on the Windows Security prompt to confirm the installation.</li>
+                    <li>The terminal will close automatically. <b>Leave this page open</b> to detect completion.</li>
+                    <li>Ask the Host to turn off <b>Share Mode</b> in the game menu to finalize the stable connection.
+                    </li>
+                </ol>
+
+                <!-- MAC / UNIX -->
+                <ol id="steps-unix" class="steps hidden">
+                    <li>Download the <b>Automated Script</b> (.sh) using the blue button.</li>
+                    <li>Open your <b>Terminal</b> app.</li>
+                    <li>Type <code>sh ~/Downloads/trust-unix.sh</code> and press Enter.</li>
+                    <li>Enter your system password when prompted to finalize the trust.</li>
+                    <li>Ask the Host to turn off <b>Share Mode</b> in the game menu to finalize the stable connection.
+                    </li>
+                </ol>
+
+                <!-- iOS -->
+                <ol id="steps-ios" class="steps hidden">
+                    <li>Tap <b>Manual Certificate</b> above, then tap <b>Allow</b>.</li>
+                    <li>Open <b>Settings</b> > <b>Profile Downloaded</b> and tap <b>Install</b>.</li>
+                    <li>Go to <b>Settings</b> > <b>General</b> > <b>About</b> > <b>Certificate Trust Settings</b>.</li>
+                    <li>Enable the switch for <b>Telemachus (Local Root CA)</b>.</li>
+                    <li>Ask the Host to turn off <b>Share Mode</b> in the game menu to finalize the stable connection.
+                    </li>
+                </ol>
+
+                <!-- ANDROID -->
+                <ol id="steps-android" class="steps hidden">
+                    <li>Tap <b>Manual Certificate</b> and download the file.</li>
+                    <li>Open the file from your notifications.</li>
+                    <li>Name it "Telemachus" and select <b>VPN and app user certificate</b>.</li>
+                    <li>Confirm with your PIN/Biometrics.</li>
+                    <li>Ask the Host to turn off <b>Share Mode</b> in the game menu to finalize the stable connection.
+                    </li>
+                </ol>
+
+                <!-- DEFAULT -->
+                <ol id="steps-default" class="steps hidden">
+                    <li>Download the <b>Manual Certificate</b> file (.cer).</li>
+                    <li>Import it into your system's <b>Trusted Root Certification Authorities</b> store.</li>
+                    <li>Restart your browser to apply the security changes.</li>
+                </ol>
+            </div>
+
+            <p class="footer-note">Once installed, this page will automatically redirect you to the secure dashboard.
+            </p>
+        </div>
+
+        <div id="success-panel" class="hidden">
+            <h2>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                Connection Verified
+            </h2>
+            <p id="redirect-timer">Redirecting to Dashboard in 5 seconds...</p>
+            <p class="footer-note">Your mission connection is now secured.</p>
+            <a id="secure-link" href="#" class="secure-btn">
+                (If you aren't redirected, click here to launch manually)
+            </a>
+            <p class="footer-note" style="margin-top: 15px;">Ask the Host to disable <b>Share Mode</b> in the game menu
+                now.</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+            let os = "default";
+            let osName = "Browser";
+            let autoInstallUrl = "/telemachus_root.cer";
+
+            if (/android/i.test(userAgent)) {
+                os = "android"; osName = "Android";
+            } else if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+                os = "ios"; osName = "iOS Device";
+            } else if (/Mac/i.test(userAgent)) {
+                os = "unix"; osName = "macOS";
+                autoInstallUrl = "/trust-unix.sh";
+            } else if (/Win/i.test(userAgent)) {
+                os = "windows"; osName = "Windows";
+                autoInstallUrl = "/trust-win.bat";
+            } else if (/Linux/i.test(userAgent)) {
+                os = "unix"; osName = "Linux";
+                autoInstallUrl = "/trust-unix.sh";
+            }
+
+            // UI Setup
+            const badge = document.getElementById('os-badge');
+            badge.innerText = `Detected OS: ${osName}`;
+
+            const steps = document.getElementById(`steps-${os}`);
+            if (steps) steps.classList.remove('hidden');
+            else document.getElementById('steps-default').classList.remove('hidden');
+
+            const autoBtn = document.getElementById('auto-install-btn');
+            if (os === "android" || os === "ios" || os === "default") {
+                autoBtn.classList.add('hidden');
+            } else {
+                autoBtn.href = autoInstallUrl;
+            }
+
+            // Trust Detection Logic
+            const secureUrl = `https://${window.location.hostname}:${window.location.port}/`;
+            document.getElementById('secure-link').href = secureUrl;
+
+            let trustConfirmed = false;
+
+            async function checkTrust() {
+                if (trustConfirmed) return;
+
+                try {
+                    // Try to fetch a small resource or just ping via fetch. 
+                    // No-cors won't give us details but will fail if cert is untrusted.
+                    // Actually, if cert is untrusted, the browser will block the request entirely (SSL Error).
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 2000);
+
+                    await fetch(secureUrl, {
+                        mode: 'no-cors',
+                        signal: controller.signal,
+                        cache: 'no-store'
+                    });
+
+                    // If we reach here, the SSL handshake succeeded!
+                    onTrustEstablished();
+                } catch (e) {
+                    // Handshake failed or timed out (expected until cert is installed)
+                    console.log("Trust not yet established...");
+                }
+            }
+
+            function onTrustEstablished() {
+                trustConfirmed = true;
+                clearInterval(checkInterval);
+
+                document.getElementById('status-pulse').classList.add('trusted');
+                const statusText = document.getElementById('status-text');
+                statusText.innerText = "Secure Connection Established";
+                statusText.classList.add('trusted');
+
+                document.getElementById('setup-panel').classList.add('hidden');
+                document.getElementById('success-panel').classList.remove('hidden');
+
+                // Automatic redirect with countdown
+                let timeLeft = 5;
+                const timerElement = document.getElementById('redirect-timer');
+
+                const redirectId = setInterval(() => {
+                    timeLeft -= 1;
+                    if (timeLeft <= 0) {
+                        clearInterval(redirectId);
+                        window.location.href = secureUrl;
+                    } else {
+                        timerElement.innerText = `Redirecting to Dashboard in ${timeLeft} seconds...`;
+                    }
+                }, 1000);
+            }
+
+            // Check every 2.5 seconds
+            const checkInterval = setInterval(checkTrust, 2500);
+            checkTrust(); // Initial check
+        });
+    </script>
+</body>
+
+</html>

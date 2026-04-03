@@ -9,6 +9,8 @@ using System.Text;
 using System.Timers;
 using UnityEngine;
 using WebSocketSharp.Server;
+using System.Security.Cryptography.X509Certificates;
+using WebSocketSharp; // Needed for WriteContent
 
 namespace Telemachus
 {
@@ -39,10 +41,38 @@ namespace Telemachus
         private static UpLinkDownLinkRate rateTracker = new();
 
         private static bool isPartless = false;
+        public static bool IsShareMode = false;
 
         static public string getServerPrimaryIPAddress()
         {
             return serverConfig.ValidIpAddresses.First().ToString();
+        }
+
+        public static ServerConfiguration GetServerConfig() => serverConfig;
+        public static bool IsServerRunning() => webServer != null && webServer.IsListening;
+
+        static public void SaveConfig()
+        {
+            config.SetValue("PORT", serverConfig.port);
+            config.SetValue("IPADDRESS", serverConfig.ipAddress.ToString());
+            config.SetValue("USE_SSL", serverConfig.UseSsl ? 1 : 0);
+            config.SetValue("HAS_PROMPTED_SSL", serverConfig.HasPromptedSsl ? 1 : 0);
+            config.save();
+        }
+
+        static public void StartServer() => startDataLink();
+
+        static public void SetSslPreference(bool useSsl)
+        {
+            serverConfig.UseSsl = useSsl;
+            serverConfig.HasPromptedSsl = true;
+            SaveConfig();
+
+            if (IsServerRunning())
+            {
+                StopServer();
+                StartServer();
+            }
         }
 
         static public string getServerPort()
@@ -66,6 +96,7 @@ namespace Telemachus
 
                     // Create the dispatcher and handlers. Handlers added in reverse priority order so that new ones are not ignored.
                     webDispatcher = new KSPWebServerDispatcher();
+
                     webDispatcher.AddResponder(new ElseResponsibility());
                     webDispatcher.AddResponder(new IOPageResponsibility());
                     var cameraLink = new CameraResponsibility(apiInstance, rateTracker);
@@ -75,18 +106,44 @@ namespace Telemachus
                     var apiRoute = new APIRouteResponsibility(apiInstance, rateTracker);
                     webDispatcher.AddResponder(apiRoute);
 
-                    // Create the server and associate the dispatcher
-                    // Using the port-only constructor makes the server more permissive with Host headers
-                    if (serverConfig.ipAddress == System.Net.IPAddress.Any) {
-                        webServer = new HttpServer(serverConfig.port);
-                    } else {
-                        webServer = new HttpServer(serverConfig.ipAddress, serverConfig.port);
+                    // Add ShareModeResponsibility last so it evaluates first and overrides IOPageResponsibility
+                    webDispatcher.AddResponder(new ShareModeResponsibility());
+
+                    // --- SSL CONFIGURATION PRE-CHECK ---
+                    X509Certificate2 cert = null;
+                    if (serverConfig.UseSsl)
+                    {
+                        cert = TelemachusCertificateManager.GetServerCertificate(serverConfig, false);
+                        if (cert == null)
+                        {
+                            PluginLogger.print("[SSL] Failed to load certificate. Falling back to HTTP.");
+                            serverConfig.UseSsl = false;
+                        }
                     }
-                    
-                    webServer.OnGet += (sender, e) => {
+
+                    // Create the server and associate the dispatcher
+                    bool useSslNow = serverConfig.UseSsl && !IsShareMode;
+                    if (serverConfig.ipAddress == System.Net.IPAddress.Any)
+                    {
+                        webServer = useSslNow ? new HttpServer(serverConfig.port, true) : new HttpServer(serverConfig.port);
+                    }
+                    else
+                    {
+                        webServer = useSslNow ? new HttpServer(serverConfig.ipAddress, serverConfig.port, true) : new HttpServer(serverConfig.ipAddress, serverConfig.port);
+                    }
+
+                    if (useSslNow && cert != null)
+                    {
+                        webServer.SslConfiguration.ServerCertificate = cert;
+                        webServer.SslConfiguration.EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12;
+                        PluginLogger.print("[SSL] HTTPS Enabled with certificate: " + cert.Subject);
+                    }
+
+                    webServer.OnGet += (sender, e) =>
+                    {
                         var request = e.Request;
                         var response = e.Response;
-                        
+
                         PluginLogger.print(string.Format("[Server] {0} {1} (Host: {2})", request.HttpMethod, request.RawUrl, request.UserHostName));
 
                         // CORS Headers
@@ -94,16 +151,37 @@ namespace Telemachus
                         response.AddHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
                         response.AddHeader("Access-Control-Allow-Headers", "Content-Type, X-KSP-UT, X-KSP-Delay");
 
-                        if (request.HttpMethod == "OPTIONS") {
+                        if (request.HttpMethod == "OPTIONS")
+                        {
                             response.StatusCode = 200;
                             response.Close();
+                            return;
+                        }
+
+                        // Handle root certificate download separately
+                        if (request.RawUrl != null && request.RawUrl.Contains("/telemachus_root.cer"))
+                        {
+                            string certPath = TelemachusCertificateManager.GetRootCertPath();
+                            if (System.IO.File.Exists(certPath))
+                            {
+                                response.ContentType = "application/x-x509-ca-cert";
+                                response.AddHeader("Content-Disposition", "attachment; filename=\"telemachus_root.cer\"");
+                                byte[] certBytes = System.IO.File.ReadAllBytes(certPath);
+                                response.WriteContent(certBytes);
+                            }
+                            else
+                            {
+                                response.StatusCode = 404;
+                                response.Close();
+                            }
                             return;
                         }
 
                         webDispatcher.DispatchRequest(sender, e);
                     };
 
-                    webServer.OnPost += (sender, e) => {
+                    webServer.OnPost += (sender, e) =>
+                    {
                         e.Response.AddHeader("Access-Control-Allow-Origin", "*");
                         webDispatcher.DispatchRequest(sender, e);
                     };
@@ -111,7 +189,6 @@ namespace Telemachus
                     // Create the websocket server and attach to the web server
                     webServer.AddWebSocketService("/datalink", () => new KSPWebSocketService(apiInstance, rateTracker));
                     webServer.AddWebSocketService("/stream", () => new KSPUnifiedStreamService(rateTracker));
-                    webServer.AddWebSocketService("/radio", () => new KSPRadioService(rateTracker));
 
                     // Finally, start serving requests!
                     try
@@ -146,6 +223,8 @@ namespace Telemachus
         static private void readConfiguration()
         {
             config.load();
+            serverConfig.ValidIpAddresses.Clear();
+            serverConfig.ValidIpAddresses.Add(IPAddress.Loopback);
 
             // Read the port out of the config file
             int port = config.GetValue<int>("PORT");
@@ -180,11 +259,9 @@ namespace Telemachus
                 PluginLogger.print("No IP address in configuration file.");
             }
 
-            // Fill the serverconfig list of addresses.... if IPAddress.Any, then enumerate them
-            if (serverConfig.ipAddress == IPAddress.Any)
+            // Enumerate other interfaces if bound to Any
+            if (serverConfig.ipAddress.Equals(IPAddress.Any))
             {
-                // Build a list of addresses we will be able to recieve at
-                serverConfig.ValidIpAddresses.Add(IPAddress.Loopback);
                 try
                 {
                     foreach (var iface in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
@@ -197,7 +274,8 @@ namespace Telemachus
                                 && !IPAddress.IsLoopback(addr.Address))
                             {
                                 PluginLogger.print("Found LAN address: " + addr.Address + " on " + iface.Name);
-                                serverConfig.ValidIpAddresses.Add(addr.Address);
+                                if (!serverConfig.ValidIpAddresses.Contains(addr.Address))
+                                    serverConfig.ValidIpAddresses.Add(addr.Address);
                             }
                         }
                     }
@@ -210,15 +288,21 @@ namespace Telemachus
             }
             else
             {
-                serverConfig.ValidIpAddresses.Add(serverConfig.ipAddress);
+                if (!serverConfig.ValidIpAddresses.Contains(serverConfig.ipAddress))
+                    serverConfig.ValidIpAddresses.Add(serverConfig.ipAddress);
             }
 
             serverConfig.version = Assembly.GetExecutingAssembly().GetName().Version.ToString();
             serverConfig.name = "Telemachus";
 
+            serverConfig.UseSsl = config.GetValue<int>("USE_SSL") != 0;
+            serverConfig.HasPromptedSsl = config.GetValue<int>("HAS_PROMPTED_SSL") != 0;
             isPartless = config.GetValue<int>("PARTLESS") != 0;
-            PluginLogger.print("Partless:" + isPartless);
+
+            PluginLogger.print("Partless:" + isPartless + " | SSL:" + serverConfig.UseSsl);
         }
+
+        static public void StopServer() => stopDataLink();
 
         static private void stopDataLink()
         {

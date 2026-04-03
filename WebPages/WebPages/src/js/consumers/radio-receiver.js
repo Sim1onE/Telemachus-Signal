@@ -9,19 +9,125 @@ class RadioReceiver {
         this.audioCtx = audioCtx;
         this.sync = new DownlinkSynchronizer();
         this.isRunning = false;
+        
+        // --- DIAGNOSTICS (v13.0) ---
+        this._sentPackets = 0;
+        this._lastLogTime = Date.now();
+        this._packetCount = 0;
+        this._creationUT = 0;
+        this.isMuted = true; // Default to muted for Autoplay safety
+        
+        // --- RING BUFFER STATE ---
+        this.workletInitted = false;
+        this.micProcessor = null;
+        this.reservoirStatusMs = 0;
+        this.isBuffering = true;
 
-        // Sub to Type 2 (Audio Downlink)
+        this.playbackInterval = null;
         this.signalLink.on(PacketType.AUDIO_DOWNLINK, this.handleIncomingAudio.bind(this));
+        
+        // v14.31: Mobile-Enhanced Autoplay Fix.
+        const resume = async () => {
+            if (this.audioCtx.state === 'suspended') {
+                await this.audioCtx.resume();
+                // Play a micro-sound to 'wake up' the audio hardware on iOS
+                const osc = this.audioCtx.createOscillator();
+                const gain = this.audioCtx.createGain();
+                gain.gain.value = 0.001; 
+                osc.connect(gain);
+                gain.connect(this.audioCtx.destination);
+                osc.start(0);
+                osc.stop(this.audioCtx.currentTime + 0.01);
+            }
+            ['click', 'keydown', 'touchstart', 'touchend', 'mousedown'].forEach(e => 
+                document.removeEventListener(e, resume));
+        };
+        ['click', 'keydown', 'touchstart', 'touchend', 'mousedown'].forEach(e => 
+            document.addEventListener(e, resume));
+
+        console.log("[Radio-v14.31] Receiver Initialized (Mobile-Ready)");
     }
 
-    start() {
+    async start() {
+        if (this.audioCtx.state === 'suspended') await this.audioCtx.resume();
+        
         this.isRunning = true;
-        this.playbackLoop();
+        
+        // --- v14.17: AUDIO WORKLET IMPLEMENTATION (Zero Jitter Downlink) ---
+        if (!this.workletInitted) {
+            await this.audioCtx.audioWorklet.addModule('../js/consumers/radio-receiver-worklet.js');
+            this.workletInitted = true;
+        }
+
+        this.processor = new AudioWorkletNode(this.audioCtx, 'radio-downstream-worklet');
+        this.processor.connect(this.audioCtx.destination);
+
+        this.processor.port.onmessage = (e) => {
+            if (e.data.type === 'telemetry') {
+                this.reservoirStatusMs = e.data.reservoirMs;
+                this.isBuffering = e.data.isBuffering;
+                this._adaptiveRatio = e.data.ratio;
+            } else if (e.data.type === 'click-detected') {
+                console.warn(`[Radio-Diag v14.19] ⚠️ DOWNLINK CLICK DETECTED! Phase Jump: ${e.data.delta.toFixed(2)}V`);
+            }
+        };
+
+        // v14.19: Use high-frequency interval instead of requestAnimationFrame
+        // to decouple audio from rendering frame rate/lag.
+        if (this.playbackInterval) clearInterval(this.playbackInterval);
+        this.playbackInterval = setInterval(() => this.playbackLoop(), 20);
+    }
+
+    setMuted(isMuted) {
+        this.isMuted = isMuted;
+        if (this.processor) {
+            this.processor.port.postMessage({
+                type: 'set-mute',
+                payload: isMuted
+            });
+        }
+        
+        // v14.32: Play feedback sound when unmuting (also helps wake up Mobile Audio)
+        if (!isMuted) {
+            this.playActivationSound();
+        }
+    }
+
+    playActivationSound() {
+        if (!this.audioCtx) return;
+        const now = this.audioCtx.currentTime;
+        
+        // Professional NASA 'Quindar' tone (Intro style)
+        // 250ms at 2525Hz
+        const osc = this.audioCtx.createOscillator();
+        const gain = this.audioCtx.createGain();
+        
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(2525, now);
+        
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.2, now + 0.005);
+        gain.gain.setValueAtTime(0.2, now + 0.150);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.200);
+        
+        osc.connect(gain);
+        gain.connect(this.audioCtx.destination);
+        
+        osc.start(now);
+        osc.stop(now + 0.25);
     }
 
     stop() {
         this.isRunning = false;
+        if (this.playbackInterval) {
+            clearInterval(this.playbackInterval);
+            this.playbackInterval = null;
+        }
         this.sync.clear();
+        if (this.processor) {
+            this.processor.disconnect();
+            this.processor = null;
+        }
     }
 
     handleIncomingAudio(metadata, rawData) {
@@ -56,45 +162,34 @@ class RadioReceiver {
             const readyPackets = this.sync.popReady(delayedTimecode);
             
             if (readyPackets.length > 0) {
-                this.playPackets(readyPackets);
+                // Push ready samples into the Worklet Ring Buffer
+                readyPackets.forEach(p => {
+                    if (!p.payload || !p.payload.samples) return;
+                    this.processor.port.postMessage({
+                        type: 'push-samples',
+                        payload: p.payload.samples
+                    });
+
+                    // Diagnostics Update
+                    this._packetCount++;
+                    this._creationUT = p.ut;
+                });
+                
+                const now = Date.now();
+                if (now - this._lastLogTime > 2000) {
+                    console.log(`[Radio-Diag v14.19] DOWNLINK (Worklet): Sync=${this._adaptiveRatio ? this._adaptiveRatio.toFixed(3) : 1}x Buffering=${this.isBuffering} Reservoir=${this.reservoirStatusMs.toFixed(1)}ms Packets=${this._packetCount}`);
+                    this._packetCount = 0;
+                    this._lastLogTime = now;
+                }
+                
+                // CATCH-UP LOGIC:
+                const tooFarAhead = this.reservoirStatusMs > 660; 
+                if (tooFarAhead) { 
+                    this.processor.port.postMessage({ type: 'force-snap', readPtr: -1 }); 
+                    console.warn(`[Radio-Diag v14.19] Buffer overflow snap triggered. Reservoir was ${this.reservoirStatusMs.toFixed(1)}ms. Volume ducked to crossfade.`);
+                }
             }
         }
-
-        requestAnimationFrame(() => this.playbackLoop());
-    }
-
-    async playPackets(packets) {
-        if (!this.audioCtx) return;
-        if (this.audioCtx.state === 'suspended') await this.audioCtx.resume();
-
-        // Stitch together multiple packets if they arrived at once
-        let totalLength = 0;
-        packets.forEach(p => totalLength += p.payload.samples.length);
-        
-        if (totalLength === 0) return;
-
-        const buffer = this.audioCtx.createBuffer(1, totalLength, 22050);
-        const channelData = buffer.getChannelData(0);
-        
-        let offset = 0;
-        packets.forEach(p => {
-            channelData.set(p.payload.samples, offset);
-            offset += p.payload.samples.length;
-        });
-
-        const source = this.audioCtx.createBufferSource();
-        source.buffer = buffer;
-        
-        // Simple gain node for basic volume control
-        const gainNode = this.audioCtx.createGain();
-        
-        // Signal quality effect: Add noise if signal is low
-        // (The server already adds noise, but we can do further UI feedback if needed)
-        gainNode.gain.value = 0.8; 
-
-        source.connect(gainNode);
-        gainNode.connect(this.audioCtx.destination);
-        source.start();
     }
 }
 

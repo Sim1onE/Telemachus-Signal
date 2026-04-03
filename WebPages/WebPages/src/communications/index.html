@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telemachus | Advanced Camera Feed</title>
+    <title>Telemachus | Communications</title>
     <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
     <header>
         <div class="system-title">
-            <h1>Advanced Camera Feed</h1>
+            <h1>Communications Console</h1>
         </div>
         <div class="telemetry-bar">
             <div class="telemetry-item">
@@ -65,10 +65,15 @@
                 <h3>Communication</h3>
             </div>
             <div class="comms-panel">
-                <button id="radio-ptt-btn" class="radio-btn">
-                    <span class="icon">🎙️</span>
-                    <span class="label">RADIO UPLINK</span>
-                </button>
+                <div style="display: flex; gap: 8px;">
+                    <button id="radio-ptt-btn" class="radio-btn" style="flex: 1;">
+                        <span class="icon">🎙️</span>
+                        <span class="label">RADIO UPLINK</span>
+                    </button>
+                    <button id="radio-speaker-btn" class="radio-speaker-btn muted">
+                        <span class="icon">🔇</span>
+                    </button>
+                </div>
                 <div id="radio-status" class="radio-status">
                     <span class="status-dot"></span>
                     <span class="status-text">DISCONNECTED</span>
@@ -108,7 +113,8 @@
                     <input type="text" id="fov-input" class="fov-value-display" value="60">
                     <span class="telemetry-label">DEG</span>
                 </div>
-                <button id="reset-zoom-btn" class="action-btn" style="border-color: #ff4c4c; color: #ff4c4c;">Reset</button>
+                <button id="reset-zoom-btn" class="action-btn"
+                    style="border-color: #ff4c4c; color: #ff4c4c;">Reset</button>
             </div>
         </section>
     </main>

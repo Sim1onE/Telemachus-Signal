@@ -185,6 +185,35 @@ main {
     box-shadow: 0 0 20px rgba(255, 76, 76, 0.5);
 }
 
+.radio-speaker-btn {
+    width: 48px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--accent-color);
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    transition: var(--transition);
+    color: var(--accent-color);
+}
+
+.radio-speaker-btn:hover {
+    background: var(--accent-glow);
+}
+
+.radio-speaker-btn.muted {
+    border-color: #ffcc00;
+    color: #ffcc00;
+    opacity: 0.6;
+}
+
+.radio-speaker-btn.unmuted {
+    background: rgba(0, 255, 208, 0.1);
+    box-shadow: 0 0 10px var(--accent-glow);
+}
+
 .radio-status {
     display: flex;
     align-items: center;

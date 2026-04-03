@@ -19,7 +19,15 @@ class DownlinkSynchronizer {
     popReady(masterTimecode) {
         let readyPackets = [];
         while (this.queue.length > 0 && this.queue[0].ut <= masterTimecode) {
-            readyPackets.push(this.queue.shift());
+            const p = this.queue.shift(); // The packet is now GONE from the queue forever.
+            
+            // ANTI-LOOP BARRIER: Never play the same (or older) UT twice in one session.
+            if (this.lastPoppedUT !== undefined && p.ut <= this.lastPoppedUT) {
+                continue; 
+            }
+            
+            this.lastPoppedUT = p.ut;
+            readyPackets.push(p);
         }
         return readyPackets;
     }
@@ -39,36 +47,62 @@ class UplinkSynchronizer {
 
     // binaryType (Number) or null if string
     queuePacket(type, payload) {
-        const creationUT = this.signalLink.getEstimatedFlightUT();
+        let creationUT = this.signalLink.getEstimatedFlightUT();
+        
+        // v14.13 Fix: If KSP physics stalled, `getEstimatedFlightUT` can snap backwards during sync.
+        // If an audio packet timestamp snaps backwards, it gets filtered/sorted out of order!
+        // We rigidly enforce a strictly monotonic progression for all queued packets.
+        if (this._lastCreationUT !== undefined && creationUT <= this._lastCreationUT) {
+            creationUT = this._lastCreationUT + 0.000001;
+        }
+        this._lastCreationUT = creationUT;
+
         this.queue.push({ type, creationUT, payload });
     }
 
     startQueueProcessing() {
         setInterval(() => {
             if (!this.signalLink.ws || this.signalLink.ws.readyState !== WebSocket.OPEN) return;
-            
+
             const currentUT = this.signalLink.getEstimatedFlightUT();
             const instantDelay = this.signalLink.latestNetworkDelay;
 
-            let i = this.queue.length;
-            while (i--) {
+            let toSend = [];
+            let i = 0;
+            while (i < this.queue.length) {
                 const packet = this.queue[i];
                 if (currentUT >= packet.creationUT + instantDelay) {
-                    
-                    if (typeof packet.payload === 'string') {
-                        // 1. JSON String (Delayed Flight Command)
-                        this.signalLink.ws.send(packet.payload);
-                    } else {
-                        // 2. Binary Buffer (Delayed Audio)
-                        const finalBuffer = new Uint8Array(1 + packet.payload.length);
-                        finalBuffer[0] = packet.type;
-                        finalBuffer.set(packet.payload, 1);
-                        this.signalLink.ws.send(finalBuffer.buffer);
-                    }
-
+                    toSend.push(packet);
                     this.queue.splice(i, 1);
+                } else {
+                    i++;
                 }
             }
+
+            // Guaranteed Chronological Transmission (v14.12)
+            toSend.sort((a,b) => a.creationUT - b.creationUT);
+
+            toSend.forEach(packet => {
+                if (typeof packet.payload === 'string') {
+                    // 1. JSON String (Delayed Flight Command)
+                    this.signalLink.ws.send(packet.payload);
+                } else {
+                    // 2. Binary Buffer (Delayed Audio)
+                    const finalBuffer = new Uint8Array(StreamConstants.HEADER_SIZE + packet.payload.length);
+                    const view = new DataView(finalBuffer.buffer);
+                    
+                    // Fill 34-byte Header
+                    view.setUint8(0, packet.type);
+                    view.setFloat64(1, packet.creationUT, true);
+                    view.setFloat64(9, this.signalLink.lastPacketWarp || 1.0, true);
+                    view.setFloat64(17, instantDelay, true);
+                    view.setFloat64(25, 0, true); // No FOV for audio
+                    view.setUint8(33, 100); // 100% Signal (Uplink is assumed clear)
+
+                    finalBuffer.set(packet.payload, StreamConstants.HEADER_SIZE);
+                    this.signalLink.ws.send(finalBuffer.buffer);
+                }
+            });
         }, 33);
     }
 }
@@ -106,8 +140,8 @@ class TelemachusSignalLink {
         this.ws.binaryType = 'arraybuffer';
 
         this.ws.onopen = () => {
-             console.log("[SignalLink] Unified Data Stream Hub Active");
-             this.requestCameraList();
+            console.log("[SignalLink] Unified Data Stream Hub Active");
+            this.requestCameraList();
         };
 
         this.ws.onmessage = (e) => {
@@ -146,14 +180,14 @@ class TelemachusSignalLink {
 
     // Sends specific JSON commands immediately (Ignoring delay logic)
     sendSystemCommand(cmdObject) {
-         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-             this.ws.send(JSON.stringify(cmdObject));
-         }
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify(cmdObject));
+        }
     }
 
     // Delays binary payloads (Audio)
     queueUplink(type, payloadUint8Array) {
-         this.uplink.queuePacket(type, payloadUint8Array);
+        this.uplink.queuePacket(type, payloadUint8Array);
     }
 
     // Delays JSON commands through the string-synchronizer

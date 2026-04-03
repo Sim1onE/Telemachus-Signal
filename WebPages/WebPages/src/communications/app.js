@@ -1,4 +1,4 @@
-class AdvancedCameraFeed {
+class CommunicationsConsole {
     constructor() {
         this.selectedCamera = null;
         this.currentFov = null;
@@ -19,6 +19,7 @@ class AdvancedCameraFeed {
         this.fovInput = document.getElementById('fov-input');
         this.resetZoomBtn = document.getElementById('reset-zoom-btn');
         this.radioBtn = document.getElementById('radio-ptt-btn');
+        this.speakerBtn = document.getElementById('radio-speaker-btn');
         this.radioStatusUI = document.getElementById('radio-status');
         this.radioStatusText = this.radioStatusUI?.querySelector('.status-text');
 
@@ -76,7 +77,7 @@ class AdvancedCameraFeed {
         
         this.radioTransmitter = new RadioTransmitter(this.signalLink, this.audioCtx);
         this.radioReceiver = new RadioReceiver(this.signalLink, this.audioCtx);
-        this.radioReceiver.start(); // Start listening for game audio automatically
+        this.radioReceiver.start(); // Start background preparation immediately
         
         this.startSignalWatchdog();
     }
@@ -107,6 +108,7 @@ class AdvancedCameraFeed {
                 this.radioBtn.classList.add('active');
                 if (this.radioStatusUI) this.radioStatusUI.classList.add('transmitting');
                 try {
+                    // v14.35: NO Await for receiver. Instant transmission.
                     if (this.audioCtx.state === 'suspended') await this.audioCtx.resume();
                     await this.radioTransmitter.startTransmission();
                 } catch(err) {
@@ -115,6 +117,23 @@ class AdvancedCameraFeed {
             });
             this.radioBtn.addEventListener('pointerup', (e) => { this.stopRadioUI(); });
             this.radioBtn.addEventListener('pointercancel', (e) => { this.stopRadioUI(); });
+        }
+
+        if (this.speakerBtn) {
+            this.speakerBtn.addEventListener('click', async () => {
+                // Autoplay Bypass: Resuming context on user gesture
+                if (this.audioCtx.state === 'suspended') await this.audioCtx.resume();
+                
+                const nextMuteState = !this.radioReceiver.isMuted;
+                this.radioReceiver.setMuted(nextMuteState);
+                
+                // Toggle UI state
+                this.speakerBtn.classList.toggle('muted', nextMuteState);
+                this.speakerBtn.classList.toggle('unmuted', !nextMuteState);
+                
+                const icon = this.speakerBtn.querySelector('.icon');
+                if (icon) icon.innerText = nextMuteState ? '🔇' : '🔊';
+            });
         }
     }
 
@@ -236,4 +255,4 @@ class AdvancedCameraFeed {
         return `${d}D ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
     }
 }
-document.addEventListener('DOMContentLoaded', () => { window.app = new AdvancedCameraFeed(); });
+document.addEventListener('DOMContentLoaded', () => { window.app = new CommunicationsConsole(); });

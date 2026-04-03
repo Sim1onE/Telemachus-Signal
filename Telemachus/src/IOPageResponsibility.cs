@@ -22,61 +22,95 @@ namespace Telemachus
 
         public bool process(HttpListenerRequest request, HttpListenerResponse response)
         {
-            string url = request.RawUrl;
-            
-            // Normalize root and prefix using a REAL 302 redirect
-            if (url == "/" || url == "/telemachus" || url == "/telemachus/") {
-                response.Redirect("/telemachus/index.html");
+            string url = request.RawUrl.ToLower();
+            if (url.Contains("?")) url = url.Split('?')[0];
+
+            // CLEAN URL ENFORCEMENT: Remove .html from the URL using validated pattern
+            if (url.EndsWith(".html"))
+            {
+                string cleanUrl = url.Substring(0, url.Length - 5);
+                // If it was index.html, remove "index" too
+                if (cleanUrl.EndsWith("/index")) cleanUrl = cleanUrl.Substring(0, cleanUrl.Length - 6);
+                if (string.IsNullOrEmpty(cleanUrl)) cleanUrl = "/";
+                
+                // Follow the project's verified redirect pattern
+                var target = new Uri(request.Url, cleanUrl);
+                response.Redirect(target.ToString());
                 return true;
             }
 
-            if (url.StartsWith(PAGE_PREFIX))
+            // Normalize URL: treat it as relative to Telemachus folder whether or not prefix is present
+            string relativePath = url;
+            if (relativePath.StartsWith(PAGE_PREFIX)) 
+                relativePath = relativePath.Substring(PAGE_PREFIX.Length);
+            
+            if (relativePath.StartsWith("/")) relativePath = relativePath.Substring(1);
+            if (string.IsNullOrEmpty(relativePath)) relativePath = "index.html";
+
+            string localPath = buildPath(escapeFileName(relativePath));
+
+            // Search Order:
+            // 1. Direct match (e.g. /telemachus/js/app.js OR /js/app.js -> js/app.js)
+            if (System.IO.File.Exists(localPath)) return serve(localPath, response);
+            
+            // 2. HTML Fallback (e.g. /telemachus/dashboard -> dashboard.html)
+            if (System.IO.File.Exists(localPath + ".html")) return serve(localPath + ".html", response);
+            
+            // 3. Directory Index Fallback (e.g. /telemachus/communications -> communications/index.html)
+            string indexPath = System.IO.Path.Combine(localPath, "index.html");
+            if (System.IO.File.Exists(indexPath)) return serve(indexPath, response);
+
+            // 4. SMART CONTEXT FALLBACK (The "Referer" Trick)
+            // If we still didn't find the file, check if the browser is requesting an asset 
+            // from a page that was accessed without a trailing slash.
+            if (request.UrlReferrer != null)
             {
-                try
+                string referrerPath = request.UrlReferrer.AbsolutePath.ToLower();
+                if (referrerPath.StartsWith(PAGE_PREFIX))
                 {
-                    // Strip query strings (e.g. index.html?v=1)
-                    if (url.Contains("?")) url = url.Split('?')[0];
-
-                    string requestedFile = url.Substring(PAGE_PREFIX.Length);
-                    // Remove leading slash to avoid double-slashes with the PluginData path
-                    if (requestedFile.StartsWith("/")) requestedFile = requestedFile.Substring(1);
-                    if (string.IsNullOrEmpty(requestedFile)) requestedFile = "index.html";
-
-                    var contentType = GetContentType(Path.GetExtension(requestedFile));
-
-                    // CORS for static files
-                    response.AddHeader("Access-Control-Allow-Origin", "*");
-
-                    var localPath = buildPath(escapeFileName(requestedFile));
-                    PluginLogger.print(string.Format("[IO] Serving {0} -> {1}", url, localPath));
-
-                    if (!System.IO.File.Exists(localPath))
-                    {
-                        PluginLogger.print(string.Format("[IO] ERROR: File NOT Found on Disk: {0}", localPath));
-                        return false;
-                    }
-
-                    byte[] contentData = System.IO.File.ReadAllBytes(localPath);
-                    if (contentType.contentType == HTMLContentType.TextContent)
-                    {
-                        response.ContentEncoding = Encoding.UTF8;
-                    }
+                    string contextFolder = referrerPath.Substring(PAGE_PREFIX.Length);
+                    if (contextFolder.StartsWith("/")) contextFolder = contextFolder.Substring(1);
                     
-                    if (contentType.mimeType != null)
+                    // If the referrer looks like a directory (no extension), try looking inside it
+                    if (!contextFolder.Contains(".") && !string.IsNullOrEmpty(contextFolder))
                     {
-                        response.ContentType = contentType.mimeType;
+                        string retryPath = System.IO.Path.Combine(buildPath(contextFolder), relativePath);
+                        if (System.IO.File.Exists(retryPath))
+                        {
+                             PluginLogger.print("[IO] Context hit: " + relativePath + " found in referrer context: " + contextFolder);
+                             return serve(retryPath, response);
+                        }
                     }
-
-                    response.WriteContent(contentData);
-
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    PluginLogger.print(string.Format("[IO] ERROR processing {0}: {1}", url, ex.Message));
                 }
             }
+
             return false;
+        }
+
+        private bool serve(string localPath, HttpListenerResponse response)
+        {
+            try
+            {
+                var filename = System.IO.Path.GetFileName(localPath);
+                var contentType = GetContentType(System.IO.Path.GetExtension(localPath).ToLower());
+                
+                byte[] contentData = System.IO.File.ReadAllBytes(localPath);
+                response.AddHeader("Access-Control-Allow-Origin", "*");
+                
+                if (contentType.contentType == HTMLContentType.TextContent) 
+                    response.ContentEncoding = Encoding.UTF8;
+                
+                if (contentType.mimeType != null) 
+                    response.ContentType = contentType.mimeType;
+
+                response.WriteContent(contentData);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                PluginLogger.print("[IO] Error serving file: " + ex.Message);
+                return false;
+            }
         }
 
         #endregion
