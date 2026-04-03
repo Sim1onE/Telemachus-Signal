@@ -6,7 +6,10 @@ export class RadioDSP {
     constructor(isTransmitter = false) {
         this.lpPrev = 0;
         this.isTransmitter = isTransmitter;
-        this.staticHissLevel = isTransmitter ? 0.0 : 0.012; // v17.2: Reduced for comfort
+        this.staticHissLevel = isTransmitter ? 0.0 : 0.012; 
+        
+        // --- v17.4 Packet Loss State ---
+        this.dropoutCounter = 0;
     }
 
     apply(s, q) {
@@ -27,9 +30,21 @@ export class RadioDSP {
             s = Math.round(s * steps) / steps;
         }
 
-        // 4. Mix
+        // 4. Packet Loss (Dropouts)
+        // Probability increases exponentially as quality drops
+        const lossChance = Math.pow(1.0 - q, 4.0);
+        if (this.dropoutCounter > 0) {
+            this.dropoutCounter--;
+            s = 0; // Mute sample during dropout
+        } else if (q < 0.5 && Math.random() < lossChance * 0.05) {
+            // Start a new dropout burst (5ms to 40ms)
+            this.dropoutCounter = Math.floor(Math.random() * 800) + 100;
+            s = 0;
+        }
+
+        // 5. Mix
         const dryLevel = Math.max(0, q * 1.1 - 0.1);
-        const hissScale = Math.pow(1.0 - q, 1.2); // v17.3: Hiss now goes to ZERO at 100% quality
+        const hissScale = Math.pow(1.0 - q, 1.2); 
         const hiss = (Math.random() * 2 - 1) * this.staticHissLevel * hissScale;
         
         return (s * dryLevel) + whiteNoise + hiss;
