@@ -15,11 +15,20 @@ namespace Telemachus.Harmony
         private static bool _patchedUI = false;
         private static bool _patchedTelemetry = false;
         private static bool _kerbalismFound = false;
+        private static HashSet<int> _seenSources = new HashSet<int>();
+        private static HashSet<string> _seenGroups = new HashSet<string>();
 
         private float nextCheck = 0f;
         private bool patchesFinalized = false;
+        private int _frameCount = 0;
+        private int _totalFiltered = 0;
 
         void Awake() { InitializePatches("Awake"); }
+
+        void Start()
+        {
+            ScavengeAudioSources("Scene-Start");
+        }
 
         void Update()
         {
@@ -33,6 +42,99 @@ namespace Telemachus.Harmony
                     InitializePatches("RUNTIME");
                 }
             }
+
+            // Periodic scan every ~3 seconds (low frequency to avoid overhead)
+            _frameCount++;
+            if (_frameCount >= 180) 
+            {
+                _frameCount = 0;
+                ScavengeAudioSources("Periodic");
+            }
+        }
+
+        private void ScavengeAudioSources(string context)
+        {
+            AudioSource[] sources = UnityEngine.Object.FindObjectsOfType<AudioSource>();
+            if (sources == null) return;
+
+            // Diagnostic log to confirm the scavenger is running
+            // UnityEngine.Debug.Log(string.Format("[Telemachus-Audio] {0}: Found {1} active sources.", context, sources.Length));
+
+            int newMatches = 0;
+            foreach (var source in sources)
+            {
+                if (AnalyzeAndFilterSource(source))
+                {
+                    newMatches++;
+                }
+            }
+            
+            if (newMatches > 0)
+            {
+                UnityEngine.Debug.Log(string.Format("[Telemachus-Audio] Filtered {0} NEW matching audio sources in this scan.", newMatches));
+            }
+        }
+
+        private static bool AnalyzeAndFilterSource(AudioSource source)
+        {
+            if (source == null) return false;
+
+            int id = source.GetInstanceID();
+            bool isNew = false;
+            
+            lock (_seenSources)
+            {
+                if (!_seenSources.Contains(id))
+                {
+                    _seenSources.Add(id);
+                    isNew = true;
+                }
+            }
+
+            string groupName = (source.outputAudioMixerGroup != null) ? source.outputAudioMixerGroup.name : "NONE";
+            string objectName = source.gameObject.name;
+            float spatial = source.spatialBlend; // 0 = 2D (Music/UI/Ambient), 1 = 3D (Engines/SFX)
+
+            // LOG EVERY SINGLE SOURCE AT LEAST ONCE
+            if (isNew)
+            {
+                // UnityEngine.Debug.Log(string.Format("[Telemachus-Audio] SCAN: Object='{0}', Group='{1}', Blend={2:F2}, Bypass={3}", 
+                //    objectName, groupName, spatial, source.bypassListenerEffects));
+            }
+
+            // DETECTION LOGIC: If Keyword in Mixer OR Keyword in GameObject Name
+            bool hasMusicKW = groupName.IndexOf("Music", StringComparison.OrdinalIgnoreCase) >= 0 || 
+                              objectName.IndexOf("Music", StringComparison.OrdinalIgnoreCase) >= 0;
+            
+            bool hasUIKW = groupName.IndexOf("UI", StringComparison.OrdinalIgnoreCase) >= 0 || 
+                            objectName.IndexOf("UI", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            objectName.IndexOf("UIAudio", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            bool hasVoiceKW = groupName.IndexOf("Voice", StringComparison.OrdinalIgnoreCase) >= 0 || 
+                              objectName.IndexOf("Voice", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            bool hasMenuKW = groupName.IndexOf("Menu", StringComparison.OrdinalIgnoreCase) >= 0 || 
+                             objectName.IndexOf("Menu", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            // HEURISTIC: If it has NONE group but it's a 2D sound, it's highly likely to be UI/Music/Ambient skip
+            bool isSuspiciousNonCategorized2D = (groupName == "NONE") && (spatial < 0.1f);
+
+            bool shouldBypass = hasMusicKW || hasUIKW || hasVoiceKW || hasMenuKW || isSuspiciousNonCategorized2D;
+
+            if (shouldBypass && !source.bypassListenerEffects)
+            {
+                source.bypassListenerEffects = true;
+                UnityEngine.Debug.Log(string.Format("[Telemachus-Audio] >>> BYPASSED: '{0}' (Reason: {1}{2}{3}{4}{5})", 
+                    objectName, 
+                    hasMusicKW ? "Music " : "", 
+                    hasUIKW ? "UI " : "", 
+                    hasVoiceKW ? "Voice " : "", 
+                    hasMenuKW ? "Menu " : "",
+                    isSuspiciousNonCategorized2D ? "Uncategorized2D" : ""));
+                return true;
+            }
+
+            return false;
         }
 
         public void InitializePatches(string scene)
@@ -325,4 +427,5 @@ namespace Telemachus.Harmony
             catch { }
         }
     }
+
 }
