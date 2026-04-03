@@ -1,32 +1,20 @@
 class CommunicationsConsole {
     constructor() {
-        this.selectedCamera = null;
-        this.currentFov = null;
         this.cameras = [];
         this.baseUrl = window.location.origin;
         this.signalLink = null;
-        this.cameraReceiver = null;
         this.radioReceiver = null;
         this.audioCtx = null;
         this.telemetryData = {};
-        this.lastFovUpdateTick = 0;
-        this.fovUpdateTimeout = null;
+        this.activeWidgets = new Map(); // v16.08: Multiplexed widgets map
+        this.nextCameraId = 1;
 
         // UI Elements
         this.cameraList = document.getElementById('camera-list');
-        this.cameraFeed = document.getElementById('camera-feed');
-        this.fovSlider = document.getElementById('fov-slider');
-        this.fovInput = document.getElementById('fov-input');
-        this.resetZoomBtn = document.getElementById('reset-zoom-btn');
         this.radioBtn = document.getElementById('radio-ptt-btn');
         this.speakerBtn = document.getElementById('radio-speaker-btn');
         this.radioStatusUI = document.getElementById('radio-status');
         this.radioStatusText = this.radioStatusUI?.querySelector('.status-text');
-
-        // Metadata elements
-        this.metaName = document.getElementById('metadata-camera-name');
-        this.metaRes = document.getElementById('metadata-resolution');
-        this.metaFov = document.getElementById('metadata-fov');
 
         // Telemetry elements
         this.telAlt = document.getElementById('tel-alt');
@@ -34,11 +22,6 @@ class CommunicationsConsole {
         this.telMet = document.getElementById('tel-met');
         this.telDelay = document.getElementById('tel-delay');
         this.telSignal = document.getElementById('tel-signal');
-
-        this.statusOverlay = document.getElementById('viewport-overlay');
-        this.statusText = document.getElementById('status-text');
-        this.statusSpinner = document.getElementById('status-spinner');
-        this.glitchOverlay = document.getElementById('glitch-overlay');
 
         this.lastFrameTime = 0;
         this.signalWatchdog = null;
@@ -62,12 +45,34 @@ class CommunicationsConsole {
 
             // Camera List Response (JSON)
             this.signalLink.on('cameraList', (msg) => {
-                this.cameras = msg.cameras;
+                this.cameras = msg.cameras || [];
                 this.renderCameraList();
                 
-                if (!this.selectedCamera && this.cameras.length > 0) {
-                    this.selectCamera(this.cameras[0]);
+                if (this.cameras.length === 0) {
+                     setTimeout(() => this.signalLink.requestCameraList(), 2000);
+                     return;
                 }
+
+                // Auto-recovery after restart (Keep existing widgets alive)
+                this.activeWidgets.forEach((widget, name) => {
+                    const match = this.cameras.find(c => c.name === name);
+                    if (match) {
+                        widget.camInfo = match;
+                        widget.start();
+                    }
+                });
+
+                if (this.activeWidgets.size === 0 && this.cameras.length > 0) {
+                    this.toggleCamera(this.cameras[0]);
+                }
+            });
+
+            // Connection Re-established (v15.07)
+            this.signalLink.on('open', () => {
+                this.activeWidgets.forEach(widget => {
+                    widget.receiver.sync.clear();
+                    widget.start();
+                });
             });
 
             this.signalLink.connect();
@@ -83,24 +88,8 @@ class CommunicationsConsole {
     }
 
     bindEvents() {
-        this.fovSlider.addEventListener('input', (e) => {
-            const min = parseFloat(this.fovSlider.min);
-            const max = parseFloat(this.fovSlider.max);
-            const sliderVal = parseFloat(e.target.value);
-            this.currentFov = (max + min) - sliderVal;
-            this.fovInput.value = Math.round(this.currentFov);
-            this.forceFovUpdate();
-        });
-
-        this.resetZoomBtn.addEventListener('click', () => {
-            if (this.selectedCamera) {
-                const def = this.selectedCamera.currentFov || 60;
-                this.currentFov = def;
-                this.fovInput.value = Math.round(this.currentFov);
-                this.forceFovUpdate();
-            }
-        });
-
+        // FOV events moved to CameraWidget class
+        
         if (this.radioBtn) {
             this.radioBtn.oncontextmenu = (e) => { e.preventDefault(); return false; };
             this.radioBtn.addEventListener('pointerdown', async (e) => {
@@ -146,26 +135,29 @@ class CommunicationsConsole {
     renderCameraList() {
         this.cameraList.innerHTML = '';
         this.cameras.forEach(cam => {
+            const isActive = this.activeWidgets.has(cam.name);
             const li = document.createElement('li');
-            li.className = `camera-item ${this.selectedCamera?.name === cam.name ? 'active' : ''}`;
+            li.className = `camera-item ${isActive ? 'in-grid' : ''}`;
             li.innerHTML = `<span>${cam.name}</span> <small style="opacity: 0.5;">${cam.type}</small>`;
-            li.addEventListener('click', () => this.selectCamera(cam));
+            li.addEventListener('click', () => this.toggleCamera(cam));
             this.cameraList.appendChild(li);
         });
     }
 
-    selectCamera(cam) {
-        if (this.cameraReceiver) this.cameraReceiver.stop();
-        this.selectedCamera = cam;
-        this.updateStatus('loading', `CONNECTING: ${cam.name.toUpperCase()}...`);
+    toggleCamera(cam) {
+        if (this.activeWidgets.has(cam.name)) {
+            const widget = this.activeWidgets.get(cam.name);
+            widget.destroy();
+            this.activeWidgets.delete(cam.name);
+        } else {
+            // Maximum cameras check
+            if (this.activeWidgets.size >= 6) return;
 
-        this.fovSlider.min = cam.fovMin || 1;
-        this.fovSlider.max = cam.fovMax || 120;
-        this.fovInput.value = Math.round(cam.currentFov || 60);
-        this.metaName.innerText = `SENSOR: ${cam.name.toUpperCase()}`;
-
-        this.cameraReceiver = new CameraReceiver(this.signalLink, this.cameraFeed, this);
-        this.cameraReceiver.start(cam.name);
+            const grid = document.getElementById('camera-grid');
+            const widget = new CameraWidget(grid, this.signalLink, cam, this.nextCameraId++);
+            widget.onClose = (w) => this.toggleCamera(w.camInfo);
+            this.activeWidgets.set(cam.name, widget);
+        }
         this.renderCameraList();
     }
 
@@ -185,10 +177,9 @@ class CommunicationsConsole {
         this.updateSignalUI(status.quality);
     }
 
-    syncFromStream(ut, warp, delay, fov, signal) {
-        if (fov && this.metaFov) this.metaFov.innerText = `FOV: ${fov.toFixed(1)}°`;
+    syncFromStream(ut, warp, delay, fov, signal, id) {
+        // Individual widgets handle their own syncFromStream calls directly from CameraReceiver
         this.lastFrameTime = Date.now();
-        if (this.statusOverlay.style.display !== 'none') this.updateStatus('online');
     }
 
     updateSignalUI(signal) {
@@ -202,47 +193,25 @@ class CommunicationsConsole {
 
     startSignalWatchdog() {
         setInterval(() => {
-            if (!this.selectedCamera) return;
+            this.activeWidgets.forEach(widget => {
+                widget.updateWatchdog();
+            });
+            
+            // Check overall connection
             const now = Date.now();
-            if (now - this.lastFrameTime > 2500) {
-                if (this.cameraReceiver && this.cameraReceiver.sync.queue.length > 5) {
-                    this.updateStatus('loading', 'BUFFERING/SYNCING...');
-                } else {
-                    this.updateStatus('error', 'NO SIGNAL');
+            const isDead = !this.signalLink.ws || this.signalLink.ws.readyState !== WebSocket.OPEN;
+            if (isDead) {
+                if (this.cameras.length > 0) {
+                    this.cameras = [];
+                    this.renderCameraList();
                 }
             }
         }, 500);
     }
 
-    forceFovUpdate() {
-        if (!this.selectedCamera || !this.signalLink) return;
-        const now = performance.now();
-        const minInterval = 50;
-
-        if (now - this.lastFovUpdateTick < minInterval) {
-            if (this.fovUpdateTimeout) clearTimeout(this.fovUpdateTimeout);
-            this.fovUpdateTimeout = setTimeout(() => {
-                this.fovUpdateTimeout = null;
-                this.forceFovUpdate();
-            }, minInterval);
-            return;
-        }
-
-        this.lastFovUpdateTick = now;
-        this.signalLink.queueCommand({ 
-            camera: this.selectedCamera.name, 
-            action: "fov", 
-            fov: this.currentFov 
-        });
-    }
 
     updateStatus(type, msg) {
-        if (!this.statusOverlay) return;
-        if (type === 'online') { this.statusOverlay.style.display = 'none'; return; }
-        this.statusOverlay.style.display = 'flex';
-        this.statusText.innerText = (msg || '').toUpperCase();
-        this.statusSpinner.style.display = type === 'loading' ? 'block' : 'none';
-        this.statusText.classList.toggle('error', type === 'error');
+        // Global status updates (rarely used now, delegated to widgets)
     }
 
     formatMET(seconds) {

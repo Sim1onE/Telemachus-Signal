@@ -239,13 +239,14 @@ namespace Telemachus
         {
             VideoDownlink = 0, VideoUplink = 1, AudioDownlink = 2, AudioUplink = 3
         }
-        public const int HEADER_SIZE = 34;
+        public const int HEADER_SIZE = 35; // v16.01: Increased to 35 for CameraID
 
         private UpLinkDownLinkRate dataRates;
         private AudioSource audioSource;
         private GameObject audioHost;
-        private string cameraName = null;
+        private Dictionary<byte, string> activeCameras = new Dictionary<byte, string>(); // v16.02: Multi-camera session support
         private long lastSentFrameId = -1;
+        private Dictionary<byte, long> lastSentFrameIds = new Dictionary<byte, long>(); // v16.03: Track frame IDs per camera
         private long lastHeartbeatTick = 0;
         private KSPAudioDownlink _sharedProbe;
         private int _downlinkPacketCount = 0;
@@ -308,11 +309,25 @@ namespace Telemachus
         private void HandleCommand(Dictionary<string, object> json)
         {
             if (json.ContainsKey("camera")) {
-                cameraName = json["camera"].ToString();
-                if (CameraCaptureManager.classedInstance != null) CameraCaptureManager.classedInstance.EnsureFlightCamera();
+                string name = json["camera"].ToString();
+                byte id = json.ContainsKey("id") ? (byte)Convert.ToInt32(json["id"]) : (byte)0;
+                bool remove = json.ContainsKey("remove") && (bool)json["remove"];
+                bool isSensorCommand = json.ContainsKey("action"); // v16.11: Check if it's just a parameter update
+
+                if (remove) {
+                    if (activeCameras.ContainsKey(id)) activeCameras.Remove(id);
+                } else if (!isSensorCommand) {
+                    // v16.12: Only update session mapping if this is NOT a targeted sensor command (like FOV)
+                    activeCameras[id] = name;
+                    if (CameraCaptureManager.classedInstance != null) CameraCaptureManager.classedInstance.EnsureFlightCamera();
+                }
             }
-            CameraCapture sensor = GetSensor(cameraName);
-            if (sensor != null) sensor.ProcessCameraCommand(json);
+
+            // v16.09: Targeted command processing (preventing broadcast to all cams)
+            if (json.ContainsKey("camera")) {
+                CameraCapture sensor = GetSensor(json["camera"].ToString());
+                if (sensor != null) sensor.ProcessCameraCommand(json);
+            }
         }
 
         private CameraCapture GetSensor(string name)
@@ -348,7 +363,7 @@ namespace Telemachus
             }
 
             byte[] packet = new byte[HEADER_SIZE + pcm.Length];
-            FillHeader(packet, (byte)PacketType.AudioDownlink, uniqueUt, 0);
+            FillHeader(packet, (byte)PacketType.AudioDownlink, uniqueUt, 0, 0); // v16.04: Audio uses ID 0
             Buffer.BlockCopy(pcm, 0, packet, HEADER_SIZE, pcm.Length);
             SendAsync(packet, null);
 
@@ -376,19 +391,28 @@ namespace Telemachus
             }
             if (_pendingDownlinkMsg != null) { PluginLogger.print(_pendingDownlinkMsg); _pendingDownlinkMsg = null; }
             SendHeartbeat();
-            if (!string.IsNullOrEmpty(cameraName)) PushVideoFrame();
+            
+            // v16.05: Dispatch frames for all active cameras in the session
+            if (activeCameras.Count > 0) {
+                foreach (var kvp in activeCameras.ToList()) {
+                    PushVideoFrame(kvp.Key, kvp.Value);
+                }
+            }
         }
 
-        private void PushVideoFrame()
+        private void PushVideoFrame(byte id, string name)
         {
-            CameraCapture sensor = GetSensor(cameraName);
+            CameraCapture sensor = GetSensor(name);
             if (sensor == null) return;
             sensor.lastRequestTick = Environment.TickCount;
-            if (sensor.imageBytes == null || sensor.lastFrameId == lastSentFrameId) return;
-            lastSentFrameId = sensor.lastFrameId;
+
+            long lastId = lastSentFrameIds.ContainsKey(id) ? lastSentFrameIds[id] : -1;
+            if (sensor.imageBytes == null || sensor.lastFrameId == lastId) return;
+            
+            lastSentFrameIds[id] = sensor.lastFrameId;
             byte[] jpegData = sensor.imageBytes;
             byte[] packet = new byte[HEADER_SIZE + jpegData.Length];
-            FillHeader(packet, (byte)PacketType.VideoDownlink, sensor.lastFrameUT, sensor.interpolatedFOV);
+            FillHeader(packet, (byte)PacketType.VideoDownlink, sensor.lastFrameUT, sensor.interpolatedFOV, id);
             Buffer.BlockCopy(jpegData, 0, packet, HEADER_SIZE, jpegData.Length);
             SendAsync(packet, null);
             dataRates.SendDataToClient(packet.Length);
@@ -414,17 +438,19 @@ namespace Telemachus
             } catch { }
         }
 
-        private void FillHeader(byte[] packet, byte type, double ut, double fov)
+        private void FillHeader(byte[] packet, byte type, double ut, double fov, byte cameraID)
         {
             packet[0] = type;
             double warp = TimeWarp.fetch != null ? TimeWarp.CurrentRate : 1.0;
             double delay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
             byte quality = (byte)(TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel) * 100);
+            
             Buffer.BlockCopy(BitConverter.GetBytes(ut), 0, packet, 1, 8);
             Buffer.BlockCopy(BitConverter.GetBytes(warp), 0, packet, 9, 8);
             Buffer.BlockCopy(BitConverter.GetBytes(delay), 0, packet, 17, 8);
             Buffer.BlockCopy(BitConverter.GetBytes(fov), 0, packet, 25, 8);
             packet[33] = quality;
+            packet[34] = cameraID; // v16.01: Camera Identifier
         }
 
         private void SendCameraList()

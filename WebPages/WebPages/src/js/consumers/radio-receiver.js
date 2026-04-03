@@ -55,7 +55,7 @@ class RadioReceiver {
         
         // --- v14.17: AUDIO WORKLET IMPLEMENTATION (Zero Jitter Downlink) ---
         if (!this.workletInitted) {
-            await this.audioCtx.audioWorklet.addModule('../js/consumers/radio-receiver-worklet.js');
+            await this.audioCtx.audioWorklet.addModule('../js/consumers/radio-receiver-worklet.js', { type: 'module' });
             this.workletInitted = true;
         }
 
@@ -167,7 +167,8 @@ class RadioReceiver {
                     if (!p.payload || !p.payload.samples) return;
                     this.processor.port.postMessage({
                         type: 'push-samples',
-                        payload: p.payload.samples
+                        payload: p.payload.samples,
+                        quality: p.quality / 100
                     });
 
                     // Diagnostics Update

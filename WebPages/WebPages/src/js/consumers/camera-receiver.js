@@ -4,10 +4,11 @@
  * Its only job is to decode JPEG byte chunks to a Canvas and create the "Fast-Forward" effect.
  */
 class CameraReceiver {
-    constructor(signalLink, displayElement, datalink) {
+    constructor(signalLink, displayElement, datalink, cameraId = 0) {
         this.signalLink = signalLink;
         this.displayElement = displayElement;
         this.datalink = datalink;
+        this.cameraId = cameraId; // v16.06: Filter by multiplexed ID
 
         this.isCanvas = displayElement instanceof HTMLCanvasElement;
         if (this.isCanvas) {
@@ -23,9 +24,14 @@ class CameraReceiver {
     }
 
     start(sensorName) {
+        // v16.07: Always send ID with camera request
+        if (this.isRunning) {
+            this.signalLink.sendSystemCommand({ camera: sensorName, id: this.cameraId });
+            return;
+        }
+        
         this.isRunning = true;
-        // Ask KSP to start streaming video for this sensor
-        this.signalLink.sendSystemCommand({ camera: sensorName });
+        this.signalLink.sendSystemCommand({ camera: sensorName, id: this.cameraId });
         this.playbackLoop();
     }
 
@@ -42,7 +48,7 @@ class CameraReceiver {
 
     // Fired instantly when the hub reads the 34-byte header
     async handleIncomingVideo(metadata, rawData) {
-        if (!this.isRunning) return;
+        if (!this.isRunning || metadata.id !== this.cameraId) return;
 
         // Skip the 34-byte header, read the JPEG
         const jpgBytes = new Uint8Array(rawData, StreamConstants.HEADER_SIZE);
