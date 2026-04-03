@@ -125,6 +125,7 @@ class CommunicationsConsole {
                 const def = this.selectedCamera.currentFov || 60;
                 this.currentFov = def;
                 this.fovInput.value = Math.round(this.currentFov);
+                this.fovSlider.value = (parseFloat(this.fovSlider.max) + parseFloat(this.fovSlider.min)) - this.currentFov;
                 this.forceFovUpdate();
             }
         });
