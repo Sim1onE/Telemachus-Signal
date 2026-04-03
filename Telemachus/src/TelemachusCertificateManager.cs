@@ -36,28 +36,34 @@ namespace Telemachus
             {
                 string telemachusDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
                 string certDir = Path.Combine(Directory.GetParent(telemachusDir).FullName, "Certificates");
-                if (!Directory.Exists(certDir)) Directory.CreateDirectory(certDir);
+                PluginLogger.print($"[SSL] Starting cert resolution. Target directory: {certDir}");
+
+                if (!Directory.Exists(certDir)) {
+                    PluginLogger.print("[SSL] Certificate directory does not exist, creating it...");
+                    Directory.CreateDirectory(certDir);
+                }
 
                 string pfxPath = Path.Combine(certDir, "telemachus_host.pfx");
                 string rootCerPath = Path.Combine(certDir, "telemachus_root.cer");
 
                 if (force)
                 {
-                    PluginLogger.print("[SSL] Forced regeneration requested. Deleting old files...");
-                    if (File.Exists(pfxPath)) File.Delete(pfxPath);
-                    if (File.Exists(rootCerPath)) File.Delete(rootCerPath);
+                    PluginLogger.print("[SSL] Forced regeneration requested. Deleting old files if they exist...");
+                    if (File.Exists(pfxPath)) { PluginLogger.print("[SSL] Deleting old PFX..."); File.Delete(pfxPath); }
+                    if (File.Exists(rootCerPath)) { PluginLogger.print("[SSL] Deleting old Root CER..."); File.Delete(rootCerPath); }
                 }
 
                 if (File.Exists(pfxPath) && new FileInfo(pfxPath).Length > 0)
                 {
+                    PluginLogger.print("[SSL] Certificate found on disk. Loading...");
                     var loadedCert = new X509Certificate2(pfxPath, config.CertificatePassword, X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet);
-                    PluginLogger.print($"[SSL] Certificate Loaded: {loadedCert.Subject} (HasPrivateKey={loadedCert.HasPrivateKey}, Thumbprint={loadedCert.Thumbprint})");
+                    PluginLogger.print($"[SSL] Certificate Loaded: {loadedCert.Subject} (Thumbprint={loadedCert.Thumbprint})");
                     return loadedCert;
                 }
 
                 if (!force)
                 {
-                    PluginLogger.print("[SSL] Certificate missing, and manual regeneration was not requested.");
+                    PluginLogger.print("[SSL] Certificate missing, but no force flag was set. Returning null.");
                     return null;
                 }
 
@@ -72,8 +78,13 @@ namespace Telemachus
                     GenerateSelfSignedCertsUnix(config, pfxPath, rootCerPath);
                 }
 
+                if (!File.Exists(pfxPath)) {
+                    PluginLogger.print("[SSL] FAILED: Post-generation check failed. PFX file not found even though script reported success.");
+                    return null;
+                }
+
                 var generatedCert = new X509Certificate2(pfxPath, config.CertificatePassword, X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet);
-                PluginLogger.print($"[SSL] New Certificate Generated: {generatedCert.Subject} (Thumbprint={generatedCert.Thumbprint})");
+                PluginLogger.print($"[SSL] New Certificate successfully generated and verified in memory. Subject: {generatedCert.Subject}");
                 return generatedCert;
             }
             catch (Exception ex)
@@ -240,10 +251,18 @@ $hostCert | Remove-Item
 
             using (var process = Process.Start(psi))
             {
+                string outMsg = process.StandardOutput.ReadToEnd();
                 string error = process.StandardError.ReadToEnd();
                 process.WaitForExit();
-                if (process.ExitCode != 0) throw new Exception("PowerShell Cert Generation Failed: " + error);
-                PluginLogger.print("[SSL] PowerShell cert generation successful with SAN text: " + sanText);
+                
+                if (!string.IsNullOrEmpty(outMsg)) PluginLogger.print("[SSL] PowerShell Output: " + outMsg);
+                if (!string.IsNullOrEmpty(error)) PluginLogger.print("[SSL] PowerShell Error Stream: " + error);
+                
+                if (process.ExitCode != 0) {
+                    PluginLogger.print($"[SSL] PowerShell FAILED with exit code {process.ExitCode}. Error: {error}");
+                    throw new Exception("PowerShell Cert Generation Failed: " + error);
+                }
+                PluginLogger.print("[SSL] PowerShell cert generation reported success.");
             }
         }
 
