@@ -11,6 +11,7 @@ class CommunicationsConsole {
         this.telemetryData = {};
         this.lastFovUpdateTick = 0;
         this.fovUpdateTimeout = null;
+        this.needsFovSync = false;
 
         // UI Elements
         this.cameraList = document.getElementById('camera-list');
@@ -161,8 +162,15 @@ class CommunicationsConsole {
 
         this.fovSlider.min = cam.fovMin || 1;
         this.fovSlider.max = cam.fovMax || 120;
-        this.fovInput.value = Math.round(cam.currentFov || 60);
+        
+        // v15.01 Fix: Update BOTH input and slider to match the camera's initial state
+        const initialFov = cam.currentFov || 60;
+        this.fovInput.value = Math.round(initialFov);
+        this.fovSlider.value = (parseFloat(this.fovSlider.max) + parseFloat(this.fovSlider.min)) - initialFov;
+        this.currentFov = initialFov;
+
         this.metaName.innerText = `SENSOR: ${cam.name.toUpperCase()}`;
+        this.needsFovSync = true; // Wait for the first real packet from KSP to snap the UI
 
         this.cameraReceiver = new CameraReceiver(this.signalLink, this.cameraFeed, this);
         this.cameraReceiver.start(cam.name);
@@ -187,6 +195,20 @@ class CommunicationsConsole {
 
     syncFromStream(ut, warp, delay, fov, signal) {
         if (fov && this.metaFov) this.metaFov.innerText = `FOV: ${fov.toFixed(1)}°`;
+        
+        // v15.02: Snap the UI controls to the actual live state on the first frame received
+        if (this.needsFovSync && fov) {
+            this.fovInput.value = Math.round(fov);
+            this.fovSlider.value = (parseFloat(this.fovSlider.max) + parseFloat(this.fovSlider.min)) - fov;
+            this.currentFov = fov;
+            this.needsFovSync = false;
+        }
+
+        // v15.03: Update resolution info from the actual canvas if available
+        if (this.cameraFeed && this.metaRes) {
+            this.metaRes.innerText = `RES: ${this.cameraFeed.width}x${this.cameraFeed.height}`;
+        }
+
         this.lastFrameTime = Date.now();
         if (this.statusOverlay.style.display !== 'none') this.updateStatus('online');
     }
