@@ -260,8 +260,28 @@ main {
     border-left: 4px solid var(--accent-color);
 }
 
-/* Feed Viewport */
-.viewport-container {
+.camera-item.in-grid {
+    border-right: 4px solid var(--accent-color);
+    background: rgba(0, 255, 208, 0.05);
+}
+
+/* Feed Viewport Grid */
+.camera-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+    grid-auto-rows: 1fr;
+    gap: 15px;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+/* Single Widget Fullscreen */
+.camera-grid:has(> :last-child:nth-child(1)) {
+    grid-template-columns: 1fr;
+}
+
+.camera-widget {
     position: relative;
     background: #000;
     border: 1px solid var(--border-color);
@@ -270,13 +290,39 @@ main {
     display: flex;
     flex-direction: column;
     box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.9);
+    min-height: 300px;
 }
 
-#camera-feed, .camera-viewport {
+.camera-viewport {
     width: 100%;
     height: 100%;
     object-fit: contain;
     background: #000;
+}
+
+.close-widget-btn {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(255, 76, 76, 0.2);
+    border: 1px solid #ff4c4c;
+    color: #ff4c4c;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 30;
+    transition: var(--transition);
+    font-size: 1rem;
+}
+
+.close-widget-btn:hover {
+    background: #ff4c4c;
+    color: white;
+    box-shadow: 0 0 15px rgba(255, 76, 76, 0.5);
 }
 
 .signal-metadata {

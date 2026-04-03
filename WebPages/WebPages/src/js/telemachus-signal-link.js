@@ -7,7 +7,7 @@ const PacketType = {
 };
 
 const StreamConstants = {
-    HEADER_SIZE: 34
+    HEADER_SIZE: 35 // v16.01: Matches server 35 bytes
 };
 
 class DownlinkSynchronizer {
@@ -87,7 +87,7 @@ class UplinkSynchronizer {
 
             toSend.forEach(packet => {
                 if (typeof packet.payload === 'string') {
-                    // 1. JSON String (Delayed Flight Command)
+                    // JSON String (Uplink Command) - Sent individually to prevent key collisions (v16.14)
                     this.signalLink.ws.send(packet.payload);
                 } else {
                     // 2. Binary Buffer (Delayed Audio)
@@ -101,6 +101,7 @@ class UplinkSynchronizer {
                     view.setFloat64(17, instantDelay, true);
                     view.setFloat64(25, 0, true); // No FOV for audio
                     view.setUint8(33, 100); // 100% Signal (Uplink is assumed clear)
+                    view.setUint8(34, 0); // v16.01: CameraID (0 for audio/system)
 
                     finalBuffer.set(packet.payload, StreamConstants.HEADER_SIZE);
                     this.signalLink.ws.send(finalBuffer.buffer);
@@ -170,9 +171,17 @@ class TelemachusSignalLink {
             const kspDelay = view.getFloat64(17, true);
             const kspFOV = view.getFloat64(25, true);
             const kspSignal = view.getUint8(33);
+            const kspCameraID = view.getUint8(34); // v16.01: Camera Identifier
 
             if (this.listeners.has(type)) {
-                this.listeners.get(type).forEach(cb => cb({ ut: kspUT, warp: kspWarp, delay: kspDelay, fov: kspFOV, quality: kspSignal }, e.data));
+                this.listeners.get(type).forEach(cb => cb({ 
+                    ut: kspUT, 
+                    warp: kspWarp, 
+                    delay: kspDelay, 
+                    fov: kspFOV, 
+                    quality: kspSignal,
+                    id: kspCameraID 
+                }, e.data));
             }
         };
 
