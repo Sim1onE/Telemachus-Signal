@@ -84,7 +84,8 @@ if ($mustPublish) {
 $kspDir = "$root/ksp-telemachus-dev"
 if (Test-Path $kspDir) {
     if (Test-Path "$kspDir/GameData/Telemachus") {
-        Remove-Item "$kspDir/GameData/Telemachus" -Recurse -Force
+        # Clean up everything EXCEPT the Certificates folder to preserve SSL trust across builds
+        Get-ChildItem "$kspDir/GameData/Telemachus" -Exclude "Certificates" | Remove-Item -Recurse -Force
     }
 
     # Ensure base directory exists

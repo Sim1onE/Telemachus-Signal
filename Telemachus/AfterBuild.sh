@@ -81,7 +81,10 @@ fi
 
   kspDir="$ProjectDir/../ksp-telemachus-dev"
   if [ -d "$kspDir" ]; then
-    rm -rf "$kspDir/GameData/Telemachus"
+    if [ -d "$kspDir/GameData/Telemachus" ]; then
+      # Clean up everything EXCEPT the Certificates folder to preserve SSL trust across builds
+      find "$kspDir/GameData/Telemachus" -mindepth 1 -maxdepth 1 ! -name 'Certificates' -exec rm -rf {} +
+    fi
     mkdir -p "$kspDir/GameData/Telemachus/Plugins"
 
     # Copy everything from publish to GameData, excluding the core web assets folder
