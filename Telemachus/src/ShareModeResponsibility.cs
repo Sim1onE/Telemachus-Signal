@@ -38,9 +38,11 @@ echo --------------------------------------------------
 echo Downloading certificate from: %CERT_URL%
 powershell -Command ""(New-Object System.Net.WebClient).DownloadFile('%CERT_URL%', '%CERT_PATH%')""
 
-echo Installing certificate into Trusted Root Store...
-echo IMPORTANT: Click 'Yes' if Windows asks for permission.
-powershell -Command ""Start-Process certutil.exe -ArgumentList '-user -addstore Root \""%CERT_PATH%\""' -Wait -Verb RunAs""
+echo Cleaning up old certificates from the Trusted Root Store...
+echo ONE OR MORE confirmation windows may appear for deletion.
+echo Then, one final window for the new certificate installation.
+echo IMPORTANT: Click 'Yes' on ALL prompts to ensure a clean state.
+powershell -Command ""Start-Process certutil.exe -ArgumentList '-user -delstore Root Telemachus' -Wait -Verb RunAs; Start-Process certutil.exe -ArgumentList '-user -addstore Root \""%CERT_PATH%\""' -Wait -Verb RunAs""
 
 if %ERRORLEVEL% EQU 0 (
     echo.
@@ -70,7 +72,10 @@ echo ""Downloading certificate...""
 curl -s $CERT_URL -o $CERT_TEMP
 
 if [[ ""$OSTYPE"" == ""darwin""* ]]; then
-    echo ""Installing to macOS Keychain (requires password)...""
+    echo ""Cleaning up old certificates (requires sudo)...""
+    echo ""NOTE: Multiple password requests might appear to delete old items.""
+    sudo security find-certificate -c ""Telemachus"" -a -Z | grep ""SHA-1 hash:"" | awk '{{print $NF}}' | xargs -n 1 sudo security delete-certificate -Z
+    echo ""Installing to macOS Keychain (requires sudo)...""
     sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $CERT_TEMP
 else
     echo ""Installing to Linux CA store (requires sudo)...""

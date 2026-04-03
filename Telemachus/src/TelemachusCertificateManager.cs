@@ -176,13 +176,17 @@ namespace Telemachus
                 bool isMac = Directory.Exists("/Library/Keychains");
                 if (isMac)
                 {
-                    PluginLogger.print("[SSL] Attempting to trust certificate via macOS Keychain...");
+                    PluginLogger.print("[SSL] Attempting to cleanup and trust certificate via macOS Keychain...");
                     try
                     {
+                        // Clean up old Telemachus certs first
+                        string cleanupCmd = "security find-certificate -c \"Telemachus\" -a -Z | grep \"SHA-1 hash:\" | awk '{print $NF}' | xargs -n 1 sudo security delete-certificate -Z";
+                        string trustCmd = $"sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \"{rootPath}\"";
+                        
                         ProcessStartInfo psi = new ProcessStartInfo
                         {
-                            FileName = "security",
-                            Arguments = $"add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \"{rootPath}\"",
+                            FileName = "/bin/bash",
+                            Arguments = $"-c \"{cleanupCmd}; {trustCmd}\"",
                             UseShellExecute = true
                         };
                         Process.Start(psi);
