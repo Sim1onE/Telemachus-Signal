@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="utf-8" />
     <title>Telemachus</title>
@@ -62,11 +63,11 @@
                 var state = $("#api-accordion").accordion("option", "active");
                 for (var i = 0; i < d.api.length; i++) {
                     $("#api-accordion").append("<h3>" + d.api[i].name +
-                    "</h3><div>" +
-                    "<p>" + d.api[i].apistring + "</p>" +
-                    "<p>" + d.api[i].units + "</p>" +
-                    (d.api[i].plotable ? "<p>This value can be plotted/placed into a table</p>" : "<p>This value cannot be plotted/placed into a table</p>") +
-                      "</div>");
+                        "</h3><div>" +
+                        "<p>" + d.api[i].apistring + "</p>" +
+                        "<p>" + d.api[i].units + "</p>" +
+                        (d.api[i].plotable ? "<p>This value can be plotted/placed into a table</p>" : "<p>This value cannot be plotted/placed into a table</p>") +
+                        "</div>");
                 }
                 $("#api-accordion").accordion("destroy").accordion({ heightStyle: "content" });
                 $("#api-accordion").accordion("option", "active", state);
@@ -76,6 +77,7 @@
 
     </script>
 </head>
+
 <body onload="onLoad()">
 
     <div id="tabs">
@@ -128,11 +130,12 @@
                     <p>
                         <button onclick="window.open('touchball-pyr.html')">Open</button>
                     </p>
-                </div> 
+                </div>
                 <h3>Basic Flight Control</h3>
                 <div>
                     <p>
-                        Use this interface to send basic commands to your vessel, such as staging, setting the throttle and toggling ASAS.
+                        Use this interface to send basic commands to your vessel, such as staging, setting the throttle
+                        and toggling ASAS.
                     </p>
                     <p>
                         <button onclick="window.open('flight-control.html')">Open</button>
@@ -141,13 +144,14 @@
                 <h3>Smart A.S.S.</h3>
                 <div>
                     <p>
-                        This page interfaces with MechJeb2 and allows you to use some of the Smart A.S.S. functions. If you do not have MechJeb2 installed then it will not function.
+                        This page interfaces with MechJeb2 and allows you to use some of the Smart A.S.S. functions. If
+                        you do not have MechJeb2 installed then it will not function.
                     </p>
                     <p>
                         <button onclick="window.open('smart-ass.html')">Open</button>
                     </p>
                 </div>
-                 <h3>Speech Commands</h3>
+                <h3>Speech Commands</h3>
                 <div>
                     <p>
                         This page demonstrates the possibility of voice control for KSP.
@@ -156,7 +160,7 @@
                         <button onclick="window.open('speech.html')">Open</button>
                     </p>
                 </div>
-                 <h3>Houston & MKON UI</h3>
+                <h3>Houston & MKON UI</h3>
                 <div>
                     <p>
                         This page opens Houston and MKON UI
@@ -188,9 +192,9 @@
                 <h3>Credits</h3>
                 <div>
                     <ul>
-                        <li>Current contributor - <b>Sidrus</b> 
+                        <li>Current contributor - <b>Sidrus</b>
                         </li>
-                        <li>Telemachus and Server Plugins - <b>Rich</b> 
+                        <li>Telemachus and Server Plugins - <b>Rich</b>
                         </li>
                         <li>Houston - <b>tcannonfodder</b>
                         </li>
@@ -217,4 +221,5 @@
         </div>
     </div>
 </body>
+
 </html>

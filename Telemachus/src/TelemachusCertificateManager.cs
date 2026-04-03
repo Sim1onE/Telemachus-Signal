@@ -12,6 +12,16 @@ namespace Telemachus
     {
         private const string ROOT_SUBJECT = "CN=Telemachus (Local Root CA)";
 
+        private static bool IsWindows => Environment.OSVersion.Platform != PlatformID.Unix && 
+                                         Environment.OSVersion.Platform != PlatformID.MacOSX &&
+                                         (int)Environment.OSVersion.Platform != 128; // Older Mono/Unix detection
+
+        public static string GetRootCertPath()
+        {
+            string telemachusDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+            return Path.Combine(Directory.GetParent(telemachusDir).FullName, "Certificates", "telemachus_root.cer");
+        }
+
         public static X509Certificate2 GetServerCertificate(ServerConfiguration config, bool force = false)
         {
             try
@@ -37,8 +47,16 @@ namespace Telemachus
                     return loadedCert;
                 }
 
-                PluginLogger.print("[SSL] Generating new Standalone Certificates via PowerShell...");
-                GenerateSelfSignedCerts(config, pfxPath, rootCerPath);
+                if (IsWindows)
+                {
+                    PluginLogger.print("[SSL] Generating new Standalone Certificates via PowerShell...");
+                    GenerateSelfSignedCertsWindows(config, pfxPath, rootCerPath);
+                }
+                else
+                {
+                    PluginLogger.print("[SSL] Generating new Standalone Certificates via OpenSSL...");
+                    GenerateSelfSignedCertsUnix(config, pfxPath, rootCerPath);
+                }
 
                 var generatedCert = new X509Certificate2(pfxPath, config.CertificatePassword, X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet);
                 PluginLogger.print($"[SSL] New Certificate Generated: {generatedCert.Subject} (Thumbprint={generatedCert.Thumbprint})");
@@ -61,6 +79,7 @@ namespace Telemachus
 
         public static bool IsRootTrusted()
         {
+            if (!IsWindows) return false; // Automatic check only reliable on Windows currently
             if (!_needsCheck) return _cachedTrust;
 
             _needsCheck = false;
@@ -103,50 +122,62 @@ namespace Telemachus
                 return;
             }
 
-            PluginLogger.print("[SSL] Launching system trust prompt via certutil...");
-            try
+            if (IsWindows)
             {
-                ProcessStartInfo psi = new ProcessStartInfo
+                PluginLogger.print("[SSL] Launching system trust prompt via certutil...");
+                try
                 {
-                    FileName = "certutil.exe",
-                    Arguments = $"-user -addstore Root \"{certPath}\"",
-                    UseShellExecute = true,
-                    CreateNoWindow = false,
-                    WindowStyle = ProcessWindowStyle.Normal
-                };
-
-                Process.Start(psi);
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = "certutil.exe",
+                        Arguments = $"-user -addstore Root \"{certPath}\"",
+                        UseShellExecute = true
+                    };
+                    Process.Start(psi);
+                }
+                catch (Exception ex) { PluginLogger.print("[SSL] Failed to launch certutil: " + ex.Message); }
             }
-            catch (Exception ex)
+            else if (Environment.OSVersion.Platform == PlatformID.Unix || (int)Environment.OSVersion.Platform == 128)
             {
-                PluginLogger.print("[SSL] CRITICAL - Failed to launch certutil: " + ex.Message);
+                bool isMac = Directory.Exists("/Library/Keychains");
+                if (isMac)
+                {
+                    PluginLogger.print("[SSL] Attempting to trust certificate via macOS Keychain...");
+                    try
+                    {
+                        ProcessStartInfo psi = new ProcessStartInfo
+                        {
+                            FileName = "security",
+                            Arguments = $"add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \"{certPath}\"",
+                            UseShellExecute = true
+                        };
+                        Process.Start(psi);
+                    }
+                    catch (Exception ex) { PluginLogger.print("[SSL] macOS trust failed: " + ex.Message); }
+                }
+                else
+                {
+                    PluginLogger.print("[SSL] Linux trust requires manual action: sudo cp telemachus_root.cer /usr/local/share/ca-certificates/ && sudo update-ca-certificates");
+                }
             }
         }
 
-        private static void GenerateSelfSignedCerts(ServerConfiguration config, string pfxPath, string rootCerPath)
+        private static List<string> GetSanList(ServerConfiguration config, bool dnsPrefix)
         {
-            // Build a literal SAN text string for the X509v3 Subject Alternative Name extension.
-            // Browsers strictly require IPs to be labeled as "IPAddress=" and not "DNS=".
-            var sanEntries = new List<string> { "DNS=localhost", "IPAddress=127.0.0.1" };
-            
-            // Add local hostname
-            try 
-            { 
-                string hostName = System.Net.Dns.GetHostName();
-                if (!string.IsNullOrEmpty(hostName)) sanEntries.Add($"DNS={hostName}"); 
-            } 
-            catch { }
-
+            var entries = new List<string> { (dnsPrefix ? "DNS:" : "DNS=") + "localhost", (dnsPrefix ? "IP:" : "IPAddress=") + "127.0.0.1" };
+            try { entries.Add((dnsPrefix ? "DNS:" : "DNS=") + System.Net.Dns.GetHostName()); } catch { }
             foreach (var ip in config.ValidIpAddresses)
             {
                 string ipStr = ip.ToString();
                 if (ipStr != "127.0.0.1" && ipStr != "0.0.0.0" && ipStr != "::1")
-                {
-                    sanEntries.Add($"IPAddress={ipStr}");
-                }
+                    entries.Add((dnsPrefix ? "IP:" : "IPAddress=") + ipStr);
             }
-            
-            string sanText = "{text}" + string.Join("&", sanEntries);
+            return entries;
+        }
+
+        private static void GenerateSelfSignedCertsWindows(ServerConfiguration config, string pfxPath, string rootCerPath)
+        {
+            string sanText = "{text}" + string.Join("&", GetSanList(config, false));
 
             string psScript = $@"
 $ErrorActionPreference = 'Stop'
@@ -175,6 +206,52 @@ $hostCert | Remove-Item
                 process.WaitForExit();
                 if (process.ExitCode != 0) throw new Exception("PowerShell Cert Generation Failed: " + error);
                 PluginLogger.print("[SSL] PowerShell cert generation successful with SAN text: " + sanText);
+            }
+        }
+
+        private static void GenerateSelfSignedCertsUnix(ServerConfiguration config, string pfxPath, string rootCerPath)
+        {
+            string certDir = Path.GetDirectoryName(pfxPath);
+            string confPath = Path.Combine(certDir, "openssl.conf");
+            string rootKeyPath = Path.Combine(certDir, "telemachus_root.key");
+            string hostKeyPath = Path.Combine(certDir, "telemachus_host.key");
+            string hostCerPath = Path.Combine(certDir, "telemachus_host.cer");
+
+            var sans = GetSanList(config, true);
+            string sanString = string.Join(",", sans);
+
+            string confContent = $@"[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_ca
+[req_distinguished_name]
+[v3_ca]
+subjectAltName = {sanString}
+basicConstraints = CA:true
+";
+            File.WriteAllText(confPath, confContent);
+
+            try
+            {
+                RunCommand("openssl", $"req -x509 -nodes -newkey rsa:2048 -keyout \"{rootKeyPath}\" -out \"{rootCerPath}\" -subj \"/CN=Telemachus Root CA\" -days 3650 -config \"{confPath}\"");
+                RunCommand("openssl", $"req -nodes -newkey rsa:2048 -keyout \"{hostKeyPath}\" -out \"{hostCerPath}\" -subj \"/CN=Telemachus Host\" -days 825 -config \"{confPath}\"");
+                RunCommand("openssl", $"pkcs12 -export -out \"{pfxPath}\" -inkey \"{hostKeyPath}\" -in \"{hostCerPath}\" -password pass:{config.CertificatePassword}");
+            }
+            finally
+            {
+                if (File.Exists(confPath)) File.Delete(confPath);
+                if (File.Exists(rootKeyPath)) File.Delete(rootKeyPath);
+                if (File.Exists(hostKeyPath)) File.Delete(hostKeyPath);
+                if (File.Exists(hostCerPath)) File.Delete(hostCerPath);
+            }
+        }
+
+        private static void RunCommand(string cmd, string args)
+        {
+            ProcessStartInfo psi = new ProcessStartInfo { FileName = cmd, Arguments = args, UseShellExecute = false, CreateNoWindow = true };
+            using (var process = Process.Start(psi))
+            {
+                process.WaitForExit();
+                if (process.ExitCode != 0) throw new Exception($"Command {cmd} failed with exit code {process.ExitCode}");
             }
         }
     }

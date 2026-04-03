@@ -10,6 +10,7 @@ using System.Timers;
 using UnityEngine;
 using WebSocketSharp.Server;
 using System.Security.Cryptography.X509Certificates;
+using WebSocketSharp; // Needed for WriteContent
 
 namespace Telemachus
 {
@@ -40,6 +41,7 @@ namespace Telemachus
         private static UpLinkDownLinkRate rateTracker = new();
 
         private static bool isPartless = false;
+        public static bool IsShareMode = false;
 
         static public string getServerPrimaryIPAddress()
         {
@@ -59,14 +61,15 @@ namespace Telemachus
         }
 
         static public void StartServer() => startDataLink();
-        
+
         static public void SetSslPreference(bool useSsl)
         {
             serverConfig.UseSsl = useSsl;
             serverConfig.HasPromptedSsl = true;
             SaveConfig();
-            
-            if (IsServerRunning()) {
+
+            if (IsServerRunning())
+            {
                 StopServer();
                 StartServer();
             }
@@ -93,6 +96,7 @@ namespace Telemachus
 
                     // Create the dispatcher and handlers. Handlers added in reverse priority order so that new ones are not ignored.
                     webDispatcher = new KSPWebServerDispatcher();
+
                     webDispatcher.AddResponder(new ElseResponsibility());
                     webDispatcher.AddResponder(new IOPageResponsibility());
                     var cameraLink = new CameraResponsibility(apiInstance, rateTracker);
@@ -101,6 +105,9 @@ namespace Telemachus
                     webDispatcher.AddResponder(dataLink);
                     var apiRoute = new APIRouteResponsibility(apiInstance, rateTracker);
                     webDispatcher.AddResponder(apiRoute);
+
+                    // Add ShareModeResponsibility last so it evaluates first and overrides IOPageResponsibility
+                    webDispatcher.AddResponder(new ShareModeResponsibility());
 
                     // --- SSL CONFIGURATION PRE-CHECK ---
                     X509Certificate2 cert = null;
@@ -115,23 +122,28 @@ namespace Telemachus
                     }
 
                     // Create the server and associate the dispatcher
-                    if (serverConfig.ipAddress == System.Net.IPAddress.Any) {
-                        webServer = serverConfig.UseSsl ? new HttpServer(serverConfig.port, true) : new HttpServer(serverConfig.port);
-                    } else {
-                        webServer = serverConfig.UseSsl ? new HttpServer(serverConfig.ipAddress, serverConfig.port, true) : new HttpServer(serverConfig.ipAddress, serverConfig.port);
+                    bool useSslNow = serverConfig.UseSsl && !IsShareMode;
+                    if (serverConfig.ipAddress == System.Net.IPAddress.Any)
+                    {
+                        webServer = useSslNow ? new HttpServer(serverConfig.port, true) : new HttpServer(serverConfig.port);
+                    }
+                    else
+                    {
+                        webServer = useSslNow ? new HttpServer(serverConfig.ipAddress, serverConfig.port, true) : new HttpServer(serverConfig.ipAddress, serverConfig.port);
                     }
 
-                    if (serverConfig.UseSsl && cert != null)
+                    if (useSslNow && cert != null)
                     {
                         webServer.SslConfiguration.ServerCertificate = cert;
                         webServer.SslConfiguration.EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12;
                         PluginLogger.print("[SSL] HTTPS Enabled with certificate: " + cert.Subject);
                     }
-                    
-                    webServer.OnGet += (sender, e) => {
+
+                    webServer.OnGet += (sender, e) =>
+                    {
                         var request = e.Request;
                         var response = e.Response;
-                        
+
                         PluginLogger.print(string.Format("[Server] {0} {1} (Host: {2})", request.HttpMethod, request.RawUrl, request.UserHostName));
 
                         // CORS Headers
@@ -139,16 +151,37 @@ namespace Telemachus
                         response.AddHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
                         response.AddHeader("Access-Control-Allow-Headers", "Content-Type, X-KSP-UT, X-KSP-Delay");
 
-                        if (request.HttpMethod == "OPTIONS") {
+                        if (request.HttpMethod == "OPTIONS")
+                        {
                             response.StatusCode = 200;
                             response.Close();
+                            return;
+                        }
+
+                        // Handle root certificate download separately
+                        if (request.RawUrl != null && request.RawUrl.Contains("/telemachus_root.cer"))
+                        {
+                            string certPath = TelemachusCertificateManager.GetRootCertPath();
+                            if (System.IO.File.Exists(certPath))
+                            {
+                                response.ContentType = "application/x-x509-ca-cert";
+                                response.AddHeader("Content-Disposition", "attachment; filename=\"telemachus_root.cer\"");
+                                byte[] certBytes = System.IO.File.ReadAllBytes(certPath);
+                                response.WriteContent(certBytes);
+                            }
+                            else
+                            {
+                                response.StatusCode = 404;
+                                response.Close();
+                            }
                             return;
                         }
 
                         webDispatcher.DispatchRequest(sender, e);
                     };
 
-                    webServer.OnPost += (sender, e) => {
+                    webServer.OnPost += (sender, e) =>
+                    {
                         e.Response.AddHeader("Access-Control-Allow-Origin", "*");
                         webDispatcher.DispatchRequest(sender, e);
                     };
@@ -265,7 +298,7 @@ namespace Telemachus
             serverConfig.UseSsl = config.GetValue<int>("USE_SSL") != 0;
             serverConfig.HasPromptedSsl = config.GetValue<int>("HAS_PROMPTED_SSL") != 0;
             isPartless = config.GetValue<int>("PARTLESS") != 0;
-            
+
             PluginLogger.print("Partless:" + isPartless + " | SSL:" + serverConfig.UseSsl);
         }
 

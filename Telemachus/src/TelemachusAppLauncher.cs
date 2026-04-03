@@ -122,61 +122,118 @@ namespace Telemachus
 
             GUILayout.BeginVertical();
 
-            GUILayout.Label("<b>SERVER STATUS</b>", new GUIStyle(GUI.skin.label) { richText = true });
-            bool isRunning = TelemachusBehaviour.IsServerRunning();
-            GUILayout.Label(isRunning ? "<color=green>ONLINE</color>" : "<color=red>OFFLINE</color>", new GUIStyle(GUI.skin.label) { richText = true, fontSize = 14 });
-
-            if (GUILayout.Button(isRunning ? "STOP SERVER" : "START SERVER", GUILayout.Height(30)))
+            if (TelemachusBehaviour.IsShareMode)
             {
-                if (isRunning) TelemachusBehaviour.StopServer();
-                else TelemachusBehaviour.StartServer();
-            }
-
-            GUILayout.Space(15);
-            GUILayout.Label("<b>NETWORK CONFIG</b>", new GUIStyle(GUI.skin.label) { richText = true });
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Port:", GUILayout.Width(50));
-            string newPortStr = GUILayout.TextField(config.port.ToString(), 5);
-            if (int.TryParse(newPortStr, out int p)) config.port = p;
-            GUILayout.EndHorizontal();
-
-            GUILayout.Space(10);
-            bool useSsl = GUILayout.Toggle(config.UseSsl, "Enable SSL (HTTPS/WSS)");
-            if (useSsl != config.UseSsl)
-            {
-                config.UseSsl = useSsl;
-                TelemachusBehaviour.SaveConfig();
-            }
-
-            if (config.UseSsl)
-            {
-                bool isTrusted = TelemachusCertificateManager.IsRootTrusted();
-                GUILayout.Label(isTrusted ? "<color=white>Certificate Status: <color=green>Trusted</color></color>" : "<color=white>Certificate Status: <color=yellow>Not Trusted</color></color>", new GUIStyle(GUI.skin.label) { richText = true });
-
-                if (GUILayout.Button("REFRESH / TRUST CERTIFICATE"))
+                GUILayout.Label("<color=#4cc9f0><b>SHARE MODE ACTIVE</b></color>", new GUIStyle(GUI.skin.label) { richText = true, fontSize = 16, alignment = TextAnchor.MiddleCenter });
+                GUILayout.Space(10);
+                GUILayout.Label("The server is temporarily running in unencrypted mode (HTTP).", new GUIStyle(GUI.skin.label) { wordWrap = true });
+                GUILayout.Space(10);
+                GUILayout.Label("<b>1.</b> Send one of the links below to your remote browser.", new GUIStyle(GUI.skin.label) { richText = true });
+                GUILayout.Label("<b>2.</b> Tell them to download and install the Certificate.", new GUIStyle(GUI.skin.label) { richText = true });
+                GUILayout.Label("<b>3.</b> Close this mode to resume high-security transmission.", new GUIStyle(GUI.skin.label) { richText = true });
+                
+                GUILayout.Space(15);
+                foreach (var ip in config.ValidIpAddresses)
                 {
-                    // Force complete regeneration then trust
-                    TelemachusCertificateManager.GetServerCertificate(config, true);
-                    TelemachusCertificateManager.TrustRootCertificate();
-                    TelemachusCertificateManager.ForceRefreshTrustCheck();
+                    string displayIp = ip.Equals(System.Net.IPAddress.Loopback) ? "localhost" : ip.ToString();
+                    string url = $"http://{displayIp}:{config.port}/";
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label(url, GUILayout.ExpandWidth(true));
+                    if (GUILayout.Button("COPY", GUILayout.Width(60)))
+                    {
+                        GUIUtility.systemCopyBuffer = url;
+                        ScreenMessages.PostScreenMessage("Install Link copied!", 3.0f, ScreenMessageStyle.UPPER_CENTER);
+                    }
+                    GUILayout.EndHorizontal();
+                }
 
-                    // Restart to apply
+                GUILayout.Space(20);
+                if (GUILayout.Button("<color=#ff4c4c><b>EXIT SHARE MODE</b></color>", new GUIStyle(GUI.skin.button) { richText = true, fixedHeight = 40 }))
+                {
+                    TelemachusBehaviour.IsShareMode = false;
                     if (TelemachusBehaviour.IsServerRunning()) {
                         TelemachusBehaviour.StopServer();
                         TelemachusBehaviour.StartServer();
                     }
                 }
             }
-
-
-            GUILayout.Space(15);
-            GUILayout.Label("<b>ACCESS URLS</b>", new GUIStyle(GUI.skin.label) { richText = true });
-            string scheme = config.UseSsl ? "https" : "http";
-            foreach (var ip in config.ValidIpAddresses)
+            else
             {
-                string displayIp = ip.Equals(IPAddress.Loopback) ? "localhost" : ip.ToString();
-                GUILayout.TextField($"{scheme}://{displayIp}:{config.port}/", GUILayout.ExpandWidth(true));
+                GUILayout.Label("<b>SERVER STATUS</b>", new GUIStyle(GUI.skin.label) { richText = true });
+                bool isRunning = TelemachusBehaviour.IsServerRunning();
+                GUILayout.Label(isRunning ? "<color=green>ONLINE</color>" : "<color=red>OFFLINE</color>", new GUIStyle(GUI.skin.label) { richText = true, fontSize = 14 });
+
+                if (GUILayout.Button(isRunning ? "STOP SERVER" : "START SERVER", GUILayout.Height(30)))
+                {
+                    if (isRunning) TelemachusBehaviour.StopServer();
+                    else TelemachusBehaviour.StartServer();
+                }
+
+                GUILayout.Space(15);
+                GUILayout.Label("<b>NETWORK CONFIG</b>", new GUIStyle(GUI.skin.label) { richText = true });
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Port:", GUILayout.Width(50));
+                string newPortStr = GUILayout.TextField(config.port.ToString(), 5);
+                if (int.TryParse(newPortStr, out int p)) config.port = p;
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(10);
+                bool useSsl = GUILayout.Toggle(config.UseSsl, "Enable SSL (HTTPS/WSS) required for Audio");
+                if (useSsl != config.UseSsl)
+                {
+                    config.UseSsl = useSsl;
+                    TelemachusBehaviour.SaveConfig();
+                }
+
+                if (config.UseSsl)
+                {
+                    bool isTrusted = TelemachusCertificateManager.IsRootTrusted();
+                    GUILayout.Label(isTrusted ? "<color=white>Certificate Status: <color=green>Trusted</color></color>" : "<color=white>Certificate Status: <color=yellow>Not Trusted</color></color>", new GUIStyle(GUI.skin.label) { richText = true });
+
+                    if (GUILayout.Button("REFRESH / TRUST CERTIFICATE"))
+                    {
+                        TelemachusCertificateManager.GetServerCertificate(config, true);
+                        TelemachusCertificateManager.TrustRootCertificate();
+                        TelemachusCertificateManager.ForceRefreshTrustCheck();
+
+                        if (TelemachusBehaviour.IsServerRunning()) {
+                            TelemachusBehaviour.StopServer();
+                            TelemachusBehaviour.StartServer();
+                        }
+                    }
+                    
+                    GUILayout.Space(5);
+                    if (GUILayout.Button("<color=#4cc9f0><b>ENTER SHARE MODE (INVITE DEVICE)</b></color>", new GUIStyle(GUI.skin.button) { richText = true, fixedHeight = 35 }))
+                    {
+                        TelemachusBehaviour.IsShareMode = true;
+                        if (TelemachusBehaviour.IsServerRunning()) {
+                            TelemachusBehaviour.StopServer();
+                            TelemachusBehaviour.StartServer();
+                        }
+                    }
+                }
+            }
+
+            if (!TelemachusBehaviour.IsShareMode)
+            {
+                GUILayout.Space(15);
+                GUILayout.Label("<b>ACCESS URLS (Click to Copy)</b>", new GUIStyle(GUI.skin.label) { richText = true });
+                string scheme = config.UseSsl ? "https" : "http";
+                foreach (var ip in config.ValidIpAddresses)
+                {
+                    string displayIp = ip.Equals(System.Net.IPAddress.Loopback) ? "localhost" : ip.ToString();
+                    string fullUrl = $"{scheme}://{displayIp}:{config.port}/";
+                    
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label(fullUrl, GUILayout.ExpandWidth(true));
+                    if (GUILayout.Button("COPY", GUILayout.Width(60)))
+                    {
+                        GUIUtility.systemCopyBuffer = fullUrl;
+                        ScreenMessages.PostScreenMessage("Indirizzo copiato!", 3.0f, ScreenMessageStyle.UPPER_CENTER);
+                    }
+                    GUILayout.EndHorizontal();
+                }
             }
 
             GUILayout.FlexibleSpace();
