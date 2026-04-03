@@ -22,6 +22,14 @@ namespace Telemachus
             return Path.Combine(Directory.GetParent(telemachusDir).FullName, "Certificates", "telemachus_root.cer");
         }
 
+        public static bool AreCertificateFilesMissing()
+        {
+            string rootPath = GetRootCertPath();
+            string certDir = Path.GetDirectoryName(rootPath);
+            string pfxPath = Path.Combine(certDir, "telemachus_host.pfx");
+            return !File.Exists(rootPath) || !File.Exists(pfxPath);
+        }
+
         public static X509Certificate2 GetServerCertificate(ServerConfiguration config, bool force = false)
         {
             try
@@ -35,7 +43,7 @@ namespace Telemachus
 
                 if (force)
                 {
-                    PluginLogger.print("[SSL] Forced regeneration. Deleting old files...");
+                    PluginLogger.print("[SSL] Forced regeneration requested. Deleting old files...");
                     if (File.Exists(pfxPath)) File.Delete(pfxPath);
                     if (File.Exists(rootCerPath)) File.Delete(rootCerPath);
                 }
@@ -45,6 +53,12 @@ namespace Telemachus
                     var loadedCert = new X509Certificate2(pfxPath, config.CertificatePassword, X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet);
                     PluginLogger.print($"[SSL] Certificate Loaded: {loadedCert.Subject} (HasPrivateKey={loadedCert.HasPrivateKey}, Thumbprint={loadedCert.Thumbprint})");
                     return loadedCert;
+                }
+
+                if (!force)
+                {
+                    PluginLogger.print("[SSL] Certificate missing, and manual regeneration was not requested.");
+                    return null;
                 }
 
                 if (IsWindows)
@@ -71,6 +85,7 @@ namespace Telemachus
 
         private static bool _cachedTrust = false;
         private static bool _needsCheck = true;
+        private static DateTime _lastCheck = DateTime.MinValue;
 
         public static void ForceRefreshTrustCheck()
         {
@@ -79,17 +94,29 @@ namespace Telemachus
 
         public static bool IsRootTrusted()
         {
-            if (!IsWindows) return false; // Automatic check only reliable on Windows currently
+            if (!IsWindows) return false;
+            
+            if (AreCertificateFilesMissing()) return false;
+
             if (!_needsCheck) return _cachedTrust;
 
             _needsCheck = false;
+            _cachedTrust = false;
+
             try
             {
-                // PowerShell check is expensive, run ONLY when requested (menu open or generation)
+                string rootCerPath = GetRootCertPath();
+                if (!File.Exists(rootCerPath)) return false;
+
+                // Load the certificate from disk and get its thumbprint
+                X509Certificate2 diskCert = new X509Certificate2(rootCerPath);
+                string thumbprint = diskCert.Thumbprint.ToUpperInvariant().Replace(" ", "");
+
+                // Use PowerShell for reliable check on Windows/KSP environment
                 ProcessStartInfo psi = new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
-                    Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"Get-ChildItem Cert:\\CurrentUser\\Root | Where-Object { $_.Subject -match 'Telemachus' } | Select-Object -ExpandProperty Subject\"",
+                    Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"(Get-ChildItem Cert:\\CurrentUser\\Root | Where-Object { $_.Thumbprint -eq '" + thumbprint + "' }).Count -gt 0\"",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true
@@ -97,45 +124,52 @@ namespace Telemachus
 
                 using (var process = Process.Start(psi))
                 {
-                    string output = process.StandardOutput.ReadToEnd();
+                    string output = process.StandardOutput.ReadToEnd().Trim();
                     process.WaitForExit();
-                    _cachedTrust = !string.IsNullOrEmpty(output) && output.Contains("Telemachus");
-                    if (_cachedTrust) PluginLogger.print("[SSL] Root CA trust confirmed via PowerShell.");
-                    return _cachedTrust;
+                    _cachedTrust = output.Equals("True", StringComparison.OrdinalIgnoreCase);
+                    
+                    if (_cachedTrust) PluginLogger.print("[SSL] Root CA trust confirmed for thumbprint: " + thumbprint);
                 }
             }
             catch (Exception ex)
             {
-                PluginLogger.print("[SSL] Error checking trust via PowerShell: " + ex.Message);
+                PluginLogger.print("[SSL] Error checking trust store: " + ex.Message);
             }
-            return false;
+
+            return _cachedTrust;
         }
 
         public static void TrustRootCertificate()
         {
-            string telemachusDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-            string certPath = Path.Combine(Directory.GetParent(telemachusDir).FullName, "Certificates", "telemachus_root.cer");
-            
-            if (!File.Exists(certPath))
+            string rootPath = GetRootCertPath();
+            if (!File.Exists(rootPath))
             {
-                PluginLogger.print("[SSL] Root certificate file not found to trust at: " + certPath);
+                PluginLogger.print("[SSL] Root certificate file not found to trust at: " + rootPath);
                 return;
             }
 
             if (IsWindows)
             {
-                PluginLogger.print("[SSL] Launching system trust prompt via certutil...");
+                PluginLogger.print("[SSL] Launching system trust prompt (cleanup + add) via PowerShell...");
                 try
                 {
+                    // Clean up old Telemachus certificates first to avoid confusion
+                    string psCommand = 
+                        "$path = '" + rootPath + "'; " +
+                        "Get-ChildItem Cert:\\CurrentUser\\Root | Where-Object { $_.Subject -match 'Telemachus' } | ForEach-Object { certutil -user -delstore Root $_.Thumbprint }; " +
+                        "certutil -user -addstore Root $path";
+
                     ProcessStartInfo psi = new ProcessStartInfo
                     {
-                        FileName = "certutil.exe",
-                        Arguments = $"-user -addstore Root \"{certPath}\"",
-                        UseShellExecute = true
+                        FileName = "powershell.exe",
+                        Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand + "\"",
+                        UseShellExecute = true,
+                        CreateNoWindow = true
                     };
                     Process.Start(psi);
+                    ForceRefreshTrustCheck();
                 }
-                catch (Exception ex) { PluginLogger.print("[SSL] Failed to launch certutil: " + ex.Message); }
+                catch (Exception ex) { PluginLogger.print("[SSL] Failed to launch trust cleanup/add: " + ex.Message); }
             }
             else if (Environment.OSVersion.Platform == PlatformID.Unix || (int)Environment.OSVersion.Platform == 128)
             {
@@ -148,7 +182,7 @@ namespace Telemachus
                         ProcessStartInfo psi = new ProcessStartInfo
                         {
                             FileName = "security",
-                            Arguments = $"add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \"{certPath}\"",
+                            Arguments = $"add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \"{rootPath}\"",
                             UseShellExecute = true
                         };
                         Process.Start(psi);
@@ -157,7 +191,7 @@ namespace Telemachus
                 }
                 else
                 {
-                    PluginLogger.print("[SSL] Linux trust requires manual action: sudo cp telemachus_root.cer /usr/local/share/ca-certificates/ && sudo update-ca-certificates");
+                    PluginLogger.print("[SSL] Linux trust requires manual action: sudo cp " + Path.GetFileName(rootPath) + " /usr/local/share/ca-certificates/ && sudo update-ca-certificates");
                 }
             }
         }

@@ -5,4 +5,5 @@
     <int name="PARTLESS">1</int>
     <int name="USE_SSL">1</int>
     <int name="HAS_PROMPTED_SSL">0</int>
+    <int name="AUTO_GENERATE_SSL">0</int>
 </config>

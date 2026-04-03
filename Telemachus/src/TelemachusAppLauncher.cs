@@ -57,6 +57,14 @@ namespace Telemachus
             }
         }
 
+        void OnApplicationFocus(bool hasFocus)
+        {
+            if (hasFocus && _showMenu)
+            {
+                TelemachusCertificateManager.ForceRefreshTrustCheck();
+            }
+        }
+
         void OnShow() 
         { 
             _showMenu = true; 
@@ -188,10 +196,14 @@ namespace Telemachus
 
                 if (config.UseSsl)
                 {
+                    bool filesMissing = TelemachusCertificateManager.AreCertificateFilesMissing();
                     bool isTrusted = TelemachusCertificateManager.IsRootTrusted();
-                    GUILayout.Label(isTrusted ? "<color=white>Certificate Status: <color=green>Trusted</color></color>" : "<color=white>Certificate Status: <color=yellow>Not Trusted</color></color>", new GUIStyle(GUI.skin.label) { richText = true });
+                    
+                    string statusText = filesMissing ? "<color=red>Missing</color>" : (isTrusted ? "<color=green>Trusted</color>" : "<color=yellow>Not Trusted</color>");
+                    GUILayout.Label($"Certificate Status: {statusText}", new GUIStyle(GUI.skin.label) { richText = true });
 
-                    if (GUILayout.Button("REFRESH / TRUST CERTIFICATE"))
+
+                    if (GUILayout.Button("REFRESH / GENERATE CERTIFICATE"))
                     {
                         TelemachusCertificateManager.GetServerCertificate(config, true);
                         TelemachusCertificateManager.TrustRootCertificate();

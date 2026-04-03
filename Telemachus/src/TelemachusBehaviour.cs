@@ -113,7 +113,7 @@ namespace Telemachus
                     X509Certificate2 cert = null;
                     if (serverConfig.UseSsl)
                     {
-                        cert = TelemachusCertificateManager.GetServerCertificate(serverConfig);
+                        cert = TelemachusCertificateManager.GetServerCertificate(serverConfig, false);
                         if (cert == null)
                         {
                             PluginLogger.print("[SSL] Failed to load certificate. Falling back to HTTP.");

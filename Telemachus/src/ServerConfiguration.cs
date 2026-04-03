@@ -22,7 +22,6 @@ namespace Telemachus
         public bool UseSsl { get; set; } = false;
         public string CertificatePath { get; set; } = "";
         public string CertificatePassword { get; set; } = "telemachus";
-        public bool AutoGenerateSsl { get; set; } = true;
         public bool HasPromptedSsl { get; set; } = false;
     }
 
