@@ -1,4 +1,4 @@
-class AdvancedCameraFeed {
+class CommunicationsConsole {
     constructor() {
         this.selectedCamera = null;
         this.currentFov = null;
@@ -255,4 +255,4 @@ class AdvancedCameraFeed {
         return `${d}D ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
     }
 }
-document.addEventListener('DOMContentLoaded', () => { window.app = new AdvancedCameraFeed(); });
+document.addEventListener('DOMContentLoaded', () => { window.app = new CommunicationsConsole(); });
