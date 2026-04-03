@@ -42,6 +42,7 @@ class RadioTransmitter {
         if (this.micProcessor) {
             this.micProcessor.port.postMessage({ type: 'set-mute', muted: false });
         }
+        this.startQualitySync();
     }
 
     async initMic() {
@@ -61,7 +62,7 @@ class RadioTransmitter {
             this.micStream = await navigator.mediaDevices.getUserMedia(constraints);
 
             if (!this.workletInitted) {
-                await this.audioCtx.audioWorklet.addModule('../js/providers/radio-worklet.js');
+            await this.audioCtx.audioWorklet.addModule('../js/providers/radio-worklet.js', { type: 'module' });
                 this.workletInitted = true;
             }
 
@@ -106,9 +107,25 @@ class RadioTransmitter {
 
     stopTransmission() {
         this.isTransmitting = false;
+        if (this.qualityInterval) {
+            clearInterval(this.qualityInterval);
+            this.qualityInterval = null;
+        }
         if (this.micProcessor) {
             this.micProcessor.port.postMessage({ type: 'set-mute', muted: true });
         }
+    }
+
+    startQualitySync() {
+        if (this.qualityInterval) clearInterval(this.qualityInterval);
+        this.qualityInterval = setInterval(() => {
+            if (this.micProcessor && this.isTransmitting) {
+                this.micProcessor.port.postMessage({
+                    type: 'set-quality',
+                    quality: this.signalLink.latestQuality / 100
+                });
+            }
+        }, 100);
     }
 }
 

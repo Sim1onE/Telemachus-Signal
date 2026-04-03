@@ -6,6 +6,8 @@
  * v14.19: Moved Adaptive P-Controller INSIDE the worklet for instant feedback.
  *         Main thread was too slow/stale with its 2% random telemetry sampling.
  */
+import { RadioDSP } from '../shared/radio-dsp.js';
+
 class RadioDownstreamWorklet extends AudioWorkletProcessor {
     constructor() {
         super();
@@ -23,6 +25,10 @@ class RadioDownstreamWorklet extends AudioWorkletProcessor {
         this.stagnantCycles = 0;
         this.lastWritePtr = -1;
         
+        // --- v17.1 Shared DSP ---
+        this.dsp = new RadioDSP(false);
+        this.quality = 1.0;
+        
         // Telemetry throttle
         this.telemetryCounter = 0;
 
@@ -30,8 +36,12 @@ class RadioDownstreamWorklet extends AudioWorkletProcessor {
             const msg = e.data;
             if (msg.type === 'push-samples') {
                 const samples = msg.payload;
+                const q = (msg.quality !== undefined) ? msg.quality : this.quality;
+                this.quality = q;
+
                 for (let i = 0; i < samples.length; i++) {
-                    this.ringBuffer[this.writePtr] = samples[i];
+                    const s = this.dsp.apply(samples[i], q);
+                    this.ringBuffer[this.writePtr] = s;
                     this.writePtr = (this.writePtr + 1) % this.ringBuffer.length;
                 }
             } else if (msg.type === 'force-snap') {

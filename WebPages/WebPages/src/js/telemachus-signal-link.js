@@ -100,7 +100,7 @@ class UplinkSynchronizer {
                     view.setFloat64(9, this.signalLink.lastPacketWarp || 1.0, true);
                     view.setFloat64(17, instantDelay, true);
                     view.setFloat64(25, 0, true); // No FOV for audio
-                    view.setUint8(33, 100); // 100% Signal (Uplink is assumed clear)
+                    view.setUint8(33, this.signalLink.latestQuality || 100); 
                     view.setUint8(34, 0); // v16.01: CameraID (0 for audio/system)
 
                     finalBuffer.set(packet.payload, StreamConstants.HEADER_SIZE);
@@ -121,6 +121,7 @@ class TelemachusSignalLink {
         this.lastPacketWarp = 1;
         this.lastPacketReceivedAt = 0;
         this.latestNetworkDelay = 0;
+        this.latestQuality = 100;
         this.listeners = new Map();
         this.uplink = new UplinkSynchronizer(this);
     }
@@ -157,6 +158,7 @@ class TelemachusSignalLink {
                     this.lastPacketWarp = msg.warp;
                     this.lastPacketReceivedAt = performance.now();
                     this.latestNetworkDelay = msg.delay;
+                    this.latestQuality = msg.quality !== undefined ? msg.quality : 100;
                     if (this.listeners.has('status')) this.listeners.get('status').forEach(cb => cb(msg));
                 } else if (msg.type === 'cameraList') {
                     if (this.listeners.has('cameraList')) this.listeners.get('cameraList').forEach(cb => cb(msg, msg.cameras));
@@ -172,6 +174,8 @@ class TelemachusSignalLink {
             const kspFOV = view.getFloat64(25, true);
             const kspSignal = view.getUint8(33);
             const kspCameraID = view.getUint8(34); // v16.01: Camera Identifier
+
+            this.latestQuality = kspSignal;
 
             if (this.listeners.has(type)) {
                 this.listeners.get(type).forEach(cb => cb({ 

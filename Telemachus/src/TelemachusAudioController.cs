@@ -143,13 +143,9 @@ namespace Telemachus
             // Apply Volume Boost with Soft Saturation Clipper (Anti-Click v14.6)
             for (int i = 0; i < samples.Length; i++) {
                 // Soft Knee: Atan gently rounds peaks to prevent square-wave harmonic distortion (crackling)
-                samples[i] = Mathf.Atan(samples[i] * 4.0f) / (Mathf.PI / 2f);
+                samples[i] = Mathf.Atan(samples[i] * 2.5f) / (Mathf.PI / 2f);
             }
 
-            if (_cachedQuality < 1.0f)
-            {
-                ApplyRadioEffects(samples, _cachedQuality);
-            }
 
             // WRITE DIRECTLY TO RING BUFFER (Fast Path)
             lock (_bufferLock) 
@@ -252,16 +248,5 @@ namespace Telemachus
             }
         }
 
-        private void ApplyRadioEffects(float[] samples, double quality)
-        {
-            float noiseLevel = (float)(1.0 - quality) * 0.15f;
-            for (int i = 0; i < samples.Length; i++)
-            {
-                samples[i] += (UnityEngine.Random.value * 2f - 1f) * noiseLevel;
-                // Simple clamp
-                if (samples[i] > 1f) samples[i] = 1f;
-                if (samples[i] < -1f) samples[i] = -1f;
-            }
-        }
     }
 }

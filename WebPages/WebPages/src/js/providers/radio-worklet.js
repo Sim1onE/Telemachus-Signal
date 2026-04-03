@@ -7,6 +7,8 @@
  *         When muted, it continues to 'consume' audio to keep Browser AGC stable
  *         but discards all packets and resets resampler phase.
  */
+import { RadioDSP } from '../shared/radio-dsp.js';
+
 class RadioUpstreamWorklet extends AudioWorkletProcessor {
     constructor() {
         super();
@@ -23,6 +25,10 @@ class RadioUpstreamWorklet extends AudioWorkletProcessor {
         this.isFirstBlock = true;
         this.currentGain = 0.0;
         this.muted = true; // Gated by default (v14.23)
+        
+        // --- v17.1 Shared DSP ---
+        this.dsp = new RadioDSP(true);
+        this.quality = 1.0;
 
         this.port.onmessage = (e) => {
             if (e.data.type === 'init') {
@@ -35,7 +41,11 @@ class RadioUpstreamWorklet extends AudioWorkletProcessor {
                     this.isFirstBlock = true;
                     this.currentGain = 0.0;
                     this.accPtr = 0;
+                    this.dsp.reset();
                 }
+            }
+            if (e.data.type === 'set-quality') {
+                this.quality = e.data.quality;
             }
         };
     }
@@ -71,9 +81,11 @@ class RadioUpstreamWorklet extends AudioWorkletProcessor {
                 // Resetting accPtr here ensures no leaked audio.
                 this.accPtr = 0;
             } else {
-                // v14.22: Apply tiny 10ms fade-in to mask DC-offset jump at start of mic opening
                 this.currentGain = Math.min(1.0, this.currentGain + (1.0 / (this.MIC_TARGET_SAMPLE_RATE * 0.010))); // 10ms fade
                 s *= this.currentGain;
+
+                // --- Shared DSP Degradation ---
+                s = this.dsp.apply(s, this.quality);
 
                 const clamped = Math.max(-1, Math.min(1, s));
                 this.accumulator[this.accPtr] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
