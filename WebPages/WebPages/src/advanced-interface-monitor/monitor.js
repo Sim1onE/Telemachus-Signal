@@ -32,22 +32,7 @@ $(document).ready(function () {
         rXe: "r.resource[XenonGas]", rXeM: "r.resourceMax[XenonGas]",
         rEc: "r.resource[ElectricCharge]", rEcM: "r.resourceMax[ElectricCharge]",
 
-        // C2: Sensors & Science
-        sciC: "sci.count", sciD: "sci.dataAmount",
-        sT: "s.sensor.temp", sP: "s.sensor.pres", sG: "s.sensor.grav", sA: "s.sensor.acc",
-
-        // C2: Kerbalism Life Support
-        kVol: "kerbalism.habitatVolume", kPres: "kerbalism.habitatPressure", kCo2: "kerbalism.co2Level",
-        kShield: "kerbalism.radiationShielding", kComf: "kerbalism.habitatComfort", kRad: "kerbalism.radiation",
-        kStel: "kerbalism.stellarStormInProgress", kCrew: "kerbalism.crew",
-
-        // C2: Kerbalism Drives
-        kDrF: "kerbalism.drivesFreeSpace", kDrC: "kerbalism.drivesCapacity",
-        kRate: "kerbalism.connectionRate", kXmit: "kerbalism.connectionTransmitting",
-
-        // C2: Thermal
-        tHName: "therm.hottestPartName", tHTemp: "therm.hottestPartTempKelvin", tHMax: "therm.hottestPartMaxTemp",
-        tETemp: "therm.hottestEngineTemp", tEOver: "therm.anyEnginesOverheating", tFlux: "therm.heatShieldFlux",
+        // C2: Map & GNC (API mappings coming soon)
 
         // C3: Propulsion & Staging
         fThr: "f.throttle", dvReady: "dv.ready", dvStages: "dv.stages", vCurStage: "v.currentStage",
@@ -68,26 +53,18 @@ $(document).ready(function () {
 
 
     function updateMeters(data) {
-        // Logarithmic Altitude Meter (0 to 250,000m)
-        const alt = Math.max(0, parseFloat(data.vAlt) || 0);
-        const altMaxLog = Math.log10(250000 + 1);
-        const altLog = Math.log10(alt + 1);
-        const altPerc = (altLog / altMaxLog) * 100;
-        $('#alt-pointer').css('bottom', Math.min(100, altPerc) + '%');
-        $('#v-alt').text(vFmt(alt / 1000, 1)); // Show in km
+        // Altimeter HUD values
+        const alt = parseFloat(data.vAlt) || 0;
+        const hgtt = parseFloat(data.vHgtTerr) || 0;
+        const hgts = parseFloat(data.vHgtSurf) || 0;
 
-        // Logarithmic Orbital Speed Meter (0 to 3,000 m/s)
-        const spd = Math.max(0, parseFloat(data.vObtSpd) || 0);
-        const spdMaxLog = Math.log10(3000 + 1);
-        const spdLog = Math.log10(spd + 1);
-        const spdPerc = (spdLog / spdMaxLog) * 100;
-        $('#spd-pointer').css('bottom', Math.min(100, spdPerc) + '%');
-        $('#v-srfSpd').text(vFmt(spd, 0));
+        $('#v-alt').text(vFmt(alt / 1000, 1));
+        $('#v-hgt-terr').text(vFmt(hgtt / 1000, 2));
+        $('#v-hgt-surf').text(vFmt(hgts / 1000, 2));
 
         // Aerodynamic readouts
         $('#v-mach').text("M " + vFmt(data.vMach, 2));
-        $('#v-hgt-terr').text(vFmt(data.vHgtTerr, 1));
-        $('#v-hgt-surf').text(vFmt(data.vHgtSurf, 1));
+        $('#v-ias').text(vFmt(data.vIas, 1) + " m/s");
         $('#v-lat').text(vFmt(data.vLat, 3));
         $('#v-lon').text(vFmt(data.vLon, 3));
     }
@@ -193,42 +170,10 @@ $(document).ready(function () {
         updateBar('xe', d.rXe, d.rXeM);
         updateBar('ec', d.rEc, d.rEcM);
 
-        // C2: Sensors & Science
-        txt('sci-count', Number(d.sciC || 0).toFixed(0));
-        txt('sci-data', vFmt(d.sciD, 2) + " Mits");
+        // C2: 2D Orbital Map
+        updateMap(d.vLat, d.vLon);
 
-        txt('s-temp', extractSensor(d.sT) + " K");
-        txt('s-pres', extractSensor(d.sP) + " kPa");
-        txt('s-grav', extractSensor(d.sG) + " m/s²");
-        txt('s-acc', extractSensor(d.sA) + " g");
-
-        // C2: Kerbalism Life Support
-        txt('k-vol', vFmt(d.kVol, 2) + " m³");
-        txt('k-pres', vFmt(d.kPres, 2) + " atm");
-        updateBar('co2', d.kCo2 * 100, 100, true);
-        txt('k-shield', vFmt(d.kShield * 100, 0) + "%");
-        txt('k-comf', vFmt(d.kComf, 2));
-        txt('k-rad', vFmt(d.kRad, 3) + " rad/h");
-        led('led-storm', d.kStel, 'red', false);
-
-        // Crew Health
-        updateCrewHealth(d.kCrew);
-
-        // C2: Kerbalism Drives
-        txt('k-drFree', vFmt(d.kDrF, 1));
-        txt('k-drCap', vFmt(d.kDrC, 1));
-        let drPerc = (d.kDrC > 0) ? ((d.kDrC - d.kDrF) / d.kDrC * 100) : 0;
-        updateBarRaw('drive', drPerc, vFmt(drPerc, 0) + "%");
-        txt('k-drRate', vFmt(d.kRate, 3) + " MB/s");
-        txt('k-xmit', String(d.kXmit || 0));
-
-        // C2: Thermal
-        txt('t-hName', d.tHName || "-");
-        txt('t-hTemp', vFmt(d.tHTemp, 1));
-        txt('t-hMax', vFmt(d.tHMax, 1));
-        txt('t-eTemp', vFmt(d.tETemp, 1) + " K");
-        txt('t-flux', vFmt(d.tFlux, 2) + " kW");
-        led('led-overheat', d.tEOver, 'red', false);
+        // C2: GNC HUD (Variables coming later)
 
         // C3: Propulsion & Staging
         let throttlePerc = vFmt(d.fThr * 100, 0);
@@ -239,7 +184,7 @@ $(document).ready(function () {
 
         // Footer
         txt('footer-ut', 'UT: ' + formatUT(d.ut));
-        txt('footer-conn', (sigPerc > 0) ? 'STREAM ACTIVE' : 'NO SIGNAL');
+        txt('footer-conn', (sig > 0) ? 'STREAM ACTIVE' : 'NO SIGNAL');
     }
 
     // HELPER FUNCTIONS
@@ -364,6 +309,69 @@ $(document).ready(function () {
                 </div>
             `);
         });
+    }
+
+    const orbitHistory = [];
+    const MAX_HISTORY = 100;
+
+    function updateMap(lat, lon) {
+        let latVal = parseFloat(lat);
+        let lonVal = parseFloat(lon);
+        if (isNaN(latVal) || isNaN(lonVal)) return;
+
+        const canvas = document.getElementById('orbit-canvas');
+        if (!canvas) return;
+
+        // Ensure canvas matches its display size
+        const w = canvas.clientWidth;
+        const h = canvas.clientHeight;
+        if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+        }
+
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, w, h);
+
+        // Map coordinates (lat: -90 to +90) (lon: -180 to +180)
+        const posX = ((lonVal + 180) / 360) * w;
+        const posY = h - (((latVal + 90) / 180) * h);
+
+        // Move the HTML crosshairs to match the new location
+        $('.map-crosshair').css({ left: posX + 'px', top: posY + 'px' });
+        $('.map-crosshair-h').css({ top: posY + 'px' });
+        $('.map-crosshair-v').css({ left: posX + 'px' });
+
+        // Update path history
+        orbitHistory.push({ x: posX, y: posY });
+        if (orbitHistory.length > MAX_HISTORY) orbitHistory.shift();
+
+        // Draw orbital trace
+        if (orbitHistory.length > 1) {
+            ctx.beginPath();
+            ctx.strokeStyle = "rgba(0, 221, 255, 0.4)";
+            ctx.lineWidth = 2;
+            for (let i = 0; i < orbitHistory.length; i++) {
+                let pt = orbitHistory[i];
+                // Prevent lines stretching across the entire width when wrapping longitude
+                if (i > 0) {
+                    let prevPt = orbitHistory[i-1];
+                    if (Math.abs(pt.x - prevPt.x) > w * 0.5) {
+                        ctx.moveTo(pt.x, pt.y);
+                        continue;
+                    }
+                }
+                if (i === 0) ctx.moveTo(pt.x, pt.y);
+                else ctx.lineTo(pt.x, pt.y);
+            }
+            ctx.stroke();
+        }
+
+        // Draw current vessel blip
+        ctx.beginPath();
+        ctx.fillStyle = "var(--accent-amber)";
+        ctx.arc(posX, posY, 4, 0, Math.PI * 2);
+        ctx.fill();
     }
 
     function formatMET(s) {

@@ -50,67 +50,8 @@
                 <div class="data-row sub" id="v-crewNames" style="white-space: pre-wrap;"></div>
             </div>
 
-            <div class="data-group" style="display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-top:10px;">
-                <div>
-                    <div class="led-row"><span class="led" id="led-landed"></span><span class="led-label">LANDED</span></div>
-                    <div class="led-row"><span class="led" id="led-splashed"></span><span class="led-label">SPLASHED</span></div>
-                </div>
-                <div>
-                    <div class="led-row"><span class="led" id="led-active"></span><span class="led-label">ACTIVE VSL</span></div>
-                    <div class="led-row"><span class="led" id="led-control"></span><span class="led-label">CONTROL</span></div>
-                </div>
-            </div>
-
-            <!-- Instrumentation Bay -->
-            <div class="instrument-bay">
-                <!-- Altitude Meter (Log 0-250km) -->
-                <div class="tape-container alt-meter">
-                    <div class="tape-label">ALT (km)</div>
-                    <div class="tape-vignette"></div>
-                    <div class="tape-track fixed" id="alt-meter-scale">
-                        <div class="meter-tick" style="bottom:0%">0</div>
-                        <div class="meter-tick" style="bottom:55%">1</div>
-                        <div class="meter-tick" style="bottom:74%">10</div>
-                        <div class="meter-tick" style="bottom:92%">100</div>
-                        <div class="meter-tick" style="bottom:98.5%">250</div>
-                    </div>
-                    <div class="meter-pointer" id="alt-pointer"></div>
-                    <div class="tape-digital" id="v-alt">0.0</div>
-                </div>
-
-                <!-- Central Data Column -->
-                <div class="center-instrument-data">
-                    <div class="data-group">
-                        <div class="group-header">COORDINATES</div>
-                        <div class="data-row-stylized"><span class="lbl-mini">LAT</span><span class="val-mono" id="v-lat">0.000</span></div>
-                        <div class="data-row-stylized"><span class="lbl-mini">LON</span><span class="val-mono" id="v-lon">0.000</span></div>
-                    </div>
-                    <div class="data-group">
-                        <div class="group-header">AERO & SURF</div>
-                        <div class="data-row-stylized"><span class="lbl-mini">MACH</span><span class="val-mono" id="v-mach">M 0.00</span></div>
-                        <div class="data-row-stylized"><span class="lbl-mini">HGT.T</span><span class="val-mono" id="v-hgt-terr">0.0</span></div>
-                        <div class="data-row-stylized"><span class="lbl-mini">HGT.S</span><span class="val-mono" id="v-hgt-surf">0.0</span></div>
-                    </div>
-                </div>
-
-                <!-- Speed Meter (Log 0-3km/s) -->
-                <div class="tape-container spd-meter">
-                    <div class="tape-label">SPD (m/s)</div>
-                    <div class="tape-vignette"></div>
-                    <div class="tape-track fixed" id="spd-meter-scale">
-                        <div class="meter-tick" style="bottom:0%">0</div>
-                        <div class="meter-tick" style="bottom:30%">10</div>
-                        <div class="meter-tick" style="bottom:58%">100</div>
-                        <div class="meter-tick" style="bottom:86%">1k</div>
-                        <div class="meter-tick" style="bottom:98.5%">3k</div>
-                    </div>
-                    <div class="meter-pointer" id="spd-pointer"></div>
-                    <div class="tape-digital" id="v-srfSpd">0.0</div>
-                </div>
-            </div>
-
             <!-- Vector Cluster (XYZ Colored) -->
-            <div class="vector-cluster">
+            <div class="vector-cluster" style="margin-top:15px;">
                 <div class="group-header">VELOCITY VECTORS (X, Y, Z)</div>
                 <div class="vector-grid">
                     <div class="vector-set">
@@ -130,14 +71,62 @@
                 </div>
             </div>
 
-            <div class="data-group">
-                <div class="group-header">ATTITUDE (ROOT / RAW)</div>
-                <div class="data-row"><span class="lbl">HEADING</span><span class="val"><span id="n-head">0</span>&deg; <span style="font-size:0.6rem;opacity:0.6" id="n-rhead">(0)</span></span></div>
-                <div class="data-row"><span class="lbl">PITCH</span><span class="val"><span id="n-pitch">0</span>&deg; <span style="font-size:0.6rem;opacity:0.6" id="n-rpitch">(0)</span></span></div>
-                <div class="data-row"><span class="lbl">ROLL</span><span class="val"><span id="n-roll">0</span>&deg; <span style="font-size:0.6rem;opacity:0.6" id="n-rroll">(0)</span></span></div>
+            <!-- Central Data Row (Coordinates & Aero) -->
+            <div class="center-instrument-data" style="flex-direction:row; gap:10px; margin-bottom:15px;">
+                <div class="data-group" style="flex:1;">
+                    <div class="group-header">COORDINATES</div>
+                    <div class="data-row-stylized"><span class="lbl-mini">LAT</span><span class="val-mono" id="v-lat">0.000</span></div>
+                    <div class="data-row-stylized"><span class="lbl-mini">LON</span><span class="val-mono" id="v-lon">0.000</span></div>
+                </div>
+                <div class="data-group" style="flex:1;">
+                    <div class="group-header">AERODYNAMICS</div>
+                    <div class="data-row-stylized"><span class="lbl-mini">MACH</span><span class="val-mono" id="v-mach">M 0.00</span></div>
+                    <div class="data-row-stylized"><span class="lbl-mini">I.A.S.</span><span class="val-mono" id="v-ias">0.0</span></div>
+                </div>
             </div>
 
-            <!-- Signal & Sun Header -->
+            <!-- Altimeter HUD Grid -->
+            <div class="altimeter-block">
+                <div class="group-header" style="margin-bottom:8px;">ALTIMETER MATRIX</div>
+                <div class="attitude-grid" style="grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                    <div class="att-col" style="border-top:1px solid var(--accent-cyan);">
+                        <div class="att-icon" style="border:none; color:var(--text-secondary);">ALT (km)</div>
+                        <div class="att-val" id="v-alt" style="font-size:1rem; color:var(--accent-cyan);">0.0</div>
+                    </div>
+                    <div class="att-col" style="border-top:1px solid var(--accent-cyan);">
+                        <div class="att-icon" style="border:none; color:var(--text-secondary);">HGT.T (km)</div>
+                        <div class="att-val" id="v-hgt-terr" style="font-size:1rem; color:var(--accent-cyan);">0.0</div>
+                    </div>
+                    <div class="att-col" style="border-top:1px solid var(--accent-cyan);">
+                        <div class="att-icon" style="border:none; color:var(--text-secondary);">HGT.S (km)</div>
+                        <div class="att-val" id="v-hgt-surf" style="font-size:1rem; color:var(--accent-cyan);">0.0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Attitude Graphic -->
+            <div class="attitude-block">
+                <div class="group-header" style="margin-bottom:8px;">ATTITUDE HUD</div>
+                <div class="attitude-grid">
+                    <div class="att-col">
+                        <div class="att-icon">HEAD</div>
+                        <div class="att-val" id="n-head">0&deg;</div>
+                        <div class="att-raw" id="n-rhead">(0)</div>
+                    </div>
+                    <div class="att-col">
+                        <div class="att-icon">PITCH</div>
+                        <div class="att-val" id="n-pitch">0&deg;</div>
+                        <div class="att-raw" id="n-rpitch">(0)</div>
+                    </div>
+                    <div class="att-col">
+                        <div class="att-icon">ROLL</div>
+                        <div class="att-val" id="n-roll">0&deg;</div>
+                        <div class="att-raw" id="n-rroll">(0)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Signal & Link Status -->
             <div class="signal-status-box">
                 <div class="group-header">SIGNAL & LINK STATUS</div>
                 <div class="signal-grid">
@@ -166,57 +155,57 @@
 
         </section>
 
-        <!-- COL 2: SENSORS & SCIENCE -->
-        <section class="panel-section">
-            <div class="section-title"><span>SENSORS & LIFE SUPPORT</span><span>C-2</span></div>
+        <!-- COL 2: MAP & GNC -->
+        <section class="panel-section" style="display: flex; flex-direction: column;">
+            <div class="section-title"><span>ORBITAL MAP & GNC</span><span>C-2</span></div>
             
-            <div class="data-group">
-                <div class="group-header">SCIENCE SUITE</div>
-                <div class="data-row"><span class="lbl">EXPERIMENTS</span><span class="val" id="sci-count" style="color:var(--accent-blue)">0</span></div>
-                <div class="data-row"><span class="lbl">DATA ABOARD</span><span class="val" id="sci-data">0.0 Mits</span></div>
-            </div>
-
-            <div class="data-group">
-                <div class="group-header">LOCAL SENSORS</div>
-                <div class="data-row"><span class="lbl">TEMP</span><span class="val" id="s-temp">0.0 K</span></div>
-                <div class="data-row"><span class="lbl">PRES</span><span class="val" id="s-pres">0.0 kPa</span></div>
-                <div class="data-row"><span class="lbl">GRAV</span><span class="val" id="s-grav">0.0 m/s&sup2;</span></div>
-                <div class="data-row"><span class="lbl">ACCEL</span><span class="val" id="s-acc">0.0 g</span></div>
-            </div>
-
-            <div class="data-group" style="margin-top: 20px;">
-                <div class="group-header" style="color:var(--accent-green)">KERBALISM LIFE SUPPORT</div>
-                <div class="data-row"><span class="lbl">HAB VOLUME</span><span class="val" id="k-vol">0.0 m&sup3;</span></div>
-                <div class="data-row"><span class="lbl">PRESSURE</span><span class="val" id="k-pres">0.00 atm</span></div>
-                <div class="bar-container" style="margin:8px 0;"><div class="bar-lbl">CO2 POIS.</div><div class="bar-outer"><div class="bar-inner b-mp" id="b-co2"></div></div><div class="bar-val" id="v-co2">0%</div></div>
-                <div class="data-row"><span class="lbl">SHIELDING</span><span class="val" id="k-shield">0%</span></div>
-                <div class="data-row"><span class="lbl">COMFORT</span><span class="val" id="k-comf">0.0</span></div>
-                <div class="data-row" style="margin-top:10px;"><span class="lbl">EXT RADIATION</span><span class="val" id="k-rad">0.0 rad/h</span></div>
+            <!-- 1. 2D Orbital Map (16:9) -->
+            <div class="map-container-16-9">
+                <!-- 2D Planetary Map Image Layer -->
+                <img id="planet-map-bg" src="kerbin_map.jpg" alt="Planetary Map" style="position: absolute; top:0; left:0; width:100%; height:100%; object-fit: fill; opacity: 0.6; z-index: 1;" onerror="this.style.display='none'">
                 
-                <div class="led-row" style="margin-top:10px;"><span class="led" id="led-storm"></span><span class="led-label">STELLAR STORM</span></div>
-            </div>
-
-            <div class="data-group">
-                <div class="group-header">CREW HEALTH SUMMARY</div>
-                <div id="crew-health-list" style="font-size:0.75rem;">(NO CREW)</div>
-            </div>
-
-            <div class="data-group" style="margin-top:20px;">
-                <div class="group-header" style="color:var(--accent-magenta)">COMPUTER DRIVES & LINK</div>
-                <div class="bar-container"><div class="bar-lbl">DRIVE</div><div class="bar-outer"><div class="bar-inner b-ox" id="b-drive"></div></div><div class="bar-val" id="v-drive">0%</div></div>
-                <div class="data-row sub"><span class="lbl">FREE / CAP</span><span class="val"><span id="k-drFree">0</span> / <span id="k-drCap">0</span> MB</span></div>
-                <div class="data-row"><span class="lbl">DATA RATE</span><span class="val" id="k-drRate">0 MB/s</span></div>
-                <div class="data-row"><span class="lbl">FILES XMIT</span><span class="val" id="k-xmit">0</span></div>
-            </div>
-
-            <div class="data-group" style="margin-top:20px;">
-                <div class="group-header" style="color:var(--accent-red)">THERMAL CORE</div>
-                <div class="led-row" style="margin-bottom:8px;"><span class="led" id="led-overheat"></span><span class="led-label">ENGINE OVERHEAT (>90%)</span></div>
-                <div class="data-row"><span class="lbl">HOTTEST PRT</span><span class="val" id="t-hName" style="color:var(--accent-amber); font-size:0.7rem; max-width:120px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">-</span></div>
-                <div class="data-row sub"><span class="lbl">TEMP / MAX</span><span class="val"><span id="t-hTemp">0</span> / <span id="t-hMax">0</span> K</span></div>
+                <!-- Retro Grid -->
+                <div class="map-grid-overlay" style="position: absolute; top:0; left:0; width:100%; height:100%; background: repeating-linear-gradient(0deg, transparent, transparent 19px, rgba(255,255,255,0.05) 20px), repeating-linear-gradient(90deg, transparent, transparent 19px, rgba(255,255,255,0.05) 20px); z-index: 2;"></div>
                 
-                <div class="data-row" style="margin-top:10px;"><span class="lbl">HOTTEST ENG</span><span class="val" id="t-eTemp">0 K</span></div>
-                <div class="data-row"><span class="lbl">SHIELD FLUX</span><span class="val" id="t-flux">0.0 kW</span></div>
+                <!-- Center Crosshairs -->
+                <div class="map-crosshair" style="position: absolute; top:50%; left:50%; width:20px; height:20px; border: 1px solid var(--accent-cyan); transform: translate(-50%, -50%); border-radius:50%; z-index: 5;"></div>
+                <div class="map-crosshair-h" style="position: absolute; top:50%; left:0; width:100%; height:1px; background: rgba(0, 221, 255, 0.2); z-index: 5;"></div>
+                <div class="map-crosshair-v" style="position: absolute; top:0; left:50%; width:1px; height:100%; background: rgba(0, 221, 255, 0.2); z-index: 5;"></div>
+                
+                <!-- Path drawing canvas -->
+                <canvas id="orbit-canvas" style="position: absolute; top:0; left:0; width:100%; height:100%; z-index: 10;"></canvas>
+            </div>
+
+            <!-- 2. Docking Camera Interface -->
+            <div class="docking-cam-box">
+                <div class="cam-overlay">DOCKING-CAM-01 / RAW</div>
+                <div class="cam-bracket cam-tl"></div>
+                <div class="cam-bracket cam-tr"></div>
+                <div class="cam-bracket cam-bl"></div>
+                <div class="cam-bracket cam-br"></div>
+                <div class="cam-noise"></div>
+                <div style="color:var(--text-secondary); font-family:var(--font-header); font-size:0.6rem; letter-spacing:3px;">NO VIDEO SIGNAL</div>
+            </div>
+
+            <!-- 3. GNC Docking HUD -->
+            <div class="gnc-block" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); padding: 8px;">
+                <div class="group-header" style="color:var(--accent-amber); margin-bottom:8px;">GNC TARGETING & DOCKING</div>
+                
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                    <div class="data-group" style="margin-bottom:0;">
+                        <div class="data-row-stylized"><span class="lbl-mini">TGT DIST</span><span class="val-mono" id="gnc-dist" style="color:var(--accent-cyan); font-size:1rem;">--- m</span></div>
+                        <div class="data-row-stylized"><span class="lbl-mini">REL VEL</span><span class="val-mono" id="gnc-rvel" style="color:var(--accent-amber);">--- m/s</span></div>
+                        <div class="data-row-stylized"><span class="lbl-mini">APP RATE</span><span class="val-mono" id="gnc-app">--- m/s</span></div>
+                        <div class="data-row-stylized"><span class="lbl-mini">C.A. DIST</span><span class="val-mono" id="gnc-ca">--- m</span></div>
+                    </div>
+                    
+                    <div class="data-group" style="margin-bottom:0;">
+                        <div class="data-row-stylized"><span class="lbl-mini">ALIGN P</span><span class="val-mono" id="gnc-ap">---&deg;</span></div>
+                        <div class="data-row-stylized"><span class="lbl-mini">ALIGN Y</span><span class="val-mono" id="gnc-ay">---&deg;</span></div>
+                        <div class="data-row-stylized"><span class="lbl-mini">ALIGN R</span><span class="val-mono" id="gnc-ar">---&deg;</span></div>
+                        <div class="data-row-stylized"><span class="lbl-mini">TIME TO</span><span class="val-mono" id="gnc-tca">T- 00:00:00</span></div>
+                    </div>
+                </div>
             </div>
         </section>
 
