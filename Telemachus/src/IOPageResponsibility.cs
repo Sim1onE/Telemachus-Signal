@@ -25,6 +25,20 @@ namespace Telemachus
             string url = request.RawUrl.ToLower();
             if (url.Contains("?")) url = url.Split('?')[0];
 
+            // CLEAN URL ENFORCEMENT: Remove .html from the URL using validated pattern
+            if (url.EndsWith(".html"))
+            {
+                string cleanUrl = url.Substring(0, url.Length - 5);
+                // If it was index.html, remove "index" too
+                if (cleanUrl.EndsWith("/index")) cleanUrl = cleanUrl.Substring(0, cleanUrl.Length - 6);
+                if (string.IsNullOrEmpty(cleanUrl)) cleanUrl = "/";
+                
+                // Follow the project's verified redirect pattern
+                var target = new Uri(request.Url, cleanUrl);
+                response.Redirect(target.ToString());
+                return true;
+            }
+
             // Normalize URL: treat it as relative to Telemachus folder whether or not prefix is present
             string relativePath = url;
             if (relativePath.StartsWith(PAGE_PREFIX)) 
