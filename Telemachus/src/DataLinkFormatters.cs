@@ -235,7 +235,7 @@ namespace Telemachus
                                 Vessel v = sensor.part.vessel;
                                 f = sensor.sensorType.ToString().ToUpperInvariant() switch
                                 {
-                                    "ACC"  => (float)v.geeForce,
+                                    "ACC" => (float)v.geeForce,
                                     "GRAV" => (float)FlightGlobals.getGeeForceAtPosition(v.GetWorldPos3D()).magnitude,
                                     "PRES" => (float)v.staticPressurekPa,
                                     "TEMP" => (float)v.externalTemperature,
