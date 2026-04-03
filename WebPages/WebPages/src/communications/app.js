@@ -63,20 +63,33 @@ class CommunicationsConsole {
 
             // Camera List Response (JSON)
             this.signalLink.on('cameraList', (msg) => {
-                this.cameras = msg.cameras;
+                this.cameras = msg.cameras || [];
                 this.renderCameraList();
                 
+                if (this.cameras.length === 0) {
+                     // v15.09: If server sends empty list, it might be still initializing. Retry.
+                     setTimeout(() => this.signalLink.requestCameraList(), 2000);
+                     return;
+                }
+
                 if (this.selectedCamera) {
                     // v15.08 Recovery: Try to find the same camera by name if server restarts
                     const existing = this.cameras.find(c => c.name === this.selectedCamera.name);
-                    if (existing) this.selectCamera(existing);
-                } else if (this.cameras.length > 0) {
+                    if (existing) {
+                        this.selectCamera(existing);
+                    } else {
+                        // If old selection is gone, pick the first one
+                        this.selectCamera(this.cameras[0]);
+                    }
+                } else {
                     this.selectCamera(this.cameras[0]);
                 }
             });
 
             // Connection Re-established (v15.07)
             this.signalLink.on('open', () => {
+                this.lastFrameTime = Date.now(); // v15.11: Postpone watchdog on reconnect
+                this.updateStatus('loading', 'SYNCING WITH KSP...');
                 if (this.cameraReceiver) {
                     this.cameraReceiver.sync.clear(); // Reset buffers for new epoch
                     if (this.selectedCamera) {
@@ -188,6 +201,7 @@ class CommunicationsConsole {
 
         this.cameraReceiver = new CameraReceiver(this.signalLink, this.cameraFeed, this);
         this.cameraReceiver.start(cam.name);
+        this.lastFrameTime = Date.now(); // v15.11: Reset timeout to allow stream to start
         this.renderCameraList();
     }
 
@@ -245,6 +259,14 @@ class CommunicationsConsole {
                     this.updateStatus('loading', 'BUFFERING/SYNCING...');
                 } else {
                     this.updateStatus('error', 'NO SIGNAL');
+                    
+                    // v15.10 Correction: Only clear list if connection is truly dead. 
+                    // This avoids wiping the UI during initial loading state.
+                    const isDead = !this.signalLink.ws || this.signalLink.ws.readyState !== WebSocket.OPEN;
+                    if (isDead && this.cameras.length > 0) {
+                        this.cameras = [];
+                        this.renderCameraList();
+                    }
                 }
             }
         }, 500);
