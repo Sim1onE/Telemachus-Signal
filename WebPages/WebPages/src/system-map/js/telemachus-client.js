@@ -19,7 +19,8 @@ class Telemachus {
   }
 
   get url() {
-    return `http://${this.host}:${this.port}/telemachus/datalink`;
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    return `${protocol}//${this.host}:${this.port}/telemachus/datalink`;
   }
 
   updateConnection(host, port) {
