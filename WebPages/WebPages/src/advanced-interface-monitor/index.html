@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HOUSTON MISSION CONTROL | DEEP TELEMETRY</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <script src="../js/jquery-1.9.1.min.js"></script>
+    <script src="../js/jKSPWAPICore.js"></script>
+    <script>
+        // Robust path detection for Telemachus datalink
+        var getDatalinkPath = function() {
+            var path = window.location.pathname;
+            if (path.indexOf('/telemachus/') !== -1) {
+                return path.substring(0, path.indexOf('/telemachus/') + 12) + "datalink";
+            }
+            return "../datalink"; // Fallback
+        };
+        var datalinkPath = getDatalinkPath();
+
+        jKSPWAPI.initPoll = function (APIString, preUpdate, postUpdate, rawData) {
+            var requestUrl = datalinkPath + "?" + APIString + "&p=p.paused";
+            var callback = function (response, status) {
+                if (status == "success" && response.p == 0) postUpdate(rawData, response);
+                setTimeout(function () { jKSPWAPI.initPoll(APIString, preUpdate, postUpdate, rawData) }, jKSPWAPI.pollPeriod);
+            };
+            $.get(requestUrl, callback).error(function () {
+                setTimeout(function () { jKSPWAPI.initPoll(APIString, preUpdate, postUpdate, rawData) }, jKSPWAPI.pollPeriod);
+            });
+        };
+        jKSPWAPI.call = function (APIString, postUpdate) { $.get(datalinkPath + "?" + APIString, postUpdate); };
+    </script>
+</head>
+<body>
+    <div class="crt-overlay"></div>
+    <div class="scanlines"></div>
+
+    <main class="dashboard-grid">
+        <!-- COL 1: KINEMATICS & VESSEL ID -->
+        <section class="panel-section">
+            <div class="section-title"><span>VESSEL & KINEMATICS</span><span>C-1</span></div>
+            
+            <div class="data-group" style="padding-bottom: 5px; border-bottom: 1px dashed rgba(255,255,255,0.1)">
+                <h2 id="v-name" style="font-family: var(--font-header); color: var(--accent-cyan); font-size:1.2rem; margin-bottom:5px;">AWAITING SIGNAL</h2>
+                <div class="data-row"><span class="lbl">TYPE</span><span class="val" id="v-type">-</span></div>
+                <div class="data-row"><span class="lbl">SITUATION</span><span class="val" id="v-situation">-</span></div>
+                <div class="data-row"><span class="lbl">MISSION TIME</span><span class="val" id="v-met">00:00:00</span></div>
+                <div class="data-row"><span class="lbl">CREW</span><span class="val" id="v-crewCount">0 / 0</span></div>
+                <div class="data-row sub" id="v-crewNames" style="white-space: pre-wrap;"></div>
+            </div>
+
+            <div class="data-group" style="display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-top:10px;">
+                <div>
+                    <div class="led-row"><span class="led" id="led-landed"></span><span class="led-label">LANDED</span></div>
+                    <div class="led-row"><span class="led" id="led-splashed"></span><span class="led-label">SPLASHED</span></div>
+                </div>
+                <div>
+                    <div class="led-row"><span class="led" id="led-active"></span><span class="led-label">ACTIVE VSL</span></div>
+                    <div class="led-row"><span class="led" id="led-control"></span><span class="led-label">CONTROL</span></div>
+                </div>
+            </div>
+
+            <!-- Instrumentation Bay -->
+            <div class="instrument-bay">
+                <!-- Altitude Meter (Log 0-250km) -->
+                <div class="tape-container alt-meter">
+                    <div class="tape-label">ALT (km)</div>
+                    <div class="tape-vignette"></div>
+                    <div class="tape-track fixed" id="alt-meter-scale">
+                        <div class="meter-tick" style="bottom:0%">0</div>
+                        <div class="meter-tick" style="bottom:55%">1</div>
+                        <div class="meter-tick" style="bottom:74%">10</div>
+                        <div class="meter-tick" style="bottom:92%">100</div>
+                        <div class="meter-tick" style="bottom:98.5%">250</div>
+                    </div>
+                    <div class="meter-pointer" id="alt-pointer"></div>
+                    <div class="tape-digital" id="v-alt">0.0</div>
+                </div>
+
+                <!-- Central Data Column -->
+                <div class="center-instrument-data">
+                    <div class="data-group">
+                        <div class="group-header">COORDINATES</div>
+                        <div class="data-row-stylized"><span class="lbl-mini">LAT</span><span class="val-mono" id="v-lat">0.000</span></div>
+                        <div class="data-row-stylized"><span class="lbl-mini">LON</span><span class="val-mono" id="v-lon">0.000</span></div>
+                    </div>
+                    <div class="data-group">
+                        <div class="group-header">AERO & SURF</div>
+                        <div class="data-row-stylized"><span class="lbl-mini">MACH</span><span class="val-mono" id="v-mach">M 0.00</span></div>
+                        <div class="data-row-stylized"><span class="lbl-mini">HGT.T</span><span class="val-mono" id="v-hgt-terr">0.0</span></div>
+                        <div class="data-row-stylized"><span class="lbl-mini">HGT.S</span><span class="val-mono" id="v-hgt-surf">0.0</span></div>
+                    </div>
+                </div>
+
+                <!-- Speed Meter (Log 0-3km/s) -->
+                <div class="tape-container spd-meter">
+                    <div class="tape-label">SPD (m/s)</div>
+                    <div class="tape-vignette"></div>
+                    <div class="tape-track fixed" id="spd-meter-scale">
+                        <div class="meter-tick" style="bottom:0%">0</div>
+                        <div class="meter-tick" style="bottom:30%">10</div>
+                        <div class="meter-tick" style="bottom:58%">100</div>
+                        <div class="meter-tick" style="bottom:86%">1k</div>
+                        <div class="meter-tick" style="bottom:98.5%">3k</div>
+                    </div>
+                    <div class="meter-pointer" id="spd-pointer"></div>
+                    <div class="tape-digital" id="v-srfSpd">0.0</div>
+                </div>
+            </div>
+
+            <!-- Vector Cluster (XYZ Colored) -->
+            <div class="vector-cluster">
+                <div class="group-header">VELOCITY VECTORS (X, Y, Z)</div>
+                <div class="vector-grid">
+                    <div class="vector-set">
+                        <div class="v-label">ORBITAL</div>
+                        <div class="v-bar"><div class="v-fill v-x" id="bar-obtx"></div><span id="v-obt-x">0</span></div>
+                        <div class="v-bar"><div class="v-fill v-y" id="bar-obty"></div><span id="v-obt-y">0</span></div>
+                        <div class="v-bar"><div class="v-fill v-z" id="bar-obtz"></div><span id="v-obt-z">0</span></div>
+                        <div class="v-total">TOTAL: <span id="v-obt-mag" style="color:var(--accent-cyan)">0.0</span> m/s</div>
+                    </div>
+                    <div class="vector-set">
+                        <div class="v-label">SURFACE</div>
+                        <div class="v-bar"><div class="v-fill v-x" id="bar-srfx"></div><span id="v-srf-x">0</span></div>
+                        <div class="v-bar"><div class="v-fill v-y" id="bar-srfy"></div><span id="v-srf-y">0</span></div>
+                        <div class="v-bar"><div class="v-fill v-z" id="bar-srfz"></div><span id="v-srf-z">0</span></div>
+                        <div class="v-total">TOTAL: <span id="v-srf-mag" style="color:var(--accent-cyan)">0.0</span> m/s</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="data-group">
+                <div class="group-header">ATTITUDE (ROOT / RAW)</div>
+                <div class="data-row"><span class="lbl">HEADING</span><span class="val"><span id="n-head">0</span>&deg; <span style="font-size:0.6rem;opacity:0.6" id="n-rhead">(0)</span></span></div>
+                <div class="data-row"><span class="lbl">PITCH</span><span class="val"><span id="n-pitch">0</span>&deg; <span style="font-size:0.6rem;opacity:0.6" id="n-rpitch">(0)</span></span></div>
+                <div class="data-row"><span class="lbl">ROLL</span><span class="val"><span id="n-roll">0</span>&deg; <span style="font-size:0.6rem;opacity:0.6" id="n-rroll">(0)</span></span></div>
+            </div>
+
+            <!-- Signal & Sun Header -->
+            <div class="signal-status-box">
+                <div class="group-header">SIGNAL & LINK STATUS</div>
+                <div class="signal-grid">
+                    <div class="signal-bar-matrix">
+                        <div class="sig-lvl" id="sig-bar-1"></div>
+                        <div class="sig-lvl" id="sig-bar-2"></div>
+                        <div class="sig-lvl" id="sig-bar-3"></div>
+                        <div class="sig-lvl" id="sig-bar-4"></div>
+                        <div class="sig-lvl" id="sig-bar-5"></div>
+                    </div>
+                    <div class="signal-info">
+                        <div class="sig-row"><span class="lbl-small">STRENGTH</span><span class="val-mono" id="comm-str">0%</span></div>
+                        <div class="sig-row"><span class="lbl-small">STATE</span><span class="val-mono" id="comm-state">REFLECTED</span></div>
+                        <div class="sig-row"><span class="lbl-small">TRANSMIT</span><span class="val-mono" id="comm-tx">OFF</span></div>
+                        <div class="sig-row latency"><span class="lbl-small">LATENCY</span><span class="val-mono" id="comm-delay">0.00s</span></div>
+                    </div>
+                </div>
+                <!-- Sun Indicator -->
+                <div class="sun-indicator" id="v-sun-indicator">
+                    <div class="sun-label">SOLAR EXPOSURE</div>
+                    <div class="sun-led" id="led-sun"></div>
+                </div>
+            </div>
+            
+
+
+        </section>
+
+        <!-- COL 2: SENSORS & SCIENCE -->
+        <section class="panel-section">
+            <div class="section-title"><span>SENSORS & LIFE SUPPORT</span><span>C-2</span></div>
+            
+            <div class="data-group">
+                <div class="group-header">SCIENCE SUITE</div>
+                <div class="data-row"><span class="lbl">EXPERIMENTS</span><span class="val" id="sci-count" style="color:var(--accent-blue)">0</span></div>
+                <div class="data-row"><span class="lbl">DATA ABOARD</span><span class="val" id="sci-data">0.0 Mits</span></div>
+            </div>
+
+            <div class="data-group">
+                <div class="group-header">LOCAL SENSORS</div>
+                <div class="data-row"><span class="lbl">TEMP</span><span class="val" id="s-temp">0.0 K</span></div>
+                <div class="data-row"><span class="lbl">PRES</span><span class="val" id="s-pres">0.0 kPa</span></div>
+                <div class="data-row"><span class="lbl">GRAV</span><span class="val" id="s-grav">0.0 m/s&sup2;</span></div>
+                <div class="data-row"><span class="lbl">ACCEL</span><span class="val" id="s-acc">0.0 g</span></div>
+            </div>
+
+            <div class="data-group" style="margin-top: 20px;">
+                <div class="group-header" style="color:var(--accent-green)">KERBALISM LIFE SUPPORT</div>
+                <div class="data-row"><span class="lbl">HAB VOLUME</span><span class="val" id="k-vol">0.0 m&sup3;</span></div>
+                <div class="data-row"><span class="lbl">PRESSURE</span><span class="val" id="k-pres">0.00 atm</span></div>
+                <div class="bar-container" style="margin:8px 0;"><div class="bar-lbl">CO2 POIS.</div><div class="bar-outer"><div class="bar-inner b-mp" id="b-co2"></div></div><div class="bar-val" id="v-co2">0%</div></div>
+                <div class="data-row"><span class="lbl">SHIELDING</span><span class="val" id="k-shield">0%</span></div>
+                <div class="data-row"><span class="lbl">COMFORT</span><span class="val" id="k-comf">0.0</span></div>
+                <div class="data-row" style="margin-top:10px;"><span class="lbl">EXT RADIATION</span><span class="val" id="k-rad">0.0 rad/h</span></div>
+                
+                <div class="led-row" style="margin-top:10px;"><span class="led" id="led-storm"></span><span class="led-label">STELLAR STORM</span></div>
+            </div>
+
+            <div class="data-group">
+                <div class="group-header">CREW HEALTH SUMMARY</div>
+                <div id="crew-health-list" style="font-size:0.75rem;">(NO CREW)</div>
+            </div>
+
+            <div class="data-group" style="margin-top:20px;">
+                <div class="group-header" style="color:var(--accent-magenta)">COMPUTER DRIVES & LINK</div>
+                <div class="bar-container"><div class="bar-lbl">DRIVE</div><div class="bar-outer"><div class="bar-inner b-ox" id="b-drive"></div></div><div class="bar-val" id="v-drive">0%</div></div>
+                <div class="data-row sub"><span class="lbl">FREE / CAP</span><span class="val"><span id="k-drFree">0</span> / <span id="k-drCap">0</span> MB</span></div>
+                <div class="data-row"><span class="lbl">DATA RATE</span><span class="val" id="k-drRate">0 MB/s</span></div>
+                <div class="data-row"><span class="lbl">FILES XMIT</span><span class="val" id="k-xmit">0</span></div>
+            </div>
+
+            <div class="data-group" style="margin-top:20px;">
+                <div class="group-header" style="color:var(--accent-red)">THERMAL CORE</div>
+                <div class="led-row" style="margin-bottom:8px;"><span class="led" id="led-overheat"></span><span class="led-label">ENGINE OVERHEAT (>90%)</span></div>
+                <div class="data-row"><span class="lbl">HOTTEST PRT</span><span class="val" id="t-hName" style="color:var(--accent-amber); font-size:0.7rem; max-width:120px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">-</span></div>
+                <div class="data-row sub"><span class="lbl">TEMP / MAX</span><span class="val"><span id="t-hTemp">0</span> / <span id="t-hMax">0</span> K</span></div>
+                
+                <div class="data-row" style="margin-top:10px;"><span class="lbl">HOTTEST ENG</span><span class="val" id="t-eTemp">0 K</span></div>
+                <div class="data-row"><span class="lbl">SHIELD FLUX</span><span class="val" id="t-flux">0.0 kW</span></div>
+            </div>
+        </section>
+
+        <!-- COL 3: PROPULSION -->
+        <section class="panel-section">
+            <div class="section-title"><span>PROPULSION & THRUST</span><span>C-3</span></div>
+
+            <div class="data-group" style="padding-bottom:10px; border-bottom:1px solid var(--border-color); margin-bottom:10px;">
+                <div class="group-header">RESOURCE LEVELS</div>
+                <div class="bar-container"><div class="bar-lbl">LIQ</div><div class="bar-outer"><div class="bar-inner b-liq" id="b-liq"></div></div><div class="bar-val" id="v-liq">0</div></div>
+                <div class="bar-container"><div class="bar-lbl">OXI</div><div class="bar-outer"><div class="bar-inner b-ox" id="b-ox"></div></div><div class="bar-val" id="v-ox">0</div></div>
+                <div class="bar-container"><div class="bar-lbl">SOL</div><div class="bar-outer"><div class="bar-inner b-sol" id="b-sol"></div></div><div class="bar-val" id="v-sol">0</div></div>
+                <div class="bar-container"><div class="bar-lbl">MONO</div><div class="bar-outer"><div class="bar-inner b-mp" id="b-mp"></div></div><div class="bar-val" id="v-mp">0</div></div>
+                <div class="bar-container"><div class="bar-lbl">XENO</div><div class="bar-outer"><div class="bar-inner b-xe" id="b-xe"></div></div><div class="bar-val" id="v-xe">0</div></div>
+                <div class="bar-container"><div class="bar-lbl">ELEC</div><div class="bar-outer"><div class="bar-inner b-ec" id="b-ec"></div></div><div class="bar-val" id="v-ec">0</div></div>
+            </div>
+
+            <div class="propulsion-area">
+                <div class="throttle-box">
+                    <div style="font-size:0.5rem; color:var(--text-secondary); writing-mode:vertical-rl; text-orientation:mixed; transform:rotate(180deg)">THROTTLE</div>
+                    <div class="throttle-analog">
+                        <div class="throttle-fill" id="throttle-fill"></div>
+                    </div>
+                    <div class="throttle-read" id="throttle-read">0%</div>
+                </div>
+
+                <div class="stage-area">
+                    <div class="group-header">STAGING PERFORMANCE (0&rarr;N)</div>
+                    <div id="stage-stack" class="stage-stack">
+                        <div style="text-align:center; color:var(--text-secondary); font-size:0.8rem; margin-top:20px;">INIT DV CALCULATOR...</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="main-footer">
+        <div id="footer-conn">LINK STANDBY</div>
+        <div id="footer-ut">UT: 0y, 0d, 00:00:00</div>
+        <div>HOUSTON-MCC-ADV</div>
+    </footer>
+    
+    <script src="monitor.js"></script>
+</body>
+</html>
