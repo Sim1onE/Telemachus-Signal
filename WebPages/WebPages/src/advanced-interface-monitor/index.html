@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HOUSTON MISSION CONTROL | ADVANCED MONITOR</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <script src="../js/jquery-1.9.1.min.js"></script>
+    <script src="../js/jKSPWAPICore.js"></script>
+    <script>
+        // Patch jKSPWAPI to work from a subdirectory
+        jKSPWAPI.initPoll = function (APIString, preUpdate, postUpdate, rawData) {
+            APIString = "../datalink?" + APIString + "&p=p.paused";
+            var callback = function (response, status) {
+                if (status == "success" && response.p == 0) {
+                    postUpdate(rawData, response);
+                }
+                setTimeout(function () { jKSPWAPI.initPoll(APIString.split('?')[1].split('&p=')[0], preUpdate, postUpdate, rawData) }, jKSPWAPI.pollPeriod);
+            };
+            $.get(APIString, callback).error(function () {
+                setTimeout(function () { jKSPWAPI.initPoll(APIString.split('?')[1].split('&p=')[0], preUpdate, postUpdate, rawData) }, jKSPWAPI.pollPeriod);
+            });
+        };
+        jKSPWAPI.call = function (APIString, postUpdate) {
+            $.get("../datalink?" + APIString, postUpdate);
+        };
+    </script>
+</head>
+<body>
+    <div class="crt-overlay"></div>
+    <div class="scanlines"></div>
+
+    <header class="main-header">
+        <div class="vessel-info">
+            <h1 id="v-name">CONNECTING...</h1>
+            <div class="mission-timer" id="v-missionTime">MET: 00:00:00</div>
+        </div>
+        <div class="system-status">
+            <div id="v-situation" class="status-indicator">STANDBY</div>
+            <div id="kerbalism-connection" class="status-indicator connection">NO LINK</div>
+            <div id="p-paused" class="status-indicator connection" style="display:none; background:rgba(255,165,0,0.2); color:orange;">PAUSED</div>
+        </div>
+    </header>
+
+    <main class="dashboard-grid">
+        <!-- COLUMN 1: PLATFORM & MASS -->
+        <section class="panel-section">
+            <h2 class="section-title">SHIP SYSTEMS <span>COL-01</span></h2>
+            
+            <div class="telemetry-group">
+                <div class="group-header">Vessel Performance</div>
+                <div class="telemetry-row"><span class="label">THRUST</span><span class="value" id="v-thrust">0.00 kN</span></div>
+                <div class="telemetry-row"><span class="label">ISP</span><span class="value" id="v-isp">0.0 s</span></div>
+                <div class="telemetry-row"><span class="label">TOTAL TWR</span><span class="value accent-amber" id="v-twr">0.00</span></div>
+                <div class="telemetry-row"><span class="label">G-FORCE</span><span class="value" id="v-geeForce">1.00 G</span></div>
+            </div>
+
+            <div class="telemetry-group">
+                <div class="group-header">Vessel Mass Breakdown</div>
+                <div class="mass-breakdown-container">
+                    <div class="mass-bar-outer" id="mass-bar">
+                        <div id="seg-dry" class="mass-segment dry" style="width: 70%"></div>
+                        <div id="seg-liquid" class="mass-segment liquid" style="width: 20%"></div>
+                        <div id="seg-solid" class="mass-segment solid" style="width: 10%"></div>
+                    </div>
+                    <div class="mass-legend">
+                        <div class="legend-item"><div class="dot dry"></div><span>DRY: <span id="val-dry">0</span>t</span></div>
+                        <div class="legend-item"><div class="dot liquid"></div><span>LIQ: <span id="val-liquid">0</span>t</span></div>
+                        <div class="legend-item"><div class="dot solid"></div><span>SOL: <span id="val-solid">0</span>t</span></div>
+                    </div>
+                    <div class="telemetry-row" style="margin-top:10px;"><span class="label">TOTAL MASS</span><span class="value" id="v-mass">0.00 t</span></div>
+                </div>
+            </div>
+
+            <div class="telemetry-group">
+                <div class="group-header">Auxiliary Resources</div>
+                <div class="resource-block">
+                    <div class="res-meta"><span>MONOPROP</span><span id="val-mp">0.0</span></div>
+                    <div class="res-bar-outer" style="height:6px;"><div id="bar-mp" class="res-bar-inner mp" style="background:var(--accent-yellow)"></div></div>
+                </div>
+                <div class="resource-block" style="margin-top:10px;">
+                    <div class="res-meta"><span>XENON</span><span id="val-xe">0.0</span></div>
+                    <div class="res-bar-outer" style="height:6px;"><div id="bar-xe" class="res-bar-inner mp" style="background:var(--accent-blue)"></div></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- COLUMN 2: NAV & PAYLOAD -->
+        <section class="panel-section">
+            <h2 class="section-title">NAV & PAYLOAD <span>COL-02</span></h2>
+            
+            <div class="nav-gauges">
+                <div class="gauge-box"><span class="gauge-val" id="n-pitch">0°</span><span class="gauge-label">PITCH</span></div>
+                <div class="gauge-box"><span class="gauge-val" id="n-roll">0°</span><span class="gauge-label">ROLL</span></div>
+                <div class="gauge-box"><span class="gauge-val" id="n-heading">0°</span><span class="gauge-label">HEADING</span></div>
+            </div>
+
+            <div class="telemetry-group">
+                <div class="group-header">Thermal Status</div>
+                <div class="telemetry-row"><span class="label">HOTTEST PART</span><span class="value" id="therm-hottestName" style="font-size:0.7rem; color:var(--accent-amber)">-</span></div>
+                <div class="telemetry-row"><span class="label">TEMP (K)</span><span class="value" id="therm-hottestTemp">0 K</span></div>
+                <div class="telemetry-row"><span class="label">RATIO</span><span class="value" id="therm-hottestRatio">0%</span></div>
+                <div class="telemetry-row"><span class="label">SHIELD FLUX</span><span class="value" id="therm-shieldFlux">0.0 kW</span></div>
+            </div>
+
+            <div class="telemetry-group">
+                <div class="group-header">Environmental Science</div>
+                <div class="telemetry-row"><span class="label">EXT. TEMP</span><span class="value" id="v-extTemp">0 K</span></div>
+                <div class="telemetry-row"><span class="label">RADIATION</span><span class="value" id="k-envRad">0.0 rad/h</span></div>
+                <div class="telemetry-row"><span class="label">STELLAR ACT.</span><span class="value" id="k-stellarAct">0.00</span></div>
+            </div>
+
+            <div class="telemetry-group">
+                <div class="group-header">Habitat & Crew</div>
+                <div id="crew-list"></div>
+                <div class="telemetry-row" style="margin-top:10px;"><span class="label">PRESSURE</span><span class="value" id="k-habPres">0.0 atm</span></div>
+                <div class="telemetry-row"><span class="label">CO2 LEVEL</span><span class="value" id="k-co2">0.00%</span></div>
+            </div>
+        </section>
+
+        <!-- COLUMN 3: STAGING PERFORMANCE -->
+        <section class="panel-section">
+            <h2 class="section-title">STAGING PERFORMANCE <span>COL-03</span></h2>
+            
+            <div id="stage-list" class="stage-stack">
+                <div class="stage-placeholder" style="color:var(--text-secondary); font-size:0.7rem; text-align:center;">INITIALIZING STAGE DATA...</div>
+            </div>
+
+            <div class="telemetry-group" style="margin-top:20px;">
+                <div class="group-header">Landing Computer</div>
+                <div class="telemetry-row"><span class="label">TO IMPACT</span><span class="value accent-red" id="land-time">0.0 s</span></div>
+                <div class="telemetry-row"><span class="label">SUICIDE BURN</span><span class="value" id="land-suicide">0.0 s</span></div>
+                <div class="telemetry-row"><span class="label">SLOPE</span><span class="value" id="land-slope">0.0°</span></div>
+                <div id="land-coords" style="font-size:0.7rem; color:var(--text-secondary); text-align:right;">0.00°N, 0.00°E</div>
+            </div>
+
+            <div class="telemetry-group">
+                <div class="group-header">Data Link</div>
+                <div class="telemetry-row"><span class="label">STRENGTH</span><span class="value" id="comm-strength">0%</span></div>
+                <div class="telemetry-row"><span class="label">DELAY</span><span class="value" id="comm-delay">0.00s</span></div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="main-footer">
+        <div id="footer-vessel">CONNECTED TO DATA STREAM</div>
+        <div id="footer-ut">UT: 0y, 0d, 00:00:00</div>
+        <div>STATION: HOUSTON-MCC-1</div>
+    </footer>
+
+    <script src="monitor.js"></script>
+</body>
+</html>
