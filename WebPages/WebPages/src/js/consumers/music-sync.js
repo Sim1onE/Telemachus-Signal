@@ -8,6 +8,8 @@ class MusicSync {
         this.currentTrack = null;
         this.audio = new Audio();
         this.isPlaying = false;
+        
+        // v16.130: Real Mute vs Pause. We start muted (browser policy).
         this.isMuted = true;
         this.syncThreshold = 10.0; 
         
@@ -29,10 +31,15 @@ class MusicSync {
         const savedVol = localStorage.getItem('music-volume');
         this.audio.volume = savedVol !== null ? parseFloat(savedVol) : 0.5;
         if (this.elements.volume) this.elements.volume.value = this.audio.volume;
+        
+        // Finalize audio mute state
+        this.audio.muted = this.isMuted;
 
         window.addEventListener('click', () => {
-            if (this.audio.paused && this.isPlaying && !this.isMuted) {
-                this.audio.play().catch(e => console.warn("[MusicSync] Manual Activation failed:", e));
+            // v16.131: Initial activation. If game is already playing, start audio.
+            if (this.audio.paused && this.isPlaying) {
+                console.log("[MusicSync] Browser Unlocked: Attempting play.");
+                this.audio.play().catch(() => {});
             }
         }, { once: true });
 
@@ -50,9 +57,7 @@ class MusicSync {
         };
 
         this.audio.onerror = (e) => {
-            // v16.115: Enhanced error reporting for discovery
             const trackName = this.currentTrack ? this.currentTrack.split('/').pop().toUpperCase() : 'UNKNOWN';
-            console.error(`[MusicSync] MISSING AUDIO: No file found for "${trackName}" at ${this.audio.src}`);
             this.showError(`MISSING: ${trackName}`);
         };
 
@@ -87,7 +92,7 @@ class MusicSync {
         this.elements.name = this.widget.querySelector('#music-name');
         this.elements.toggle = this.widget.querySelector('#music-toggle');
         this.elements.volume = this.widget.querySelector('#music-volume');
-        this.elements.icon = this.elements.toggle.querySelector('.icon');
+        this.elements.icon = this.elements.toggle ? this.elements.toggle.querySelector('.icon') : null;
         
         if (this.elements.toggle) {
             this.elements.toggle.onclick = () => this.toggleMute();
@@ -112,18 +117,22 @@ class MusicSync {
     }
 
     toggleMute() {
+        // v16.132: Logic change - Mute should NOT pause. 
+        // It should just allow/deny output so it stays in sync in the background.
         this.isMuted = !this.isMuted;
+        this.audio.muted = this.isMuted;
+
         if (this.isMuted) {
-            this.audio.pause();
             this.elements.icon.textContent = '🔇';
             this.elements.toggle.classList.add('muted');
-            this.widget.classList.remove('playing');
+            // We DON'T call pause() here anymore.
         } else {
             this.elements.icon.textContent = '🔊';
             this.elements.toggle.classList.remove('muted');
-            if (this.isPlaying) {
+            
+            // If it WAS paused (e.g. initial load), start it now.
+            if (this.audio.paused && this.isPlaying) {
                 this.audio.play().catch(() => {});
-                this.widget.classList.add('playing');
             }
         }
     }
@@ -148,21 +157,24 @@ class MusicSync {
 
         this.isPlaying = isPlaying;
 
-        if (!this.isMuted) {
-            if (this.isPlaying) {
-                if (this.audio.paused && this.audio.src) {
-                    this.audio.play().then(() => this.widget.classList.add('playing')).catch(() => {});
-                }
-            } else if (!this.audio.paused) {
-                this.audio.pause();
-                this.widget.classList.remove('playing');
+        // v16.133: Playback control based EXCLUSIVELY on game status, not local mute.
+        if (this.isPlaying) {
+            if (this.audio.paused && this.audio.src) {
+                this.audio.play().then(() => this.widget.classList.add('playing')).catch(() => {});
+            } else {
+                this.widget.classList.add('playing');
             }
+        } else if (!this.audio.paused) {
+            this.audio.pause();
+            this.widget.classList.remove('playing');
+        }
 
-            if (this.isPlaying && this.audio.readyState >= 2) {
-                const diff = Math.abs(this.audio.currentTime - time);
-                if (diff > this.syncThreshold) {
-                    this.audio.currentTime = time + 0.2;
-                }
+        // Sync Time
+        if (this.isPlaying && this.audio.readyState >= 2) {
+            const diff = Math.abs(this.audio.currentTime - time);
+            if (diff > this.syncThreshold) {
+                console.log(`[MusicSync] Re-syncing offset: ${diff.toFixed(2)}s`);
+                this.audio.currentTime = time + 0.2;
             }
         }
     }
@@ -179,16 +191,15 @@ class MusicSync {
 
     loadTrack(name, startTime) {
         let filename = name.split('/').pop();
-        if (!filename.toLowerCase().endsWith('.mp3')) {
-            filename += '.mp3';
-        }
+        if (!filename.toLowerCase().endsWith('.mp3')) filename += '.mp3';
         
         const finalUrl = `${this.audioPath}${encodeURIComponent(filename)}`;
         this.audio.src = finalUrl;
         this.pendingSeekTime = startTime + 0.2;
         this.audio.load();
         
-        if (!this.isMuted && this.isPlaying) {
+        // Start playing immediately if game is playing (muted status doesn't block play() anymore)
+        if (this.isPlaying) {
             this.audio.play().catch(() => {});
         }
     }
