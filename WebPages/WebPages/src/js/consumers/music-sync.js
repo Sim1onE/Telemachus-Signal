@@ -8,10 +8,10 @@ class MusicSync {
         this.currentTrack = null;
         this.audio = new Audio();
         this.isPlaying = false;
-        
-        // v16.130: Real Mute vs Pause. We start muted (browser policy).
         this.isMuted = true;
-        this.syncThreshold = 10.0; 
+        
+        // v16.140: Sync precision increased to 1.5s for tighter musical alignment.
+        this.syncThreshold = 1.5; 
         
         this.widget = null;
         this.elements = {};
@@ -31,12 +31,9 @@ class MusicSync {
         const savedVol = localStorage.getItem('music-volume');
         this.audio.volume = savedVol !== null ? parseFloat(savedVol) : 0.5;
         if (this.elements.volume) this.elements.volume.value = this.audio.volume;
-        
-        // Finalize audio mute state
         this.audio.muted = this.isMuted;
 
         window.addEventListener('click', () => {
-            // v16.131: Initial activation. If game is already playing, start audio.
             if (this.audio.paused && this.isPlaying) {
                 console.log("[MusicSync] Browser Unlocked: Attempting play.");
                 this.audio.play().catch(() => {});
@@ -48,7 +45,7 @@ class MusicSync {
                 this.audio.currentTime = this.pendingSeekTime;
                 const target = this.pendingSeekTime;
                 setTimeout(() => {
-                    if (Math.abs(this.audio.currentTime - target) > 1.0) {
+                    if (Math.abs(this.audio.currentTime - target) > 0.5) {
                         this.audio.currentTime = target;
                     }
                     this.pendingSeekTime = -1;
@@ -117,20 +114,14 @@ class MusicSync {
     }
 
     toggleMute() {
-        // v16.132: Logic change - Mute should NOT pause. 
-        // It should just allow/deny output so it stays in sync in the background.
         this.isMuted = !this.isMuted;
         this.audio.muted = this.isMuted;
-
         if (this.isMuted) {
             this.elements.icon.textContent = '🔇';
             this.elements.toggle.classList.add('muted');
-            // We DON'T call pause() here anymore.
         } else {
             this.elements.icon.textContent = '🔊';
             this.elements.toggle.classList.remove('muted');
-            
-            // If it WAS paused (e.g. initial load), start it now.
             if (this.audio.paused && this.isPlaying) {
                 this.audio.play().catch(() => {});
             }
@@ -157,7 +148,6 @@ class MusicSync {
 
         this.isPlaying = isPlaying;
 
-        // v16.133: Playback control based EXCLUSIVELY on game status, not local mute.
         if (this.isPlaying) {
             if (this.audio.paused && this.audio.src) {
                 this.audio.play().then(() => this.widget.classList.add('playing')).catch(() => {});
@@ -169,7 +159,7 @@ class MusicSync {
             this.widget.classList.remove('playing');
         }
 
-        // Sync Time
+        // v16.141: Sync Time with new 1.5s tolerance
         if (this.isPlaying && this.audio.readyState >= 2) {
             const diff = Math.abs(this.audio.currentTime - time);
             if (diff > this.syncThreshold) {
@@ -192,13 +182,10 @@ class MusicSync {
     loadTrack(name, startTime) {
         let filename = name.split('/').pop();
         if (!filename.toLowerCase().endsWith('.mp3')) filename += '.mp3';
-        
         const finalUrl = `${this.audioPath}${encodeURIComponent(filename)}`;
         this.audio.src = finalUrl;
         this.pendingSeekTime = startTime + 0.2;
         this.audio.load();
-        
-        // Start playing immediately if game is playing (muted status doesn't block play() anymore)
         if (this.isPlaying) {
             this.audio.play().catch(() => {});
         }

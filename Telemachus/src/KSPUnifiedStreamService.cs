@@ -407,7 +407,7 @@ namespace Telemachus
             var status = MusicHandler.Instance.GetCurrentStatus();
             double now = Planetarium.GetUniversalTime();
 
-            // v16.81: Event-driven only. Stop sending every second to prevent client sync loops.
+            // v16.145: Strictly event-driven only. No redundant heartbeats.
             bool changed = status.name != _lastSoundtrackName || status.isPlaying != _lastSoundtrackPlaying;
 
             if (changed)
