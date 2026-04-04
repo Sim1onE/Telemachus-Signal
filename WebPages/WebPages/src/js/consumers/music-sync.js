@@ -25,7 +25,11 @@ class MusicSync {
     init() {
         this.bindElements();
         this.audio.loop = false; 
-        this.audio.volume = 0.5;
+        
+        // Load saved volume (v16.101)
+        const savedVol = localStorage.getItem('music-volume');
+        this.audio.volume = savedVol !== null ? parseFloat(savedVol) : 0.5;
+        if (this.elements.volume) this.elements.volume.value = this.audio.volume;
 
         window.addEventListener('click', () => {
             if (this.audio.paused && this.isPlaying && !this.isMuted) {
@@ -34,20 +38,13 @@ class MusicSync {
             }
         }, { once: true });
 
-        // v16.71: Handle deferred seeking when metadata is loaded
         this.audio.oncanplay = () => {
             if (this.pendingSeekTime >= 0) {
-                console.log(`[MusicSync] oncanplay: Attempting seek to: ${this.pendingSeekTime.toFixed(2)}s`);
-                
-                // Try to set current time
                 this.audio.currentTime = this.pendingSeekTime;
                 
-                // Verify seek in next tick (v16.100)
                 const target = this.pendingSeekTime;
                 setTimeout(() => {
-                    console.log(`[MusicSync] Seek Verify: Current Time is ${this.audio.currentTime.toFixed(2)}s (Target was ${target.toFixed(2)}s)`);
                     if (Math.abs(this.audio.currentTime - target) > 1.0) {
-                        console.warn("[MusicSync] Seek failed or ignored. Forcing again...");
                         this.audio.currentTime = target;
                     }
                     this.pendingSeekTime = -1;
@@ -87,9 +84,20 @@ class MusicSync {
         if (!this.widget) return;
         this.elements.name = this.widget.querySelector('#music-name');
         this.elements.toggle = this.widget.querySelector('#music-toggle');
+        this.elements.volume = this.widget.querySelector('#music-volume');
         this.elements.icon = this.elements.toggle.querySelector('.icon');
+        
         if (this.elements.toggle) {
             this.elements.toggle.onclick = () => this.toggleMute();
+        }
+
+        // v16.102: Volume slider handling
+        if (this.elements.volume) {
+            this.elements.volume.oninput = (e) => {
+                const vol = parseFloat(e.target.value);
+                this.audio.volume = vol;
+                localStorage.setItem('music-volume', vol);
+            };
         }
     }
 
@@ -120,7 +128,6 @@ class MusicSync {
 
     handleMetadata(msg) {
         const { name, time, isPlaying } = msg;
-        console.log(`[MusicSync] Metadata: ${name} at ${time.toFixed(2)}s (Playing: ${isPlaying})`);
 
         if (name && (name.toLowerCase() === 'radiosilence' || name.toLowerCase() === 'none')) {
             this.stopPlayback();
@@ -151,7 +158,6 @@ class MusicSync {
             if (this.isPlaying && this.audio.readyState >= 2) {
                 const diff = Math.abs(this.audio.currentTime - time);
                 if (diff > this.syncThreshold) {
-                    console.log(`[MusicSync] Manual Resync requested: Offset ${diff.toFixed(2)}s`);
                     this.audio.currentTime = time + 0.2;
                 }
             }
@@ -171,12 +177,9 @@ class MusicSync {
     loadTrack(name, startTime) {
         let filename = name.split('/').pop();
         if (!filename.toLowerCase().endsWith('.mp3')) filename += '.mp3';
-        
-        console.log(`[MusicSync] Loading: ${this.audioPath}${filename}`);
         this.audio.src = `${this.audioPath}${filename}`;
         this.pendingSeekTime = startTime + 0.2;
         this.audio.load();
-        
         if (!this.isMuted && this.isPlaying) {
             this.audio.play().catch(() => {});
         }

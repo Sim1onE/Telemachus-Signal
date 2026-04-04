@@ -165,6 +165,44 @@ header {
     transition: var(--transition);
 }
 
+.music-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.music-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 80px;
+    height: 3px;
+    background: rgba(0, 255, 208, 0.15);
+    border-radius: 2px;
+    outline: none;
+}
+
+.music-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent-color);
+    box-shadow: 0 0 5px var(--accent-glow);
+    cursor: pointer;
+    border: none;
+}
+
+.music-slider::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent-color);
+    box-shadow: 0 0 5px var(--accent-glow);
+    cursor: pointer;
+    border: none;
+}
+
 .music-btn:hover {
     background: var(--accent-glow);
     box-shadow: 0 0 10px var(--accent-glow);

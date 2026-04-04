@@ -24,9 +24,12 @@
                     <div class="bar"></div>
                 </div>
             </div>
-            <button id="music-toggle" class="music-btn muted" title="Toggle Soundtrack">
-                <span class="icon">🔇</span>
-            </button>
+            <div class="music-controls">
+                <input type="range" id="music-volume" class="music-slider" min="0" max="1" step="0.01" value="0.5" title="Music Volume">
+                <button id="music-toggle" class="music-btn muted" title="Toggle Soundtrack">
+                    <span class="icon">🔇</span>
+                </button>
+            </div>
         </div>
 
         <div class="telemetry-bar">

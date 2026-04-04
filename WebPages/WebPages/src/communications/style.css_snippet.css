@@ -1,0 +1,53 @@
+
+.music-btn {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--accent-color);
+    cursor: pointer;
+    width: 40px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    transition: var(--transition);
+}
+
+.music-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.music-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 80px;
+    height: 3px;
+    background: rgba(0, 255, 208, 0.15);
+    border-radius: 2px;
+    outline: none;
+}
+
+.music-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent-color);
+    box-shadow: 0 0 5px var(--accent-glow);
+    cursor: pointer;
+    border: none;
+}
+
+.music-slider::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent-color);
+    box-shadow: 0 0 5px var(--accent-glow);
+    cursor: pointer;
+    border: none;
+}
