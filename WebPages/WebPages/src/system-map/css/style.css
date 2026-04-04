@@ -303,6 +303,7 @@ html {
     gap: 4px;
 }
 
+
 .placement-controls .custom-input {
     background: rgba(0, 0, 0, 0.4);
     border: 1px solid var(--border-color);
@@ -312,4 +313,58 @@ html {
     padding: 2px 5px;
     text-align: center;
     outline: none;
+}
+
+/* Tactical Scanner Styles */
+.tab-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #666;
+    padding: 4px 0;
+    font-size: 0.6rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tab-btn.active {
+    background: rgba(255, 0, 255, 0.15);
+    border-color: #ff00ff;
+    color: #ff00ff;
+}
+
+.target-btn {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #ccc;
+    padding: 5px;
+    font-size: 0.55rem;
+    cursor: pointer;
+    text-align: center;
+}
+
+.target-btn:hover {
+    background: rgba(0, 255, 204, 0.1);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
+.scan-result-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+}
+
+.scan-result-item:hover {
+    background: rgba(255, 0, 255, 0.1);
+    color: #ff00ff;
+}
+
+#vessel-list-results::-webkit-scrollbar {
+    width: 4px;
+}
+#vessel-list-results::-webkit-scrollbar-thumb {
+    background: rgba(255, 0, 255, 0.3);
 }

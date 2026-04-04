@@ -36,6 +36,8 @@ $(document).ready(function () {
         vBody: "v.body", vLat: "v.lat", vLon: "v.long",
         oEcc: "o.eccentricity", oInc: "o.inclination", oAop: "o.argumentOfPeriapsis",
         oTrue: "o.trueAnomaly", oPeA: "o.PeA", oPeR: "o.PeR",
+        tarDist: "tar.distance", tarRelVel: "tar.o.relativeVelocity", 
+        dockAx: "dock.ax", dockAy: "dock.ay", dockAz: "dock.az",
 
         // C3: Propulsion & Staging
         fThr: "f.throttle", dvReady: "dv.ready", dvStages: "dv.stages", vCurStage: "v.currentStage",
@@ -46,19 +48,23 @@ $(document).ready(function () {
 
     const apiQuery = Object.entries(tMap).map(([key, val]) => `${key}=${val}`).join('&');
 
-    jKSPWAPI.initPoll(apiQuery,
-        function () { },
-        function (rawData, d) {
-            try { 
-                if (d.vBody && String(d.vBody).toLowerCase() !== String(currentBody).toLowerCase()) {
-                    initLeaflet(d.vBody);
-                    currentBody = d.vBody;
-                }
-                updateUI(d); 
-            } catch (e) { console.error("Update failed:", e); }
-        },
-        [{}]
-    );
+    if (typeof jKSPWAPI !== 'undefined') {
+        jKSPWAPI.initPoll(apiQuery,
+            function () { },
+            function (rawData, d) {
+                try { 
+                    if (d.vBody && String(d.vBody).toLowerCase() !== String(currentBody).toLowerCase()) {
+                        initLeaflet(d.vBody);
+                        currentBody = d.vBody;
+                    }
+                    updateUI(d); 
+                } catch (e) { console.error("Update failed:", e); }
+            },
+            [{}]
+        );
+    } else {
+        console.error("jKSPWAPI not loaded. Telemetry offline.");
+    }
 
     // Initial fallback if telemetry hasn't arrived yet
     setTimeout(() => { if (!currentBody) initLeaflet('Kerbin'); }, 1000);
@@ -73,6 +79,10 @@ $(document).ready(function () {
     const baseUrl = 'https://d3kmnwgldcmvsd.cloudfront.net';
 
     function initLeaflet(bodyName) {
+        if (typeof L === 'undefined') {
+            console.error("Leaflet not loaded. Map offline.");
+            return;
+        }
         const body = bodyName.toLowerCase();
         const mapEl = document.getElementById('leaflet-map');
         if (!mapEl) return;
@@ -263,23 +273,53 @@ $(document).ready(function () {
         // C2: 2D Orbital Map
         updateMap(d);
 
-        // C2: GNC HUD (Variables coming later)
+        // C2: GNC HUD
+        updateGNC(d);
 
         // C3: Propulsion & Staging
         let throttlePerc = vFmt(d.fThr * 100, 0);
+        $('#f-thr').text(throttlePerc + "%");
         $('#throttle-fill').css('height', throttlePerc + '%');
         txt('throttle-read', String(throttlePerc).padStart(3, '0') + '%');
+        updateStages(d.dvStages, d.vCurStage, d.dvReady, d.vName);
 
-        updateStages(d.dvStages, d.vCurStage, d.dvReady);
-
-        // Footer
+        // Footer Connection Check
         txt('footer-ut', 'UT: ' + formatUT(d.ut));
         txt('footer-conn', (sig > 0) ? 'STREAM ACTIVE' : 'NO SIGNAL');
     }
 
+    function updateGNC(d) {
+        // Distance formatting
+        let dist = parseFloat(d.tarDist) || 0;
+        let distStr = dist > 10000 ? (vFmt(dist / 1000, 2) + " km") : (vFmt(dist, 1) + " m");
+        if (dist === 0) distStr = "--- m";
+        $('#gnc-dist').text(distStr);
+
+        // Relative Velocity
+        let rVel = parseFloat(d.tarRelVel) || 0;
+        let rVelStr = vFmt(rVel, 2) + " m/s";
+        if (dist === 0) rVelStr = "--- m/s";
+        $('#gnc-rvel').text(rVelStr);
+
+        // Alignment (Only meaningful if targeting a docking port)
+        // Check if values are zero which often means no port targeted or perfect alignment
+        // (Telemachus returns 0 for docking angles if no port is targeted)
+        let hasTarget = dist > 0;
+        txt('gnc-ap', hasTarget ? (vFmt(d.dockAx, 1) + "°") : "---°");
+        txt('gnc-ay', hasTarget ? (vFmt(d.dockAy, 1) + "°") : "---°");
+        txt('gnc-ar', hasTarget ? (vFmt(d.dockAz, 1) + "°") : "---°");
+
+        // Closest Approach / Approach Rate (Placeholders for now as API is limited)
+        txt('gnc-app', hasTarget ? "CALC..." : "--- m/s");
+        txt('gnc-ca', hasTarget ? "CALC..." : "--- m");
+    }
+
     // HELPER FUNCTIONS
     function txt(id, val) { $(`#${id}`).text(val); }
-    function vFmt(v, dec = 0) { return Number(v || 0).toFixed(dec); }
+    function vFmt(v, dec = 0) { 
+        let val = parseFloat(v);
+        return isNaN(val) ? "0" : val.toFixed(dec); 
+    }
 
     function extractSensor(arr) {
         if (!arr || !Array.isArray(arr) || arr.length < 2) return "0.00";
@@ -338,29 +378,55 @@ $(document).ready(function () {
         });
     }
 
-    function updateStages(stages, curStage, ready) {
+    function updateStages(stages, curStage, ready, vesselName) {
         const s = $('#stage-stack');
-        if (!ready || !stages || stages.length === 0) {
+        if (!ready || !Array.isArray(stages) || stages.length === 0) {
             if (s.children().length === 0) s.html('<div style="text-align:center; color:var(--text-secondary); margin-top:20px;">INIT DV CALCULATOR...</div>');
             return;
         }
         s.empty();
+        
+        // Sort ascending (0, 1, 2, 3...) to process upper stages first
         let sorted = stages.sort((a, b) => a.stage - b.stage);
+        
+        // Build a lookup map of total fuel masses per stage
+        const fuelMap = {};
+        sorted.forEach(st => fuelMap[st.stage] = st.fuelMass || 0);
 
-        sorted.forEach(st => {
+        // Render from highest stage number to lowest (as in the screenshot)
+        let displayList = [...sorted].reverse();
+
+        displayList.forEach(st => {
             let act = (st.stage === curStage);
 
-            // Mass-based propellant tracking (Using cache for stable "Max")
-            let currentFuel = Math.max(0, st.fuelMass);
+            // ISOLATED FUEL CALCULATION:
+            // We subtract the cumulative fuel mass of the next available lower stage (e.g., Stage 6 - Stage 4)
+            // to find the propellant specifically isolated in the current booster.
+            let nextStageNum = st.stage - 1;
+            while (nextStageNum >= 0 && typeof fuelMap[nextStageNum] === 'undefined') {
+                nextStageNum--;
+            }
+            
+            let upperStageFuel = (nextStageNum >= 0) ? fuelMap[nextStageNum] : 0;
+            let currentFuel = Math.max(0, (st.fuelMass || 0) - upperStageFuel);
 
-            // Update cache with highest seen fuelMass for this stage
-            if (!stageMaxFuelCache[st.stage] || currentFuel > stageMaxFuelCache[st.stage]) {
-                stageMaxFuelCache[st.stage] = currentFuel;
+            // Hard-zero overrides for spent stages
+            if (st.burnTime < 0.1 || currentFuel < 0.05) currentFuel = 0;
+
+            let safeVesselName = String(vesselName || "unknown").replace(/[^a-zA-Z0-9]/g, "_");
+            let cacheKey = `maxFuelIso_${safeVesselName}_stage_${st.stage}`;
+            let storedMax = parseFloat(localStorage.getItem(cacheKey)) || 0;
+
+            if (currentFuel > storedMax) {
+                localStorage.setItem(cacheKey, currentFuel);
+                storedMax = currentFuel;
             }
 
-            let totalFuel = stageMaxFuelCache[st.stage];
+            let totalFuel = storedMax;
             let fuelRatio = (totalFuel > 0.01) ? (currentFuel / totalFuel * 100) : 0;
-            fuelRatio = Math.min(100, Math.max(0, fuelRatio));
+            if (fuelRatio < 1.0) fuelRatio = 0;
+            
+            let shadowStyle = (fuelRatio > 0.1) ? '' : 'box-shadow: none !important;';
 
             // Heuristic Fuel Type Labeling
             let fuelLabel = "PROPELLANT";
@@ -378,18 +444,22 @@ $(document).ready(function () {
                 }
             }
 
+            const hasBoost = (st.ispVac > 0.1 || st.thrustActual > 0.1);
+
             s.append(`
                 <div class="stage-card ${act ? 'active' : ''}">
                     <div class="stage-title">STAGE ${st.stage}</div>
+                    ${hasBoost ? `
                     <div class="stage-prop-container">
                         <div class="stage-prop-lbl">${fuelLabel}</div>
                         <div class="stage-prop">
-                            <div class="stage-prop-fill ${colorClass}" style="width:${fuelRatio}%"></div>
+                            <div class="stage-prop-fill ${colorClass}" style="width:${fuelRatio}%; ${shadowStyle}"></div>
                         </div>
                         <div class="stage-prop-lbl" style="width:80px; text-align:right; font-size:0.6rem;">
                             ${vFmt(currentFuel, 1)} / ${vFmt(totalFuel, 1)} t
                         </div>
                     </div>
+                    ` : ''}
                     <div class="stage-grid">
                         <div class="metric"><div class="lbl">ISP</div><div class="val">${vFmt(st.ispActual, 1)}s</div></div>
                         <div class="metric"><div class="lbl">THRUST</div><div class="val">${vFmt(st.thrustActual, 1)}kN</div></div>
@@ -483,7 +553,9 @@ $(document).ready(function () {
         
         let PeR = parseFloat(d.oPeR) || 0;
         let PeA = parseFloat(d.oPeA) || 0;
-        let currLon = parseFloat(d.vLon) || 0;
+        let currLon = parseFloat(d.vLon);
+
+        if (isNaN(currLon) || isNaN(PeR) || isNaN(PeA)) return; // Integrity check to stop Leaflet crashing
 
         // Determine planet radius from apsides difference
         let planetR = Math.max(1000, PeR - PeA);

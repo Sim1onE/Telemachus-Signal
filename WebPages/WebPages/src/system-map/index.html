@@ -40,13 +40,9 @@
             </div>
         </div>
 
-        <div class="control-group" style="padding-bottom: 5px; border-bottom: 1px solid rgba(0,255,204,0.1);">
-            <label style="color: #ff00ff;">TARGET LINK (ID)</label>
-            <div style="display:flex; justify-content: space-between; align-items: center; margin-top: 5px;">
-                <input type="number" id="target-vessel-index" min="0" max="99" value="0" class="custom-input" style="width: 45px; text-align: center;">
-                <button class="action-btn" id="btn-target" style="flex: 1; margin-left: 5px; background: rgba(255, 0, 255, 0.2); border-color: #ff00ff; color: #ff00ff;">TARGET</button>
-            </div>
-            <div id="target-readout" style="color: #ff00ff; font-size: 0.65rem; margin-top: 5px; text-transform: uppercase;">NO TARGET SELECTED</div>
+        <div class="control-group" id="target-info-panel" style="padding-bottom: 5px; border-bottom: 1px solid rgba(0, 255, 204, 0.1);">
+            <label>TARGET STATUS</label>
+            <div id="target-readout" style="color: var(--accent-color); font-size: 0.7rem; text-transform: uppercase;">NO TARGET</div>
         </div>
 
         <div class="control-group buttons">
@@ -112,9 +108,8 @@
         </div>
     </div>
 
-    <!-- Navball Globally Absolute -->
-    <div id="navball-container"></div>
 
+    <!-- Scripts -->
     <!-- Scripts -->
     <script src="js/three.min.js"></script>
     <script src="js/orbit_controls.js"></script>

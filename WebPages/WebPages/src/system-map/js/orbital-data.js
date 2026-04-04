@@ -102,6 +102,13 @@ class SystemOrbitalPositionData {
         this.buildRelativePositionPositionDataForManeuverNodeOrbitPatches(data, positionData, "vesselManeuverNodes", 'o.maneuverNodes');
       }
 
+      if (positionData['tar.type'] && positionData['tar.o.orbitPatches'] && positionData['tar.o.orbitPatches'].length > 0) {
+        if (data["targetCurrentPositionRelativePosition"]) {
+            positionData["targetCurrentPosition"]["relativePosition"] = data["targetCurrentPositionRelativePosition"];
+        }
+        this.buildRelativePositionPositionDataForOrbitPatches(data, positionData, "targetCurrentOrbit", 'tar.o.orbitPatches');
+      }
+
       this.mutexUnlock();
       if (this.options.onRecalculate) this.options.onRecalculate(positionData);
     });
@@ -220,6 +227,7 @@ class SystemOrbitalPositionData {
       'v.altitude', 'o.ApA', 'o.PeA', 'o.inclination',
       'o.eccentricity', 'o.period',
       'n.pitch', 'n.roll', 'n.heading',
+      'o.encounterBody', 'o.encounterTime',
       'astg.nextDestination', 'astg.nextBurnCountdown', 'astg.nextDeltaV'
     ]);
     this.datalink.addReceiverFunction(this.recalculate.bind(this));

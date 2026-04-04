@@ -135,17 +135,6 @@ class SystemOrbitalMap {
         toggleContainer.appendChild(item);
       });
     }
-
-    // Target Link UI
-    const btnTarget = document.getElementById('btn-target');
-    if (btnTarget) {
-        btnTarget.addEventListener('click', () => {
-            const idx = parseInt(document.getElementById('target-vessel-index').value) || 0;
-            const cmd = `tar.setTargetVessel[${idx}]`;
-            this.datalink.sendMessage({ [cmd]: cmd });
-            this.cameraSet = false; // Reset camera to snap to new target if focus is 'current vessel'
-        });
-    }
   }
 
   addNodeAt(type) {
@@ -274,13 +263,13 @@ class SystemOrbitalMap {
         <div class="data-row"><span>INC/ECC</span><span>${inc}°/${ecc}</span></div>
       `;
 
-      // Target Readout Update
+      // Target Readout Update (Read-only, Safe)
       const targetReadout = document.getElementById('target-readout');
       if (targetReadout) {
           if (d['tar.name'] && d['tar.name'] !== "No Target" && d['tar.name'] !== "No Target Selected.") {
-              targetReadout.innerText = `LOCKED: ${d['tar.name']}`.toUpperCase();
+              targetReadout.innerText = d['tar.name'].toUpperCase();
           } else {
-              targetReadout.innerText = "NO TARGET SELECTED";
+              targetReadout.innerText = "NO TARGET";
           }
       }
 
@@ -411,12 +400,14 @@ class SystemOrbitalMap {
         seenPatches[id] = true;
         var points = patch.truePositions.map(p => new THREE.Vector3(p[0], p[1], p[2]));
         let line = this.registry.orbits[id];
+        const colorVal = patch.parentType === "targetVessel" ? this.targetColor : this.orbitPathColors[i % 10];
         if (!line) {
             var geometry = this.createGeometryFromPoints(points, 256);
-            line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: patch.parentType === "targetVessel" ? this.targetColor : this.orbitPathColors[i % 10] }));
+            line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: colorVal }));
             this.group.add(line);
             this.registry.orbits[id] = line;
         } else {
+            line.material.color.set(colorVal);
             this.updateLineGeometry(line, points);
         }
     }
