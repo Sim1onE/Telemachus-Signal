@@ -158,8 +158,8 @@ class Telemachus {
 
 class Settings {
   constructor(defaultHost, defaultPort) {
-    this.defaultHost = defaultHost || "localhost";
-    this.defaultPort = defaultPort || "8085";
+    this.defaultHost = defaultHost || window.location.hostname || "localhost";
+    this.defaultPort = defaultPort || window.location.port || "8085";
   }
   get host() { return localStorage.getItem('host') || this.defaultHost; }
   set host(value) { localStorage.setItem('host', value); }
