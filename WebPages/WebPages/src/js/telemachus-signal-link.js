@@ -13,7 +13,7 @@ const StreamConstants = {
 const SignalConstants = {
     DATALINK_SAMPLE_RATE: 200,
     CORRUPTION_THRESHOLD: 20, // % Quality under which corruption starts
-    LOSS_MODIFIER: 0.2        // Scaling factor for packet loss
+    LOSS_MODIFIER: 1          // Scaling factor for packet loss
 };
 
 class DownlinkSynchronizer {
@@ -132,7 +132,7 @@ class TelemachusSignalLink {
         this.uplink = new UplinkSynchronizer(this);
         this.datalinkSync = new DownlinkSynchronizer();
         this.lastDatalinkData = {}; // v16.32: Persistent delayed data store
-        
+
         // v16.35: Smoothing & Interpolation props
         this._lastStatusMET = 0;
         this._lastStatusUT = 0; // Local reference for LaunchTime calc
@@ -161,12 +161,12 @@ class TelemachusSignalLink {
 
     getEstimatedDelayedMET() {
         if (this._lastStatusMET === 0 || this.lastPacketUT === 0) return 0;
-        
+
         // MET = UT - LaunchTime
         // LaunchTime is estimated as (status.ut - status.met)
         const launchTime = this._lastStatusUT - this._lastStatusMET;
         const delayedUT = this.getEstimatedDelayedUT();
-        
+
         return delayedUT - launchTime;
     }
 
@@ -306,7 +306,7 @@ class TelemachusSignalLink {
 
                 // v16.32: Update the generic data store
                 Object.assign(this.lastDatalinkData, data);
-                
+
                 // 3. Dispatch delayed and degraded event
                 if (this.listeners.has('datalink_update')) {
                     this.listeners.get('datalink_update').forEach(cb => cb({
@@ -327,7 +327,7 @@ class TelemachusSignalLink {
                     met: this.getEstimatedDelayedMET(),
                     quality: this.latestQuality
                 };
-                
+
                 this.listeners.get('smooth_tick').forEach(cb => cb(data));
             }
             requestAnimationFrame(tick);
