@@ -328,6 +328,24 @@ namespace Telemachus
                 CameraCapture sensor = GetSensor(json["camera"].ToString());
                 if (sensor != null) sensor.ProcessCameraCommand(json);
             }
+
+            // v16.80: Manual soundtrack request
+            if (json.ContainsKey("type") && json["type"].ToString() == "request-soundtrack")
+            {
+                var status = MusicHandler.Instance?.GetCurrentStatus();
+                if (status != null)
+                {
+                    var packet = new Dictionary<string, object>
+                    {
+                        { "type", "soundtrack" },
+                        { "name", status.Value.name },
+                        { "time", status.Value.time },
+                        { "duration", status.Value.duration },
+                        { "isPlaying", status.Value.isPlaying }
+                    };
+                    SendAsync(Json.Encode(packet), null);
+                }
+            }
         }
 
         private CameraCapture GetSensor(string name)
@@ -378,6 +396,39 @@ namespace Telemachus
             TelemachusAudioController.Instance.PlayVoiceUplink(pcmData, creationUT);
         }
 
+        private string _lastSoundtrackName = null;
+        private bool _lastSoundtrackPlaying = false;
+        private double _lastSoundtrackUpdate = 0;
+
+        private void SendSoundtrackHeartbeat()
+        {
+            if (MusicHandler.Instance == null) return;
+
+            var status = MusicHandler.Instance.GetCurrentStatus();
+            double now = Planetarium.GetUniversalTime();
+
+            // v16.81: Event-driven only. Stop sending every second to prevent client sync loops.
+            bool changed = status.name != _lastSoundtrackName || status.isPlaying != _lastSoundtrackPlaying;
+
+            if (changed)
+            {
+                var packet = new Dictionary<string, object>
+                {
+                    { "type", "soundtrack" },
+                    { "name", status.name },
+                    { "time", status.time },
+                    { "duration", status.duration },
+                    { "isPlaying", status.isPlaying }
+                };
+                
+                SendAsync(Json.Encode(packet), null);
+                
+                _lastSoundtrackName = status.name;
+                _lastSoundtrackPlaying = status.isPlaying;
+                _lastSoundtrackUpdate = now;
+            }
+        }
+
         public void ProcessUpdate()
         {
             TelemachusAudioController.EnsureInstance();
@@ -391,6 +442,7 @@ namespace Telemachus
             }
             if (_pendingDownlinkMsg != null) { PluginLogger.print(_pendingDownlinkMsg); _pendingDownlinkMsg = null; }
             SendHeartbeat();
+            SendSoundtrackHeartbeat();
             
             // v16.05: Dispatch frames for all active cameras in the session
             if (activeCameras.Count > 0) {

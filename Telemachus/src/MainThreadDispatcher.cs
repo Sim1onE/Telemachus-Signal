@@ -12,6 +12,14 @@ namespace Telemachus
     {
         private static readonly Queue<Action> _executionQueue = new Queue<Action>();
         private static MainThreadDispatcher _instance;
+        private static int _mainThreadId;
+
+        public void Awake()
+        {
+            _mainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
+            _instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
 
         public static void Ensure()
         {
@@ -42,12 +50,43 @@ namespace Telemachus
             }
         }
 
+        public static bool IsMainThread => System.Threading.Thread.CurrentThread.ManagedThreadId == _mainThreadId;
+
         public static void Enqueue(Action action)
         {
+            if (IsMainThread)
+            {
+                action();
+                return;
+            }
+
             lock (_executionQueue)
             {
                 _executionQueue.Enqueue(action);
             }
+        }
+
+        public static T Run<T>(Func<T> function)
+        {
+            if (IsMainThread)
+            {
+                return function();
+            }
+
+            T result = default;
+            var evt = new System.Threading.ManualResetEvent(false);
+            
+            Enqueue(() =>
+            {
+                try {
+                    result = function();
+                } finally {
+                    evt.Set();
+                }
+            });
+
+            evt.WaitOne();
+            return result;
         }
     }
 }

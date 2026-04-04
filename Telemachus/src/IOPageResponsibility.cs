@@ -22,7 +22,7 @@ namespace Telemachus
 
         public bool process(HttpListenerRequest request, HttpListenerResponse response)
         {
-            string url = request.RawUrl.ToLower();
+            string url = System.Net.WebUtility.UrlDecode(request.RawUrl).ToLower();
             if (url.Contains("?")) url = url.Split('?')[0];
 
             // CLEAN URL ENFORCEMENT: Remove .html from the URL using validated pattern
@@ -96,6 +96,7 @@ namespace Telemachus
                 
                 byte[] contentData = System.IO.File.ReadAllBytes(localPath);
                 response.AddHeader("Access-Control-Allow-Origin", "*");
+                response.AddHeader("Accept-Ranges", "bytes"); // v16.99: Enable seeking in Chrome/Safari
                 
                 if (contentType.contentType == HTMLContentType.TextContent) 
                     response.ContentEncoding = Encoding.UTF8;
@@ -146,6 +147,7 @@ namespace Telemachus
                 [".woff"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "application/font-woff" },
                 [".otf"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "application/font-sfnt" },
                 [".mp4"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "video/mp4" },
+                [".mp3"] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = "audio/mpeg" },
                 [".json"] = new HTMLResponseContentType { contentType = HTMLContentType.TextContent, mimeType = "application/json" },
                 [".txt"] = new HTMLResponseContentType { contentType = HTMLContentType.TextContent, mimeType = "text/plain" },
                 [""] = new HTMLResponseContentType { contentType = HTMLContentType.BinaryContent, mimeType = null },

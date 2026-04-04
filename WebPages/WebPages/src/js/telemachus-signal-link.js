@@ -159,9 +159,11 @@ class TelemachusSignalLink {
                     this.lastPacketReceivedAt = performance.now();
                     this.latestNetworkDelay = msg.delay;
                     this.latestQuality = msg.quality !== undefined ? msg.quality : 100;
-                    if (this.listeners.has('status')) this.listeners.get('status').forEach(cb => cb(msg));
-                } else if (msg.type === 'cameraList') {
-                    if (this.listeners.has('cameraList')) this.listeners.get('cameraList').forEach(cb => cb(msg, msg.cameras));
+                }
+                
+                // Generic dispatch for all JSON types (v16.21)
+                if (msg.type && this.listeners.has(msg.type)) {
+                    this.listeners.get(msg.type).forEach(cb => cb(msg));
                 }
                 return;
             }
@@ -192,6 +194,9 @@ class TelemachusSignalLink {
         this.ws.onclose = () => {
             this.isRunning = false;
             
+            // v16.96: Dispatch disconnection event
+            if (this.listeners.has('close')) this.listeners.get('close').forEach(cb => cb());
+
             // v15.05 Reset internal flight clock state on disconnect
             this.lastPacketUT = 0;
             this.lastPacketReceivedAt = 0;
