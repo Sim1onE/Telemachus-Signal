@@ -32,7 +32,10 @@ $(document).ready(function () {
         rXe: "r.resource[XenonGas]", rXeM: "r.resourceMax[XenonGas]",
         rEc: "r.resource[ElectricCharge]", rEcM: "r.resourceMax[ElectricCharge]",
 
-        // C2: Map & GNC (API mappings coming soon)
+        // C2: Map & GNC
+        vBody: "v.body", vLat: "v.lat", vLon: "v.long",
+        oEcc: "o.eccentricity", oInc: "o.inclination", oAop: "o.argumentOfPeriapsis",
+        oTrue: "o.trueAnomaly", oPeA: "o.PeA", oPeR: "o.PeR",
 
         // C3: Propulsion & Staging
         fThr: "f.throttle", dvReady: "dv.ready", dvStages: "dv.stages", vCurStage: "v.currentStage",
@@ -46,10 +49,97 @@ $(document).ready(function () {
     jKSPWAPI.initPoll(apiQuery,
         function () { },
         function (rawData, d) {
-            try { updateUI(d); } catch (e) { console.error("Update failed:", e); }
+            try { 
+                if (d.vBody && String(d.vBody).toLowerCase() !== String(currentBody).toLowerCase()) {
+                    initLeaflet(d.vBody);
+                    currentBody = d.vBody;
+                }
+                updateUI(d); 
+            } catch (e) { console.error("Update failed:", e); }
         },
         [{}]
     );
+
+    // Initial fallback if telemetry hasn't arrived yet
+    setTimeout(() => { if (!currentBody) initLeaflet('Kerbin'); }, 1000);
+
+    // Dynamic Leaflet Map Engine
+    let map = null;
+    let currentBody = null;
+    let currentStyle = 'sat';
+    let tileLayer = null;
+    let vesselMarker = null;
+    let isTracking = true;
+    const baseUrl = 'https://d3kmnwgldcmvsd.cloudfront.net';
+
+    function initLeaflet(bodyName) {
+        const body = bodyName.toLowerCase();
+        const mapEl = document.getElementById('leaflet-map');
+        if (!mapEl) return;
+
+        if (!map) {
+            map = L.map('leaflet-map', {
+                crs: L.CRS.EPSG4326,
+                zoomControl: true, // Enabled for interactive use
+                attributionControl: false,
+                dragging: true,
+                scrollWheelZoom: true,
+                doubleClickZoom: true,
+                boxZoom: true
+            }).setView([0, 0], 3);
+
+            // Detection for user interaction to pause auto-tracking
+            map.on('dragstart zoomstart', function() {
+                isTracking = false;
+                $('#btn-recenter').fadeIn();
+            });
+        }
+
+        // Custom Blue HUD Icon
+        if (!vesselMarker) {
+            const blueHudIcon = L.divIcon({
+                className: 'vessel-marker-hud',
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            });
+            vesselMarker = L.marker([0, 0], { icon: blueHudIcon }).addTo(map);
+        }
+
+        updateTileLayer(body, currentStyle);
+        console.log(`[MAP] Body reset: ${body}`);
+    }
+
+    function updateTileLayer(body, style) {
+        if (tileLayer) map.removeLayer(tileLayer);
+        const bodyName = body.toLowerCase();
+        const tileUrl = `${baseUrl}/tiles/${bodyName}/${style}/{z}/{x}/{y}.png`;
+        
+        tileLayer = L.tileLayer(tileUrl, {
+            tms: true,
+            maxZoom: 7,
+            noWrap: false
+        });
+
+        tileLayer.on('tileerror', function(error) {
+            console.warn(`[MAP] Tile load failed for ${bodyName}/${style}:`, error.url);
+        });
+
+        tileLayer.addTo(map);
+    }
+
+    // Export functions to global for HTML buttons
+    window.setMapStyle = function(style) {
+        if (!currentBody) return;
+        currentStyle = style;
+        updateTileLayer(currentBody, style);
+        $('.map-btn').removeClass('active');
+        $(`.map-btn:contains(${style.toUpperCase()})`).addClass('active');
+    };
+
+    window.recenterMap = function() {
+        isTracking = true;
+        $('#btn-recenter').fadeOut();
+    };
 
 
     function updateMeters(data) {
@@ -171,7 +261,7 @@ $(document).ready(function () {
         updateBar('ec', d.rEc, d.rEcM);
 
         // C2: 2D Orbital Map
-        updateMap(d.vLat, d.vLon);
+        updateMap(d);
 
         // C2: GNC HUD (Variables coming later)
 
@@ -314,15 +404,30 @@ $(document).ready(function () {
     const orbitHistory = [];
     const MAX_HISTORY = 100;
 
-    function updateMap(lat, lon) {
+    function updateMap(d) {
+        let lat = d.vLat;
+        let lon = d.vLon;
+        if (!map || isNaN(lat) || isNaN(lon) || !vesselMarker) return;
+        
         let latVal = parseFloat(lat);
         let lonVal = parseFloat(lon);
-        if (isNaN(latVal) || isNaN(lonVal)) return;
+        
+        // Leaflet wrap-around logic for longitudes
+        let wrappedLon = (lonVal > 180) ? lonVal - 360 : lonVal;
+        let latLng = [latVal, wrappedLon];
 
+        // 1. Update Marker Position
+        vesselMarker.setLatLng(latLng);
+
+        // 2. Control Map Camera
+        if (isTracking) {
+            map.panTo(latLng, { animate: true, duration: 0.5 });
+        }
+
+        // 3. Sync Canvas Trace
         const canvas = document.getElementById('orbit-canvas');
         if (!canvas) return;
 
-        // Ensure canvas matches its display size
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
         if (canvas.width !== w || canvas.height !== h) {
@@ -333,45 +438,149 @@ $(document).ready(function () {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, w, h);
 
-        // Map coordinates (lat: -90 to +90) (lon: -180 to +180)
-        const posX = ((lonVal + 180) / 360) * w;
-        const posY = h - (((latVal + 90) / 180) * h);
-
-        // Move the HTML crosshairs to match the new location
-        $('.map-crosshair').css({ left: posX + 'px', top: posY + 'px' });
-        $('.map-crosshair-h').css({ top: posY + 'px' });
-        $('.map-crosshair-v').css({ left: posX + 'px' });
-
-        // Update path history
-        orbitHistory.push({ x: posX, y: posY });
+        orbitHistory.push({ lat: latVal, lng: wrappedLon });
         if (orbitHistory.length > MAX_HISTORY) orbitHistory.shift();
 
-        // Draw orbital trace
+        // Draw historical trace (faded)
         if (orbitHistory.length > 1) {
             ctx.beginPath();
-            ctx.strokeStyle = "rgba(0, 221, 255, 0.4)";
-            ctx.lineWidth = 2;
+            ctx.strokeStyle = "rgba(0, 221, 255, 0.15)";
+            ctx.lineWidth = 1;
+            
             for (let i = 0; i < orbitHistory.length; i++) {
-                let pt = orbitHistory[i];
-                // Prevent lines stretching across the entire width when wrapping longitude
+                let pt = map.latLngToContainerPoint([orbitHistory[i].lat, orbitHistory[i].lng]);
+                
                 if (i > 0) {
-                    let prevPt = orbitHistory[i-1];
+                    let prevPt = map.latLngToContainerPoint([orbitHistory[i-1].lat, orbitHistory[i-1].lng]);
                     if (Math.abs(pt.x - prevPt.x) > w * 0.5) {
+                        ctx.stroke();
+                        ctx.beginPath();
                         ctx.moveTo(pt.x, pt.y);
                         continue;
                     }
                 }
+                
                 if (i === 0) ctx.moveTo(pt.x, pt.y);
                 else ctx.lineTo(pt.x, pt.y);
             }
             ctx.stroke();
         }
 
-        // Draw current vessel blip
+        // Draw Forward Keplerian Projection
+        drawGroundTrack(d, ctx, w, h, map);
+    }
+
+    const DEG2RAD = Math.PI / 180;
+    const RAD2DEG = 180 / Math.PI;
+
+    function drawGroundTrack(d, ctx, w, h, map) {
+        let e = parseFloat(d.oEcc);
+        if (isNaN(e)) return; // Orbit data not yet available
+
+        let i = (parseFloat(d.oInc) || 0) * DEG2RAD;
+        let w_arg = (parseFloat(d.oAop) || 0) * DEG2RAD;
+        let nu_curr = (parseFloat(d.oTrue) || 0) * DEG2RAD;
+        
+        let PeR = parseFloat(d.oPeR) || 0;
+        let PeA = parseFloat(d.oPeA) || 0;
+        let currLon = parseFloat(d.vLon) || 0;
+
+        // Determine planet radius from apsides difference
+        let planetR = Math.max(1000, PeR - PeA);
+        let p = PeR * (1 + e); // orbital parameter p = a(1-e^2) = PeR(1+e)
+
+        let theta_inertial_curr = Math.atan2(Math.sin(nu_curr + w_arg) * Math.cos(i), Math.cos(nu_curr + w_arg));
+
         ctx.beginPath();
-        ctx.fillStyle = "var(--accent-amber)";
-        ctx.arc(posX, posY, 4, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.strokeStyle = "rgba(0, 221, 255, 0.8)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+
+        let crashed = false;
+        let crashPt = null;
+        let points = [];
+        
+        let steps = 150;
+        let max_nu = e < 1 ? Math.PI * 2 : Math.PI; 
+        let step = max_nu / steps;
+
+        let prev_theta_inertial = theta_inertial_curr;
+        let acc_dTheta = 0;
+
+        for (let s = 0; s <= steps; s++) {
+            let nu = nu_curr + s * step;
+            let r = p / (1 + e * Math.cos(nu));
+            
+            // Check for terrain impact
+            if (r <= planetR && s > 0) {
+                crashed = true;
+            }
+
+            let lat_rad = Math.asin(Math.sin(nu + w_arg) * Math.sin(i));
+            let theta_inertial = Math.atan2(Math.sin(nu + w_arg) * Math.cos(i), Math.cos(nu + w_arg));
+
+            let delta = theta_inertial - prev_theta_inertial;
+            // Unwrap branch cuts safely
+            while (delta > Math.PI) delta -= 2 * Math.PI;
+            while (delta < -Math.PI) delta += 2 * Math.PI;
+            
+            acc_dTheta += delta;
+            prev_theta_inertial = theta_inertial;
+
+            let lon_rad = (currLon * DEG2RAD) + acc_dTheta;
+
+            let lat = lat_rad * RAD2DEG;
+            let lon = lon_rad * RAD2DEG;
+            
+            // Normalize longitude
+            lon = ((lon + 180) % 360 + 360) % 360 - 180;
+            
+            points.push({lat: lat, lon: lon, r: r});
+            
+            if (crashed) break;
+        }
+
+        // Draw the projected path
+        for (let j = 0; j < points.length; j++) {
+            let pt = map.latLngToContainerPoint([points[j].lat, points[j].lon]);
+            
+            if (j > 0) {
+                let prevPt = map.latLngToContainerPoint([points[j-1].lat, points[j-1].lon]);
+                // Wrap check across dateline
+                if (Math.abs(pt.x - prevPt.x) > w * 0.5) {
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(pt.x, pt.y);
+                    continue;
+                }
+            }
+            
+            if (j === 0) ctx.moveTo(pt.x, pt.y);
+            else ctx.lineTo(pt.x, pt.y);
+            
+            if (j === points.length - 1 && crashed) crashPt = pt;
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Render Crash Cross
+        if (crashed && crashPt) {
+            ctx.beginPath();
+            ctx.strokeStyle = "red";
+            ctx.lineWidth = 3;
+            let size = 6;
+            ctx.moveTo(crashPt.x - size, crashPt.y - size);
+            ctx.lineTo(crashPt.x + size, crashPt.y + size);
+            ctx.moveTo(crashPt.x + size, crashPt.y - size);
+            ctx.lineTo(crashPt.x - size, crashPt.y + size);
+            ctx.stroke();
+            
+            // Halo glow
+            ctx.beginPath();
+            ctx.arc(crashPt.x, crashPt.y, size * 2, 0, 2 * Math.PI);
+            ctx.strokeStyle = "rgba(255, 0, 0, 0.4)";
+            ctx.stroke();
+        }
     }
 
     function formatMET(s) {

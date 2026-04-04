@@ -135,6 +135,17 @@ class SystemOrbitalMap {
         toggleContainer.appendChild(item);
       });
     }
+
+    // Target Link UI
+    const btnTarget = document.getElementById('btn-target');
+    if (btnTarget) {
+        btnTarget.addEventListener('click', () => {
+            const idx = parseInt(document.getElementById('target-vessel-index').value) || 0;
+            const cmd = `tar.setTargetVessel[${idx}]`;
+            this.datalink.sendMessage({ [cmd]: cmd });
+            this.cameraSet = false; // Reset camera to snap to new target if focus is 'current vessel'
+        });
+    }
   }
 
   addNodeAt(type) {
@@ -262,6 +273,16 @@ class SystemOrbitalMap {
         <div class="data-row"><span>AP/PE</span><span>${ap}/${pe}km</span></div>
         <div class="data-row"><span>INC/ECC</span><span>${inc}°/${ecc}</span></div>
       `;
+
+      // Target Readout Update
+      const targetReadout = document.getElementById('target-readout');
+      if (targetReadout) {
+          if (d['tar.name'] && d['tar.name'] !== "No Target" && d['tar.name'] !== "No Target Selected.") {
+              targetReadout.innerText = `LOCKED: ${d['tar.name']}`.toUpperCase();
+          } else {
+              targetReadout.innerText = "NO TARGET SELECTED";
+          }
+      }
 
       // Encounter Info
       const encElem = document.getElementById('encounter-info');
