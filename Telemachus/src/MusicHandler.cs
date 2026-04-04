@@ -8,12 +8,12 @@ namespace Telemachus
     public class MusicHandler : DataLinkHandler
     {
         public static MusicHandler Instance { get; private set; }
-        private AudioSource _lastBestSource = null;
         private string _lastReportedName = "";
         
         private MusicStatus _cachedStatus;
         private int _lastUpdateFrame = -1;
 
+        // v16.110: Known tracks that we have MP3s for.
         private static readonly HashSet<string> SoundtrackWhitelist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "Arcadia", "Bathed in the Light", "Brittle Rille", "Dreamy Flashback",
@@ -48,52 +48,68 @@ namespace Telemachus
                     isPlaying = false
                 };
 
-                // v16.95: Persistent soundtrack detection even when paused
                 var masters = UnityEngine.Object.FindObjectsOfType<AudioSource>();
-                AudioSource candidate = null;
+                AudioSource bestCandidate = null;
+                bool foundWhitelisted = false;
 
-                // Priority 1: Check if any whitelist track is currently PLAYING
+                // v16.111: Discovery-Friendly Detection
                 foreach (var source in masters)
                 {
-                    if (source.isPlaying && source.clip != null && source.spatialBlend == 0)
+                    if (source.clip == null || source.spatialBlend > 0.1f) continue;
+
+                    string rawName = source.clip.name;
+                    string cleanName = rawName.Replace(".mp3", "").Replace(".wav", "").Replace(".ogg", "");
+                    
+                    bool isWhitelisted = SoundtrackWhitelist.Contains(cleanName);
+
+                    // If whitelisted and playing, it's our absolute top priority
+                    if (isWhitelisted && source.isPlaying)
                     {
-                        string cleanName = source.clip.name.Replace(".mp3", "").Replace(".wav", "").Replace(".ogg", "");
-                        if (SoundtrackWhitelist.Contains(cleanName))
-                        {
-                            candidate = source;
-                            break;
-                        }
+                        bestCandidate = source;
+                        foundWhitelisted = true;
+                        break;
+                    }
+
+                    // If not found yet, look for any playing "long" 2D track (High discovery probability)
+                    if (bestCandidate == null && source.isPlaying && source.clip.length > 20f && !source.loop)
+                    {
+                        bestCandidate = source;
                     }
                 }
 
-                // Priority 2: If none is playing, check if any whitelist track is merely LOADED/PAUSED
-                if (candidate == null)
+                // Fallback: If nothing is "playing", check for paused whitelisted tracks (to keep the UI stable)
+                if (bestCandidate == null)
                 {
                     foreach (var source in masters)
                     {
-                        if (source.clip != null && source.spatialBlend == 0)
+                        if (source.clip != null && source.spatialBlend < 0.1f)
                         {
                             string cleanName = source.clip.name.Replace(".mp3", "").Replace(".wav", "").Replace(".ogg", "");
                             if (SoundtrackWhitelist.Contains(cleanName))
                             {
-                                candidate = source;
+                                bestCandidate = source;
+                                foundWhitelisted = true;
                                 break;
                             }
                         }
                     }
                 }
 
-                if (candidate != null)
+                if (bestCandidate != null)
                 {
-                    status.name = candidate.clip.name;
-                    status.time = candidate.time;
-                    status.duration = candidate.clip.length;
-                    status.isPlaying = candidate.isPlaying;
+                    status.name = bestCandidate.clip.name;
+                    status.time = bestCandidate.time;
+                    status.duration = bestCandidate.clip.length;
+                    status.isPlaying = bestCandidate.isPlaying;
                 }
 
-                if (status.name != _lastReportedName)
+                if (status.name != _lastReportedName && status.name != "None")
                 {
-                    PluginLogger.print(string.Format("[MusicSync] Soundtrack state: {0} (Playing: {1})", status.name, status.isPlaying));
+                    if (foundWhitelisted)
+                        PluginLogger.print(string.Format("[MusicSync] Active Soundtrack: {0}", status.name));
+                    else
+                        PluginLogger.print(string.Format("[MusicSync] DISCOVERY: Detected unknown 2D track: {0}. Add this to your MP3 folder to sync!", status.name));
+                    
                     _lastReportedName = status.name;
                 }
 

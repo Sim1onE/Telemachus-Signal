@@ -13,17 +13,20 @@
             <h1>Communications Console</h1>
         </div>
         
-        <!-- v16.20: Soundtrack Sync Widget -->
+        <!-- v16.120: Refined Soundtrack Sync Widget -->
         <div id="music-player-widget" class="music-widget">
-            <div class="music-info">
-                <span class="telemetry-label">OST SYNC</span>
-                <span id="music-name" class="telemetry-value">SILENCE</span>
-                <div class="music-visualizer">
-                    <div class="bar"></div>
-                    <div class="bar"></div>
-                    <div class="bar"></div>
+            <div class="music-meta">
+                <div class="music-header">
+                    <span class="telemetry-label">OST SYNC</span>
+                    <div class="music-visualizer">
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                    </div>
                 </div>
+                <span id="music-name" class="telemetry-value">SILENCE</span>
             </div>
+            
             <div class="music-controls">
                 <input type="range" id="music-volume" class="music-slider" min="0" max="1" step="0.01" value="0.5" title="Music Volume">
                 <button id="music-toggle" class="music-btn muted" title="Toggle Soundtrack">

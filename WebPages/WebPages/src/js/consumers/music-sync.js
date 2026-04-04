@@ -38,9 +38,7 @@ class MusicSync {
 
         this.audio.oncanplay = () => {
             if (this.pendingSeekTime >= 0) {
-                console.log(`[MusicSync] Seeking to ${this.pendingSeekTime.toFixed(2)}s`);
                 this.audio.currentTime = this.pendingSeekTime;
-                
                 const target = this.pendingSeekTime;
                 setTimeout(() => {
                     if (Math.abs(this.audio.currentTime - target) > 1.0) {
@@ -52,13 +50,10 @@ class MusicSync {
         };
 
         this.audio.onerror = (e) => {
-            // v16.105: Log the specific error and target URL
-            console.error(`[MusicSync] Playback Error for: ${this.audio.src}`, e);
-            
-            // Only show MISSING AUDIO if we actually have a track name (ignore aborts)
-            if (this.currentTrack) {
-                this.showError('MISSING AUDIO');
-            }
+            // v16.115: Enhanced error reporting for discovery
+            const trackName = this.currentTrack ? this.currentTrack.split('/').pop().toUpperCase() : 'UNKNOWN';
+            console.error(`[MusicSync] MISSING AUDIO: No file found for "${trackName}" at ${this.audio.src}`);
+            this.showError(`MISSING: ${trackName}`);
         };
 
         this.waitForSignalLink();
@@ -74,7 +69,7 @@ class MusicSync {
                 this.showError('SIGNAL LOST');
             });
             window.app.signalLink.on('open', () => {
-                if (this.currentTrack === 'SIGNAL LOST') {
+                if (this.elements.name.textContent === 'SIGNAL LOST') {
                     this.elements.name.textContent = 'SILENCE';
                     this.elements.name.style.color = '';
                 }
@@ -135,8 +130,6 @@ class MusicSync {
 
     handleMetadata(msg) {
         const { name, time, isPlaying } = msg;
-
-        // Normalize name
         const normalizedName = (name || "").toLowerCase();
 
         if (normalizedName === 'radiosilence' || normalizedName === 'none' || !name) {
@@ -144,9 +137,7 @@ class MusicSync {
             return;
         }
 
-        // v16.106: Only reset and load if the track has ACTUALLY changed
         if (name !== this.currentTrack) {
-            console.log(`[MusicSync] Switching from ${this.currentTrack} to ${name}`);
             this.currentTrack = name;
             let display = name.split('/').pop().replace('.mp3', '').toUpperCase();
             this.elements.name.textContent = display;
@@ -187,16 +178,12 @@ class MusicSync {
     }
 
     loadTrack(name, startTime) {
-        // v16.107: Robust filename building
         let filename = name.split('/').pop();
         if (!filename.toLowerCase().endsWith('.mp3')) {
             filename += '.mp3';
         }
         
-        // Use encodeURIComponent for the filename part to handle spaces and brackets safely
         const finalUrl = `${this.audioPath}${encodeURIComponent(filename)}`;
-        console.log(`[MusicSync] Loading Track: ${finalUrl}`);
-        
         this.audio.src = finalUrl;
         this.pendingSeekTime = startTime + 0.2;
         this.audio.load();

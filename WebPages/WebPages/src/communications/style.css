@@ -102,36 +102,44 @@ header {
 }
 
 /* Music Widget v16.20 */
+/* v16.125: Refined Soundtrack Sync Widget Styling */
 .music-widget {
-    flex: 1;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 15px;
-    background: rgba(0, 255, 208, 0.05);
-    border: 1px solid rgba(0, 255, 208, 0.1);
-    border-radius: 8px;
-    padding: 8px 20px;
-    max-width: 400px;
+    justify-content: space-between;
+    gap: 30px;
+    background: rgba(0, 50, 40, 0.15);
+    border: 1px solid rgba(0, 255, 208, 0.15);
+    border-radius: 12px;
+    padding: 12px 25px;
+    max-width: 550px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    margin-bottom: 20px;
 }
 
-.music-info {
+.music-meta {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    min-width: 150px;
+    gap: 2px;
+    min-width: 160px;
+}
+
+.music-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .music-visualizer {
     display: flex;
     gap: 3px;
     height: 12px;
-    margin-top: 4px;
     align-items: flex-end;
 }
 
 .music-visualizer .bar {
-    width: 3px;
+    width: 2.5px;
     height: 3px;
     background: var(--accent-color);
     box-shadow: 0 0 5px var(--accent-glow);
@@ -150,33 +158,19 @@ header {
     to { height: 12px; }
 }
 
-.music-btn {
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    color: var(--accent-color);
-    cursor: pointer;
-    width: 40px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.1rem;
-    transition: var(--transition);
-}
-
 .music-controls {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 20px;
+    flex-shrink: 0;
 }
 
 .music-slider {
     -webkit-appearance: none;
     appearance: none;
-    width: 80px;
+    width: 100px;
     height: 3px;
-    background: rgba(0, 255, 208, 0.15);
+    background: rgba(0, 255, 208, 0.1);
     border-radius: 2px;
     outline: none;
 }
@@ -184,13 +178,13 @@ header {
 .music-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 10px;
-    height: 10px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     background: var(--accent-color);
-    box-shadow: 0 0 5px var(--accent-glow);
+    box-shadow: 0 0 10px var(--accent-glow);
     cursor: pointer;
-    border: none;
+    border: 2px solid rgba(0, 0, 0, 0.6);
 }
 
 .music-slider::-moz-range-thumb {
@@ -203,9 +197,24 @@ header {
     border: none;
 }
 
+.music-btn {
+    background: rgba(0, 255, 208, 0.05);
+    border: 1px solid rgba(0, 255, 208, 0.2);
+    border-radius: 8px;
+    color: var(--accent-color);
+    cursor: pointer;
+    width: 44px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
 .music-btn:hover {
-    background: var(--accent-glow);
-    box-shadow: 0 0 10px var(--accent-glow);
+    background: rgba(0, 255, 208, 0.15);
+    border-color: var(--accent-color);
+    transform: scale(1.05);
 }
 
 .music-btn.active {
