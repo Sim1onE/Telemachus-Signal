@@ -12,6 +12,23 @@
         <div class="system-title">
             <h1>Communications Console</h1>
         </div>
+        
+        <!-- v16.20: Soundtrack Sync Widget -->
+        <div id="music-player-widget" class="music-widget">
+            <div class="music-info">
+                <span class="telemetry-label">OST SYNC</span>
+                <span id="music-name" class="telemetry-value">SILENCE</span>
+                <div class="music-visualizer">
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                </div>
+            </div>
+            <button id="music-toggle" class="music-btn muted" title="Toggle Soundtrack">
+                <span class="icon">🔇</span>
+            </button>
+        </div>
+
         <div class="telemetry-bar">
             <div class="telemetry-item">
                 <span class="telemetry-label">ALT</span>
@@ -130,6 +147,7 @@
     <script src="../js/consumers/camera-widget.js"></script>
     <script src="../js/consumers/radio-receiver.js"></script>
     <script src="../js/providers/radio-transmitter.js"></script>
+    <script src="../js/consumers/music-sync.js"></script>
     <script src="app.js"></script>
 
 

@@ -39,7 +39,8 @@ namespace Telemachus
                     new MapViewDataLinkHandler(formatters),
                     new DockingDataLinkHandler(formatters),
                     new DeltaVDataLinkHandler(formatters),
-                    new AlarmClockDataLinkHandler(formatters)
+                    new AlarmClockDataLinkHandler(formatters),
+                    new MusicHandler(formatters)
                     }, formatters
                 ));
         }
