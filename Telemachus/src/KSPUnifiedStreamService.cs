@@ -511,8 +511,8 @@ namespace Telemachus
                 double delay = TelemachusSignalManager.GetSignalDelay(v);
                 int quality = (int)(TelemachusSignalManager.GetSignalQuality(v) * 100);
                 var status = new Dictionary<string, object> {
-                    { "type", "status" }, { "ut", currentUT }, { "warp", warp }, { "delay", delay },
-                    { "quality", quality }
+                    { "type", "status" }, { "ut", currentUT }, { "met", (double)v.missionTime }, { "warp", warp }, 
+                    { "delay", delay }, { "quality", quality }
                 };
                 SendAsync(Json.Encode(status), null);
             } catch { }

@@ -32,8 +32,8 @@ class CommunicationsConsole {
     async init() {
         this.bindEvents();
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const streamUrl = `${protocol}//${window.location.host}/stream`;
+        // v16.36: Robust stream detection
+        const streamUrl = TelemachusSignalLink.detectStreamUrl();
         
         if (!this.signalLink) {
             this.signalLink = new TelemachusSignalLink(streamUrl, this);
@@ -80,6 +80,11 @@ class CommunicationsConsole {
             // v16.31: Handle delayed datalink updates
             this.signalLink.on('datalink_update', (data) => {
                 this.handleDelayedTelemetry(data.values);
+            });
+
+            // v16.35: High-frequency clock updates
+            this.signalLink.on('smooth_tick', (data) => {
+                if (this.telMet) this.telMet.innerText = `T+ ${this.formatMET(data.met)}`;
             });
 
             this.signalLink.connect();
@@ -191,10 +196,7 @@ class CommunicationsConsole {
             const val = values['v.obtSpeed'];
             this.telVel.innerText = typeof val === 'number' ? `${Math.round(val)} M/S` : val;
         }
-        if (this.telMet && values['v.missionTime'] !== undefined) {
-            const val = values['v.missionTime'];
-            this.telMet.innerText = typeof val === 'number' ? `T+ ${this.formatMET(val)}` : val;
-        }
+        // if (this.telMet && values['v.missionTime'] !== undefined) { ... } // v16.35: Moved to smooth_tick
     }
 
     syncFromStream(ut, warp, delay, fov, signal, id) {

@@ -46,25 +46,62 @@ $(document).ready(function () {
         ut: "t.universalTime"
     };
 
-    const apiQuery = Object.entries(tMap).map(([key, val]) => `${key}=${val}`).join('&');
+    // WebSocket Data Stream Integration (v16.33)
+    // WebSocket Data Stream Integration (v16.36: Robust detection)
+    const streamUrl = TelemachusSignalLink.detectStreamUrl();
+    const signalLink = new TelemachusSignalLink(streamUrl);
 
-    if (typeof jKSPWAPI !== 'undefined') {
-        jKSPWAPI.initPoll(apiQuery,
-            function () { },
-            function (rawData, d) {
-                try { 
-                    if (d.vBody && String(d.vBody).toLowerCase() !== String(currentBody).toLowerCase()) {
-                        initLeaflet(d.vBody);
-                        currentBody = d.vBody;
-                    }
-                    updateUI(d); 
-                } catch (e) { console.error("Update failed:", e); }
-            },
-            [{}]
-        );
-    } else {
-        console.error("jKSPWAPI not loaded. Telemetry offline.");
-    }
+    signalLink.on('open', () => {
+        console.log("[Monitor] Connected to telemetry stream.");
+        // Subscribe to all requested keys in tMap
+        const keys = Object.values(tMap);
+        signalLink.subscribe(keys);
+    });
+
+    // Persistent telemetry state to prevent flickering (v16.34)
+    const telemetryState = {};
+
+    signalLink.on('status', (status) => {
+        // Update persistent metadata (Real-time link info)
+        telemetryState.cDel = status.delay;
+        telemetryState.cSig = status.quality / 100.0;
+        
+        updateUI(telemetryState);
+    });
+
+    signalLink.on('smooth_tick', (data) => {
+        // High-frequency clock updates (v16.35)
+        telemetryState.ut = data.ut;
+        telemetryState.vMet = data.met;
+        telemetryState.footerUt = data.ut;
+        
+        txt('v-met', formatMET(data.met));
+        txt('footer-ut', 'UT: ' + formatUT(data.ut));
+    });
+
+    signalLink.on('datalink_update', (data) => {
+        // Update persistent telemetry from delayed stream
+        telemetryState.ut = data.ut;
+        telemetryState.cSig = data.quality / 100.0;
+        
+        Object.entries(tMap).forEach(([alias, key]) => {
+            if (data.values[key] !== undefined) {
+                telemetryState[alias] = data.values[key];
+            }
+        });
+
+        try {
+            if (telemetryState.vBody && String(telemetryState.vBody).toLowerCase() !== String(currentBody).toLowerCase()) {
+                initLeaflet(telemetryState.vBody);
+                currentBody = telemetryState.vBody;
+            }
+            updateUI(telemetryState);
+        } catch (e) {
+            console.error("Update failed:", e);
+        }
+    });
+
+    signalLink.connect();
 
     // Initial fallback if telemetry hasn't arrived yet
     setTimeout(() => { if (!currentBody) initLeaflet('Kerbin'); }, 1000);
@@ -197,7 +234,7 @@ $(document).ready(function () {
         txt('v-name', String(d.vName || "NO SIGNAL").toUpperCase());
         txt('v-type', d.vType || "-");
         txt('v-situation', d.vSit || "-");
-        txt('v-met', formatMET(d.vMet));
+        // txt('v-met', formatMET(d.vMet)); // v16.35: Moved to smooth_tick
         txt('v-crewCount', `${d.vCrewC || 0} / ${d.vCrewCap || 0}`);
 
         let crewStr = Array.isArray(d.vCrew) ? d.vCrew.join(", ") : "-";
@@ -284,7 +321,7 @@ $(document).ready(function () {
         updateStages(d.dvStages, d.vCurStage, d.dvReady, d.vName);
 
         // Footer Connection Check
-        txt('footer-ut', 'UT: ' + formatUT(d.ut));
+        // txt('footer-ut', 'UT: ' + formatUT(d.ut)); // v16.35: Moved to smooth_tick
         txt('footer-conn', (sig > 0) ? 'STREAM ACTIVE' : 'NO SIGNAL');
     }
 
