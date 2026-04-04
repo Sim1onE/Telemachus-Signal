@@ -666,6 +666,73 @@ body {
     100% { transform: translate(0,0); }
 }
 
+/* Leaflet HUD Integration */
+#leaflet-map {
+    filter: brightness(1.1) contrast(1.1) saturate(0.8);
+    background: #000 !important;
+}
+
+.leaflet-container {
+    background: #000 !important;
+}
+
+.map-btn {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--accent-cyan);
+    color: var(--accent-cyan);
+    font-family: var(--font-header);
+    font-size: 0.6rem;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 1px;
+}
+
+.map-btn:hover {
+    background: var(--accent-cyan);
+    color: #000;
+}
+
+.map-btn.active {
+    background: var(--accent-cyan);
+    color: #000;
+}
+
+.map-btn.btn-warn {
+    border-color: var(--accent-amber);
+    color: var(--accent-amber);
+}
+
+.map-btn.btn-warn:hover {
+    background: var(--accent-amber);
+    color: #000;
+}
+
+/* Pulsing Blue Vessel Marker */
+.vessel-marker-hud {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #00d9ff;
+    border-radius: 50%;
+    position: relative;
+    background: rgba(0, 217, 255, 0.2);
+    box-shadow: 0 0 10px rgba(0, 217, 255, 0.5);
+}
+
+.vessel-marker-hud::after {
+    content: '';
+    position: absolute;
+    top: -5px; left: -5px; right: -5px; bottom: -5px;
+    border: 1px solid rgba(0, 217, 255, 0.4);
+    border-radius: 50%;
+    animation: blue-pulse 2s infinite;
+}
+
+@keyframes blue-pulse {
+    0% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(2.5); opacity: 0; }
+}
+
 .v-bar {
     display: flex;
     align-items: center;

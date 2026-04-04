@@ -40,6 +40,15 @@
             </div>
         </div>
 
+        <div class="control-group" style="padding-bottom: 5px; border-bottom: 1px solid rgba(0,255,204,0.1);">
+            <label style="color: #ff00ff;">TARGET LINK (ID)</label>
+            <div style="display:flex; justify-content: space-between; align-items: center; margin-top: 5px;">
+                <input type="number" id="target-vessel-index" min="0" max="99" value="0" class="custom-input" style="width: 45px; text-align: center;">
+                <button class="action-btn" id="btn-target" style="flex: 1; margin-left: 5px; background: rgba(255, 0, 255, 0.2); border-color: #ff00ff; color: #ff00ff;">TARGET</button>
+            </div>
+            <div id="target-readout" style="color: #ff00ff; font-size: 0.65rem; margin-top: 5px; text-transform: uppercase;">NO TARGET SELECTED</div>
+        </div>
+
         <div class="control-group buttons">
             <button id="btn-reset" class="action-btn">RESET CAMERA</button>
             <button id="btn-fullscreen" class="action-btn secondary">FULLSCREEN</button>
