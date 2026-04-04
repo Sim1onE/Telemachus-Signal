@@ -25,6 +25,17 @@ namespace Telemachus
             string url = System.Net.WebUtility.UrlDecode(request.RawUrl).ToLower();
             if (url.Contains("?")) url = url.Split('?')[0];
 
+            // v16.155: Dedicated debug endpoint to list all discoverable soundtracks
+            if (url == "/telemachus/music-list" || url == "/music-list")
+            {
+                string json = MusicHandler.Instance.GetMusicList(null).ToString();
+                byte[] data = Encoding.UTF8.GetBytes(json);
+                response.AddHeader("Access-Control-Allow-Origin", "*");
+                response.ContentType = "application/json";
+                response.WriteContent(data);
+                return true;
+            }
+
             // CLEAN URL ENFORCEMENT: Remove .html from the URL using validated pattern
             if (url.EndsWith(".html"))
             {

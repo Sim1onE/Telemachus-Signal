@@ -13,7 +13,6 @@ namespace Telemachus
         private MusicStatus _cachedStatus;
         private int _lastUpdateFrame = -1;
 
-        // v16.110: Known tracks that we have MP3s for.
         private static readonly HashSet<string> SoundtrackWhitelist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "Arcadia", "Bathed in the Light", "Brittle Rille", "Dreamy Flashback",
@@ -52,7 +51,6 @@ namespace Telemachus
                 AudioSource bestCandidate = null;
                 bool foundWhitelisted = false;
 
-                // v16.111: Discovery-Friendly Detection
                 foreach (var source in masters)
                 {
                     if (source.clip == null || source.spatialBlend > 0.1f) continue;
@@ -62,7 +60,6 @@ namespace Telemachus
                     
                     bool isWhitelisted = SoundtrackWhitelist.Contains(cleanName);
 
-                    // If whitelisted and playing, it's our absolute top priority
                     if (isWhitelisted && source.isPlaying)
                     {
                         bestCandidate = source;
@@ -70,14 +67,12 @@ namespace Telemachus
                         break;
                     }
 
-                    // If not found yet, look for any playing "long" 2D track (High discovery probability)
                     if (bestCandidate == null && source.isPlaying && source.clip.length > 20f && !source.loop)
                     {
                         bestCandidate = source;
                     }
                 }
 
-                // Fallback: If nothing is "playing", check for paused whitelisted tracks (to keep the UI stable)
                 if (bestCandidate == null)
                 {
                     foreach (var source in masters)
@@ -108,7 +103,7 @@ namespace Telemachus
                     if (foundWhitelisted)
                         PluginLogger.print(string.Format("[MusicSync] Active Soundtrack: {0}", status.name));
                     else
-                        PluginLogger.print(string.Format("[MusicSync] DISCOVERY: Detected unknown 2D track: {0}. Add this to your MP3 folder to sync!", status.name));
+                        PluginLogger.print(string.Format("[MusicSync] DISCOVERY: Detected unknown 2D track: {0}. Add this to your MP3 folder!", status.name));
                     
                     _lastReportedName = status.name;
                 }
@@ -118,6 +113,30 @@ namespace Telemachus
 
             _lastUpdateFrame = Time.frameCount;
             return _cachedStatus;
+        }
+
+        [TelemetryAPI("a.music.list", "List of all potential soundtrack clips in the game database")]
+        public object GetMusicList(DataSources dataSources)
+        {
+            return MainThreadDispatcher.Run(() =>
+            {
+                // v16.165: Robust scan using Resources.FindObjectsOfTypeAll.
+                // This is the most reliable cross-version way to find loaded clips.
+                var allClips = Resources.FindObjectsOfTypeAll<AudioClip>();
+                var uniqueClips = new HashSet<string>();
+
+                foreach (var clip in allClips)
+                {
+                    // Heuristic for soundtracks: long duration (>15s).
+                    if (clip != null && clip.length > 15.0f)
+                    {
+                        uniqueClips.Add(clip.name);
+                    }
+                }
+
+                var list = uniqueClips.OrderBy(n => n).ToList();
+                return "[" + string.Join(", ", list.Select(n => "\"" + n + "\"")) + "]";
+            });
         }
 
         [TelemetryAPI("a.music.name", "Current soundtrack name")]
