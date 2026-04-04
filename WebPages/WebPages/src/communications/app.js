@@ -73,6 +73,13 @@ class CommunicationsConsole {
                     widget.receiver.sync.clear();
                     widget.start();
                 });
+                // v16.31: Subscribe to delayed telemetry keys
+                this.signalLink.subscribe(['v.altitude', 'v.obtSpeed', 'v.missionTime']);
+            });
+
+            // v16.31: Handle delayed datalink updates
+            this.signalLink.on('datalink_update', (data) => {
+                this.handleDelayedTelemetry(data.values);
             });
 
             this.signalLink.connect();
@@ -167,14 +174,27 @@ class CommunicationsConsole {
         this.telemetryData.delay = status.delay;
         this.telemetryData.quality = status.quality;
 
-        // Main UI updates directly from Heartbeat
+        // Main UI updates directly from Heartbeat (Real-time sync markers)
         if (this.telDelay && status.delay !== undefined) this.telDelay.innerText = `${status.delay.toFixed(1)}S`;
         if (this.telSignal && status.quality !== undefined) this.telSignal.innerText = `${status.quality}%`;
-        if (this.telAlt && status.alt !== undefined) this.telAlt.innerText = `${(status.alt / 1000).toFixed(2)} KM`;
-        if (this.telVel && status.vel !== undefined) this.telVel.innerText = `${Math.round(status.vel)} M/S`;
-        if (this.telMet && status.met !== undefined) this.telMet.innerText = `T+ ${this.formatMET(status.met)}`;
 
         this.updateSignalUI(status.quality);
+    }
+
+    handleDelayedTelemetry(values) {
+        // UI updates from the delayed stream
+        if (this.telAlt && values['v.altitude'] !== undefined) {
+            const val = values['v.altitude'];
+            this.telAlt.innerText = typeof val === 'number' ? `${(val / 1000).toFixed(2)} KM` : val;
+        }
+        if (this.telVel && values['v.obtSpeed'] !== undefined) {
+            const val = values['v.obtSpeed'];
+            this.telVel.innerText = typeof val === 'number' ? `${Math.round(val)} M/S` : val;
+        }
+        if (this.telMet && values['v.missionTime'] !== undefined) {
+            const val = values['v.missionTime'];
+            this.telMet.innerText = typeof val === 'number' ? `T+ ${this.formatMET(val)}` : val;
+        }
     }
 
     syncFromStream(ut, warp, delay, fov, signal, id) {

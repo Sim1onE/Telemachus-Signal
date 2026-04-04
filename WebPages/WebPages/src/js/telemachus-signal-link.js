@@ -10,6 +10,12 @@ const StreamConstants = {
     HEADER_SIZE: 35 // v16.01: Matches server 35 bytes
 };
 
+const SignalConstants = {
+    DATALINK_SAMPLE_RATE: 200,
+    CORRUPTION_THRESHOLD: 20, // % Quality under which corruption starts
+    LOSS_MODIFIER: 0.2        // Scaling factor for packet loss
+};
+
 class DownlinkSynchronizer {
     constructor() { this.queue = []; }
     pushPacket(ut, warp, delay, fov, quality, payload) {
@@ -20,19 +26,19 @@ class DownlinkSynchronizer {
         let readyPackets = [];
         while (this.queue.length > 0 && this.queue[0].ut <= masterTimecode) {
             const p = this.queue.shift(); // The packet is now GONE from the queue forever.
-            
+
             // ANTI-LOOP BARRIER: Never play the same (or older) UT twice in one session.
             if (this.lastPoppedUT !== undefined && p.ut <= this.lastPoppedUT) {
-                continue; 
+                continue;
             }
-            
+
             this.lastPoppedUT = p.ut;
             readyPackets.push(p);
         }
         return readyPackets;
     }
-    clear() { 
-        this.queue = []; 
+    clear() {
+        this.queue = [];
         this.lastPoppedUT = undefined; // v15.04: Reset epoch barrier on clean
     }
 }
@@ -51,7 +57,7 @@ class UplinkSynchronizer {
     // binaryType (Number) or null if string
     queuePacket(type, payload) {
         let creationUT = this.signalLink.getEstimatedFlightUT();
-        
+
         // v14.13 Fix: If KSP physics stalled, `getEstimatedFlightUT` can snap backwards during sync.
         // If an audio packet timestamp snaps backwards, it gets filtered/sorted out of order!
         // We rigidly enforce a strictly monotonic progression for all queued packets.
@@ -83,7 +89,7 @@ class UplinkSynchronizer {
             }
 
             // Guaranteed Chronological Transmission (v14.12)
-            toSend.sort((a,b) => a.creationUT - b.creationUT);
+            toSend.sort((a, b) => a.creationUT - b.creationUT);
 
             toSend.forEach(packet => {
                 if (typeof packet.payload === 'string') {
@@ -93,14 +99,14 @@ class UplinkSynchronizer {
                     // 2. Binary Buffer (Delayed Audio)
                     const finalBuffer = new Uint8Array(StreamConstants.HEADER_SIZE + packet.payload.length);
                     const view = new DataView(finalBuffer.buffer);
-                    
+
                     // Fill 34-byte Header
                     view.setUint8(0, packet.type);
                     view.setFloat64(1, packet.creationUT, true);
                     view.setFloat64(9, this.signalLink.lastPacketWarp || 1.0, true);
                     view.setFloat64(17, instantDelay, true);
                     view.setFloat64(25, 0, true); // No FOV for audio
-                    view.setUint8(33, this.signalLink.latestQuality || 100); 
+                    view.setUint8(33, this.signalLink.latestQuality || 100);
                     view.setUint8(34, 0); // v16.01: CameraID (0 for audio/system)
 
                     finalBuffer.set(packet.payload, StreamConstants.HEADER_SIZE);
@@ -124,6 +130,9 @@ class TelemachusSignalLink {
         this.latestQuality = 100;
         this.listeners = new Map();
         this.uplink = new UplinkSynchronizer(this);
+        this.datalinkSync = new DownlinkSynchronizer();
+        this.lastDatalinkData = {}; // v16.32: Persistent delayed data store
+        this.startDatalinkReleaseLoop();
     }
 
     getEstimatedFlightUT() {
@@ -160,10 +169,15 @@ class TelemachusSignalLink {
                     this.latestNetworkDelay = msg.delay;
                     this.latestQuality = msg.quality !== undefined ? msg.quality : 100;
                 }
-                
+
                 // Generic dispatch for all JSON types (v16.21)
                 if (msg.type && this.listeners.has(msg.type)) {
                     this.listeners.get(msg.type).forEach(cb => cb(msg));
+                }
+
+                // v16.30: Datalink specific sync insertion
+                if (msg.type === 'datalink') {
+                    this.datalinkSync.pushPacket(msg.ut, this.lastPacketWarp, this.latestNetworkDelay, 0, this.latestQuality, msg.values);
                 }
                 return;
             }
@@ -180,20 +194,20 @@ class TelemachusSignalLink {
             this.latestQuality = kspSignal;
 
             if (this.listeners.has(type)) {
-                this.listeners.get(type).forEach(cb => cb({ 
-                    ut: kspUT, 
-                    warp: kspWarp, 
-                    delay: kspDelay, 
-                    fov: kspFOV, 
+                this.listeners.get(type).forEach(cb => cb({
+                    ut: kspUT,
+                    warp: kspWarp,
+                    delay: kspDelay,
+                    fov: kspFOV,
                     quality: kspSignal,
-                    id: kspCameraID 
+                    id: kspCameraID
                 }, e.data));
             }
         };
 
         this.ws.onclose = () => {
             this.isRunning = false;
-            
+
             // v16.96: Dispatch disconnection event
             if (this.listeners.has('close')) this.listeners.get('close').forEach(cb => cb());
 
@@ -226,6 +240,53 @@ class TelemachusSignalLink {
 
     requestCameraList() {
         this.sendSystemCommand({ list: true });
+    }
+
+    subscribe(keys) {
+        this.sendSystemCommand({ subscribe: true, keys: Array.isArray(keys) ? keys : [keys] });
+    }
+
+    unsubscribe(keys) {
+        this.sendSystemCommand({ rm: Array.isArray(keys) ? keys : [keys] });
+    }
+
+    startDatalinkReleaseLoop() {
+        setInterval(() => {
+            const flightUT = this.getEstimatedFlightUT();
+
+            // v16.32 Fix: Subtract the simulated network delay to find our target presentation UT
+            const delayedUT = flightUT - this.latestNetworkDelay;
+            const ready = this.datalinkSync.popReady(delayedUT);
+
+            ready.forEach(packet => {
+                // 1. Packet Loss Simulation
+                if (Math.random() * 100 > packet.quality * SignalConstants.LOSS_MODIFIER) {
+                    return; // Packet lost in transmission
+                }
+
+                // 2. Data Corruption Simulation (at very low quality)
+                let data = { ...packet.payload };
+                if (packet.quality < SignalConstants.CORRUPTION_THRESHOLD) {
+                    Object.keys(data).forEach(key => {
+                        if (Math.random() < 0.3) {
+                            data[key] = null;
+                        }
+                    });
+                }
+
+                // v16.32: Update the generic data store
+                Object.assign(this.lastDatalinkData, data);
+
+                // 3. Dispatch delayed and degraded event
+                if (this.listeners.has('datalink_update')) {
+                    this.listeners.get('datalink_update').forEach(cb => cb({
+                        ut: packet.ut,
+                        quality: packet.quality,
+                        values: data
+                    }));
+                }
+            });
+        }, 50); // Release check at 20Hz
     }
 }
 

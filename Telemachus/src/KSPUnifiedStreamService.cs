@@ -241,6 +241,15 @@ namespace Telemachus
         }
         public const int HEADER_SIZE = 35; // v16.01: Increased to 35 for CameraID
 
+        private KSPAPIBase api;
+        private HashSet<string> subscriptions = new HashSet<string>();
+        private long lastDatalinkTick = 0;
+
+        public KSPUnifiedStreamService(KSPAPIBase apiInstance, UpLinkDownLinkRate rateTracker) { 
+            this.api = apiInstance;
+            this.dataRates = rateTracker; 
+        }
+
         private UpLinkDownLinkRate dataRates;
         private AudioSource audioSource;
         private GameObject audioHost;
@@ -252,8 +261,6 @@ namespace Telemachus
         private int _downlinkPacketCount = 0;
         private float _lastDownlinkDiag = 0;
         private string _pendingDownlinkMsg = null;
-
-        public KSPUnifiedStreamService(UpLinkDownLinkRate rateTracker) { this.dataRates = rateTracker; }
 
         protected override void OnOpen()
         {
@@ -300,6 +307,7 @@ namespace Telemachus
                     var json = Json.DecodeObject(e.Data) as Dictionary<string, object>;
                     if (json != null) {
                         if (json.ContainsKey("list")) SendCameraList();
+                        else if (json.ContainsKey("subscribe") || json.ContainsKey("keys") || json.ContainsKey("rm")) HandleSubscription(json);
                         else HandleCommand(json);
                     }
                 } catch { }
@@ -345,6 +353,25 @@ namespace Telemachus
                     };
                     SendAsync(Json.Encode(packet), null);
                 }
+            }
+        }
+
+        private void HandleSubscription(Dictionary<string, object> json)
+        {
+            if (json.ContainsKey("keys"))
+            {
+                var keys = (json["keys"] as System.Collections.IEnumerable).Cast<object>().Select(x => x.ToString().Trim());
+                subscriptions.UnionWith(keys);
+                PluginLogger.print($"[Downlink] Client {ID} subscribed to {subscriptions.Count} telemetry keys.");
+            }
+            if (json.ContainsKey("rm"))
+            {
+                var keys = (json["rm"] as System.Collections.IEnumerable).Cast<object>().Select(x => x.ToString().Trim());
+                subscriptions.ExceptWith(keys);
+            }
+            if (json.ContainsKey("clear") && (bool)json["clear"])
+            {
+                subscriptions.Clear();
             }
         }
 
@@ -442,6 +469,7 @@ namespace Telemachus
             }
             if (_pendingDownlinkMsg != null) { PluginLogger.print(_pendingDownlinkMsg); _pendingDownlinkMsg = null; }
             SendHeartbeat();
+            SendDatalinkHeartbeat();
             SendSoundtrackHeartbeat();
             
             // v16.05: Dispatch frames for all active cameras in the session
@@ -474,7 +502,7 @@ namespace Telemachus
         {
             try {
                 long now = Environment.TickCount;
-                if (now - lastHeartbeatTick < 33 && now >= lastHeartbeatTick) return;
+                if (now - lastHeartbeatTick < 200 && now >= lastHeartbeatTick) return;
                 lastHeartbeatTick = now;
                 Vessel v = FlightGlobals.ActiveVessel;
                 if (v == null) return;
@@ -484,9 +512,38 @@ namespace Telemachus
                 int quality = (int)(TelemachusSignalManager.GetSignalQuality(v) * 100);
                 var status = new Dictionary<string, object> {
                     { "type", "status" }, { "ut", currentUT }, { "warp", warp }, { "delay", delay },
-                    { "quality", quality }, { "alt", (double)v.altitude }, { "vel", (double)v.obt_speed }, { "met", (double)v.missionTime }
+                    { "quality", quality }
                 };
                 SendAsync(Json.Encode(status), null);
+            } catch { }
+        }
+
+        private void SendDatalinkHeartbeat()
+        {
+            if (subscriptions.Count == 0) return;
+
+            try {
+                long now = Environment.TickCount;
+                if (now - lastDatalinkTick < 200 && now >= lastDatalinkTick) return;
+                lastDatalinkTick = now;
+
+                double currentUT = Planetarium.GetUniversalTime();
+                var results = new Dictionary<string, object>();
+                
+                foreach (var key in subscriptions.ToList())
+                {
+                    try {
+                        results[key] = api.ProcessAPIString(key);
+                    } catch { results[key] = null; }
+                }
+
+                var packet = new Dictionary<string, object> {
+                    { "type", "datalink" },
+                    { "ut", currentUT },
+                    { "values", results }
+                };
+                
+                SendAsync(Json.Encode(packet), null);
             } catch { }
         }
 
