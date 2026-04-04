@@ -13,7 +13,8 @@ const StreamConstants = {
 const SignalConstants = {
     DATALINK_SAMPLE_RATE: 200,
     CORRUPTION_THRESHOLD: 20, // % Quality under which corruption starts
-    LOSS_MODIFIER: 1          // Scaling factor for packet loss
+    LOSS_MODIFIER: 2.0,       // Scaling factor for packet loss (v16.43: Higher = worse penalty)
+    JITTER_BUFFER: 0.1        // v16.38: 100ms safety margin for network jitter
 };
 
 class DownlinkSynchronizer {
@@ -56,6 +57,9 @@ class UplinkSynchronizer {
 
     // binaryType (Number) or null if string
     queuePacket(type, payload) {
+        // v16.43: Discard uplink if not synchronized
+        if (!this.signalLink._isClockSync) return;
+
         let creationUT = this.signalLink.getEstimatedFlightUT();
 
         // v14.13 Fix: If KSP physics stalled, `getEstimatedFlightUT` can snap backwards during sync.
@@ -136,6 +140,8 @@ class TelemachusSignalLink {
         // v16.35: Smoothing & Interpolation props
         this._lastStatusMET = 0;
         this._lastStatusUT = 0; // Local reference for LaunchTime calc
+        this._lastReturnedFlightUT = 0; // v16.43: Monotonicity tracker
+        this._isClockSync = false;      // v16.43: Initial sync guard
 
         this.startDatalinkReleaseLoop();
         this.startSmoothingLoop();
@@ -152,11 +158,19 @@ class TelemachusSignalLink {
         if (!this.lastPacketReceivedAt) return 0;
         const now = performance.now();
         const elapsedS = (now - this.lastPacketReceivedAt) / 1000.0;
-        return this.lastPacketUT + (elapsedS * this.lastPacketWarp);
+        let estUT = this.lastPacketUT + (elapsedS * this.lastPacketWarp);
+
+        // v16.43 Monotonicity: Clock must NEVER snap backwards
+        if (estUT < this._lastReturnedFlightUT) {
+            estUT = this._lastReturnedFlightUT + 0.0001;
+        }
+        this._lastReturnedFlightUT = estUT;
+        return estUT;
     }
 
     getEstimatedDelayedUT() {
-        return this.getEstimatedFlightUT() - this.latestNetworkDelay;
+        // v16.43: Include Jitter Buffer in presentation target
+        return this.getEstimatedFlightUT() - this.latestNetworkDelay - SignalConstants.JITTER_BUFFER;
     }
 
     getEstimatedDelayedMET() {
@@ -198,6 +212,7 @@ class TelemachusSignalLink {
                     this.latestQuality = msg.quality;
                     this._lastStatusUT = msg.ut;
                     this._lastStatusMET = msg.met;
+                    this._isClockSync = true; // v16.43: Sync acquired
                 }
 
                 // Generic dispatch for all JSON types (v16.21)
@@ -289,8 +304,9 @@ class TelemachusSignalLink {
             const ready = this.datalinkSync.popReady(delayedUT);
 
             ready.forEach(packet => {
-                // 1. Packet Loss Simulation
-                if (Math.random() * 100 > packet.quality * SignalConstants.LOSS_MODIFIER) {
+                // 1. Packet Loss Simulation (v16.43 FIX: Corrected formula)
+                const lossChance = (100 - packet.quality) * SignalConstants.LOSS_MODIFIER;
+                if (Math.random() * 100 < lossChance) {
                     return; // Packet lost in transmission
                 }
 
