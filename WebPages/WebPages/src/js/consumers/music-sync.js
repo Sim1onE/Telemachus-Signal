@@ -26,20 +26,19 @@ class MusicSync {
         this.bindElements();
         this.audio.loop = false; 
         
-        // Load saved volume (v16.101)
         const savedVol = localStorage.getItem('music-volume');
         this.audio.volume = savedVol !== null ? parseFloat(savedVol) : 0.5;
         if (this.elements.volume) this.elements.volume.value = this.audio.volume;
 
         window.addEventListener('click', () => {
             if (this.audio.paused && this.isPlaying && !this.isMuted) {
-                console.log("[MusicSync] Manual Activation: Playback started.");
-                this.audio.play().catch(e => console.warn("[MusicSync] Activation failed:", e));
+                this.audio.play().catch(e => console.warn("[MusicSync] Manual Activation failed:", e));
             }
         }, { once: true });
 
         this.audio.oncanplay = () => {
             if (this.pendingSeekTime >= 0) {
+                console.log(`[MusicSync] Seeking to ${this.pendingSeekTime.toFixed(2)}s`);
                 this.audio.currentTime = this.pendingSeekTime;
                 
                 const target = this.pendingSeekTime;
@@ -53,8 +52,13 @@ class MusicSync {
         };
 
         this.audio.onerror = (e) => {
-            console.error(`[MusicSync] Failed to load track: ${this.audio.src}`);
-            this.showError('MISSING AUDIO');
+            // v16.105: Log the specific error and target URL
+            console.error(`[MusicSync] Playback Error for: ${this.audio.src}`, e);
+            
+            // Only show MISSING AUDIO if we actually have a track name (ignore aborts)
+            if (this.currentTrack) {
+                this.showError('MISSING AUDIO');
+            }
         };
 
         this.waitForSignalLink();
@@ -70,7 +74,10 @@ class MusicSync {
                 this.showError('SIGNAL LOST');
             });
             window.app.signalLink.on('open', () => {
-                this.elements.name.style.color = '';
+                if (this.currentTrack === 'SIGNAL LOST') {
+                    this.elements.name.textContent = 'SILENCE';
+                    this.elements.name.style.color = '';
+                }
                 window.app.signalLink.sendSystemCommand({ type: "request-soundtrack" });
             });
             window.app.signalLink.sendSystemCommand({ type: "request-soundtrack" });
@@ -91,7 +98,6 @@ class MusicSync {
             this.elements.toggle.onclick = () => this.toggleMute();
         }
 
-        // v16.102: Volume slider handling
         if (this.elements.volume) {
             this.elements.volume.oninput = (e) => {
                 const vol = parseFloat(e.target.value);
@@ -105,6 +111,7 @@ class MusicSync {
         if (this.elements.name) {
             this.elements.name.textContent = text;
             this.elements.name.style.color = '#ff4c4c';
+            this.elements.name.style.textShadow = '0 0 5px rgba(255,76,76,0.5)';
         }
         this.widget.classList.remove('playing');
     }
@@ -129,28 +136,33 @@ class MusicSync {
     handleMetadata(msg) {
         const { name, time, isPlaying } = msg;
 
-        if (name && (name.toLowerCase() === 'radiosilence' || name.toLowerCase() === 'none')) {
+        // Normalize name
+        const normalizedName = (name || "").toLowerCase();
+
+        if (normalizedName === 'radiosilence' || normalizedName === 'none' || !name) {
             this.stopPlayback();
             return;
         }
 
-        if (name && name !== this.currentTrack) {
+        // v16.106: Only reset and load if the track has ACTUALLY changed
+        if (name !== this.currentTrack) {
+            console.log(`[MusicSync] Switching from ${this.currentTrack} to ${name}`);
             this.currentTrack = name;
             let display = name.split('/').pop().replace('.mp3', '').toUpperCase();
             this.elements.name.textContent = display;
             this.elements.name.style.color = '';
+            this.elements.name.style.textShadow = '';
             this.loadTrack(name, time);
-        } else if (!name) {
-            this.stopPlayback();
-            return;
         }
 
         this.isPlaying = isPlaying;
 
         if (!this.isMuted) {
-            if (this.isPlaying && this.audio.paused && this.audio.src) {
-                this.audio.play().then(() => this.widget.classList.add('playing')).catch(() => {});
-            } else if (!this.isPlaying && !this.audio.paused) {
+            if (this.isPlaying) {
+                if (this.audio.paused && this.audio.src) {
+                    this.audio.play().then(() => this.widget.classList.add('playing')).catch(() => {});
+                }
+            } else if (!this.audio.paused) {
                 this.audio.pause();
                 this.widget.classList.remove('playing');
             }
@@ -175,11 +187,20 @@ class MusicSync {
     }
 
     loadTrack(name, startTime) {
+        // v16.107: Robust filename building
         let filename = name.split('/').pop();
-        if (!filename.toLowerCase().endsWith('.mp3')) filename += '.mp3';
-        this.audio.src = `${this.audioPath}${filename}`;
+        if (!filename.toLowerCase().endsWith('.mp3')) {
+            filename += '.mp3';
+        }
+        
+        // Use encodeURIComponent for the filename part to handle spaces and brackets safely
+        const finalUrl = `${this.audioPath}${encodeURIComponent(filename)}`;
+        console.log(`[MusicSync] Loading Track: ${finalUrl}`);
+        
+        this.audio.src = finalUrl;
         this.pendingSeekTime = startTime + 0.2;
         this.audio.load();
+        
         if (!this.isMuted && this.isPlaying) {
             this.audio.play().catch(() => {});
         }
