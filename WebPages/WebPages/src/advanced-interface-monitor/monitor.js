@@ -271,8 +271,11 @@ $(document).ready(function () {
         txt('n-roll', vFmt(d.nRoll, 1)); txt('n-rroll', `(${vFmt(d.nRollR, 1)})`);
 
         // C1: Signal & Link Status
-        let sig = (parseFloat(d.cSig) || 0) * 100;
-        txt('comm-str', vFmt(sig, 0) + "%");
+        const sig = (parseFloat(d.cSig) || 0) * 100;
+        const sigEl = $('#comm-str');
+        sigEl.text(vFmt(sig, 0) + "%");
+        sigEl.css('color', sig === 0 ? "#ff4c4c" : "");
+
         txt('comm-state', String(d.cState || "NO LINK").toUpperCase());
         
         let txEl = $('#comm-tx');
@@ -282,7 +285,10 @@ $(document).ready(function () {
             txEl.text("IDLE").removeClass('sig-tx-active').css('color', 'var(--text-secondary)');
         }
 
-        txt('comm-delay', vFmt(d.cDel, 2) + "s");
+        const delayEl = $('#comm-delay');
+        const isOffline = d.cDel === null || d.cDel < 0;
+        delayEl.text(isOffline ? "---" : vFmt(d.cDel, 2) + "s");
+        delayEl.css('color', isOffline ? "#ff4c4c" : "");
 
         // Signal Bars logic (5 bars)
         const bars = [1, 2, 3, 4, 5];

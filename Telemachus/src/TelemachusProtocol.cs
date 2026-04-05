@@ -24,7 +24,7 @@ namespace Telemachus
             packet[0] = type;
             Vessel v = FlightGlobals.ActiveVessel;
             double warp = TimeWarp.fetch != null ? TimeWarp.CurrentRate : 1.0;
-            double delay = v != null ? TelemachusSignalManager.GetSignalDelay(v) : 0;
+            double delay = (v != null ? TelemachusSignalManager.GetSignalDelay(v) : null) ?? -1.0;
             byte quality = (byte)(v != null ? (TelemachusSignalManager.GetSignalQuality(v) * 100) : 100);
             
             Buffer.BlockCopy(BitConverter.GetBytes(ut), 0, packet, 1, 8);

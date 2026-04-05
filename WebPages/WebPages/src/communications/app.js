@@ -185,8 +185,16 @@ class CommunicationsConsole {
         this.telemetryData.quality = status.quality;
 
         // Main UI updates directly from Heartbeat (Real-time sync markers)
-        if (this.telDelay && status.delay !== undefined) this.telDelay.innerText = `${status.delay.toFixed(1)}S`;
-        if (this.telSignal && status.quality !== undefined) this.telSignal.innerText = `${status.quality}%`;
+        if (this.telDelay && status.delay !== undefined) {
+            const isOffline = status.delay === null || status.delay < 0;
+            this.telDelay.innerText = isOffline ? "---" : `${status.delay.toFixed(1)}S`;
+            this.telDelay.style.color = isOffline ? "#ff4c4c" : "";
+        }
+        
+        if (this.telSignal && status.quality !== undefined) {
+            this.telSignal.innerText = `${status.quality}%`;
+            this.telSignal.style.color = status.quality === 0 ? "#ff4c4c" : "";
+        }
 
         this.updateSignalUI(status.quality);
     }

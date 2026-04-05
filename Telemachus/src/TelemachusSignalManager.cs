@@ -79,7 +79,7 @@ namespace Telemachus
         public static double GetSignalQuality(Vessel v)
         {
             if (DebugSignalOverride >= 0) return DebugSignalOverride;
-            if (v == null) return 0;
+            if (v == null || v.connection == null || v.connection.ControlPath == null || v.connection.ControlPath.Count == 0) return 0;
             double stock = GetSignalStrength(v);
 
             if (IsKerbalismInstalled)
@@ -172,10 +172,10 @@ namespace Telemachus
             return totalDistance;
         }
 
-        public static double GetSignalDelay(Vessel v)
+        public static double? GetSignalDelay(Vessel v)
         {
             if (DebugDelayOverride >= 0) return DebugDelayOverride;
-            if (v == null || v.connection == null) return 0;
+            if (v == null || v.connection == null || v.connection.ControlPath == null || v.connection.ControlPath.Count == 0) return null;
 
             // Average round trip time / 2
             // Sum of link delays in path

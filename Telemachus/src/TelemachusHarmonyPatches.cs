@@ -380,12 +380,12 @@ namespace Telemachus.Harmony
             if (FlightGlobals.ActiveVessel == null) return;
 
             double quality = TelemachusSignalManager.GetSignalQuality(FlightGlobals.ActiveVessel);
-            double delay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
+            double? delay = TelemachusSignalManager.GetSignalDelay(FlightGlobals.ActiveVessel);
 
             InjectTooltip(__instance, quality, delay);
         }
 
-        private static void InjectTooltip(MonoBehaviour ctrl, double quality, double delay)
+        private static void InjectTooltip(MonoBehaviour ctrl, double quality, double? delay)
         {
             try
             {
@@ -409,11 +409,11 @@ namespace Telemachus.Harmony
                                 string qualityText = string.Format("\n<size=85%><color=#00FFFF>Transmission Quality: {0:P0}</color></size>", quality);
 
                                 string delayText = "";
-                                if (delay > 0)
+                                if (delay.HasValue && delay.Value >= 0)
                                 {
-                                    string delayFormatted = delay >= 1.0
-                                        ? string.Format("{0:F2}s", delay)
-                                        : string.Format("{0:F0}ms", delay * 1000.0);
+                                    string delayFormatted = delay.Value >= 1.0
+                                        ? string.Format("{0:F2}s", delay.Value)
+                                        : string.Format("{0:F0}ms", delay.Value * 1000.0);
                                     delayText = string.Format("\n<size=85%><color=#FF00FF>Signal Delay: {0}</color></size>", delayFormatted);
                                 }
 
