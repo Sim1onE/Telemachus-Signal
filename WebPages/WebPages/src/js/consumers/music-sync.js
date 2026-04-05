@@ -36,7 +36,9 @@ class MusicSync {
         window.addEventListener('click', () => {
             if (this.audio.paused && this.isPlaying) {
                 console.log("[MusicSync] Browser Unlocked: Attempting play.");
-                this.audio.play().catch(() => {});
+                this.audio.play().then(() => {
+                    this.widget.classList.add('playing');
+                }).catch(() => {});
             }
         }, { once: true });
 
@@ -66,6 +68,8 @@ class MusicSync {
             window.app.signalLink.on('soundtrack', (packet) => {
                 this.handleMetadata(packet.data);
             });
+            // v18.61: Subscribe ONLY after the listener is registered to avoid missing initial packet
+            window.app.signalLink.subscribeSoundtrack();
             window.app.signalLink.on('close', () => {
                 this.stopPlayback();
                 this.showError('SIGNAL LOST');
@@ -75,7 +79,8 @@ class MusicSync {
                     this.elements.name.textContent = 'SILENCE';
                     this.elements.name.style.color = '';
                 }
-                // v18.11: No manual request needed, subscribeSoundtrack handles initial state
+                // v18.62: Re-subscribe on every connection open
+                window.app.signalLink.subscribeSoundtrack();
             });
         } else {
             setTimeout(() => this.waitForSignalLink(), 100);
@@ -146,16 +151,14 @@ class MusicSync {
         }
 
         this.isPlaying = isPlaying;
-
         if (this.isPlaying) {
+            this.widget.classList.add('playing');
             if (this.audio.paused && this.audio.src) {
-                this.audio.play().then(() => this.widget.classList.add('playing')).catch(() => {});
-            } else {
-                this.widget.classList.add('playing');
+                this.audio.play().catch(() => {});
             }
-        } else if (!this.audio.paused) {
-            this.audio.pause();
+        } else {
             this.widget.classList.remove('playing');
+            if (!this.audio.paused) this.audio.pause();
         }
 
         // v16.141: Sync Time with new 1.5s tolerance

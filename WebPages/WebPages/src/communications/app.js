@@ -71,7 +71,6 @@ class CommunicationsConsole {
             this.signalLink.on('open', () => {
                 // v18.14: Explicitly subscribe to required streams
                 this.signalLink.subscribeTick();
-                this.signalLink.subscribeSoundtrack();
                 this.signalLink.subscribeAudio();
                 this.signalLink.requestCameraList();
 
