@@ -24,14 +24,11 @@ class CameraReceiver {
     }
 
     start(sensorName) {
-        // v16.07: Always send ID with camera request
-        if (this.isRunning) {
-            this.signalLink.sendSystemCommand({ camera: sensorName, id: this.cameraId });
-            return;
-        }
+        // v18.14: Subscription logic moved to CameraWidget.
+        // Receiver now only handles the playback loop.
+        if (this.isRunning) return;
         
         this.isRunning = true;
-        this.signalLink.sendSystemCommand({ camera: sensorName, id: this.cameraId });
         this.playbackLoop();
     }
 

@@ -1,0 +1,279 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using Telemachus.CameraSnapshots;
+
+namespace Telemachus
+{
+    public interface ISubscription
+    {
+        string StreamType { get; }
+        string SubscriptionKey { get; }
+        bool ShouldUpdate(double currentUT);
+        void Execute(KSPUnifiedStreamService session);
+        void UpdateConfig(Dictionary<string, object> json);
+        
+        void OnStart(StreamSessionController controller);
+        void OnStop(StreamSessionController controller);
+    }
+
+    public abstract class BaseSubscription : ISubscription
+    {
+        public abstract string StreamType { get; }
+        public virtual string SubscriptionKey => StreamType;
+        public int RateMs { get; set; } = 200;
+        public bool ChangingOnly { get; set; } = false;
+
+        protected double LastSentUT = -1;
+        protected object LastSentData = null;
+
+        public virtual void OnStart(StreamSessionController controller) { }
+        public virtual void OnStop(StreamSessionController controller) { }
+
+        public virtual bool ShouldUpdate(double currentUT)
+        {
+            if (LastSentUT > 0)
+            {
+                double elapsedMs = (currentUT - LastSentUT) * 1000.0;
+                if (elapsedMs < RateMs) return false;
+            }
+            return true;
+        }
+
+        public abstract void Execute(KSPUnifiedStreamService session);
+
+        public virtual void UpdateConfig(Dictionary<string, object> json)
+        {
+            if (json.ContainsKey("rate")) RateMs = Convert.ToInt32(json["rate"]);
+            if (json.ContainsKey("changing")) ChangingOnly = (bool)json["changing"];
+        }
+
+        protected Dictionary<string, object> CreateUnifiedPacket(double ut, object data)
+        {
+            return new Dictionary<string, object> { { "type", StreamType }, { "ut", ut }, { "data", data } };
+        }
+
+        protected bool HasChanged(object newData)
+        {
+            if (!ChangingOnly) return true;
+            if (LastSentData == null || newData == null) return true;
+            if (newData is Dictionary<string, object> newDict && LastSentData is Dictionary<string, object> oldDict)
+            {
+                if (newDict.Count != oldDict.Count) return true;
+                foreach (var kvp in newDict)
+                {
+                    if (!oldDict.ContainsKey(kvp.Key)) return true;
+                    if (!object.Equals(kvp.Value, oldDict[kvp.Key])) return true;
+                }
+                return false;
+            }
+            return !object.Equals(newData, LastSentData);
+        }
+    }
+
+    public class TickSubscription : BaseSubscription
+    {
+        public override string StreamType => "tick";
+        
+        public override void UpdateConfig(Dictionary<string, object> json)
+        {
+            base.UpdateConfig(json);
+            // v18.15: Clamp rate to a maximum of 1000ms (1Hz minimum frequency)
+            if (RateMs > 1000) RateMs = 1000;
+        }
+
+        public override void Execute(KSPUnifiedStreamService session)
+        {
+            Vessel v = FlightGlobals.ActiveVessel;
+            if (v == null) return;
+            double currentUT = Planetarium.GetUniversalTime();
+            
+            // v18.15: Unified "tick" payload. ut is inside data because tick IS the time source.
+            var data = new Dictionary<string, object> {
+                { "ut", currentUT },
+                { "met", (double)v.missionTime }, 
+                { "warp", TimeWarp.fetch != null ? TimeWarp.CurrentRate : 1.0 },
+                { "delay", TelemachusSignalManager.GetSignalDelay(v) }, 
+                { "quality", (byte)(TelemachusSignalManager.GetSignalQuality(v) * 100) }
+            };
+
+            if (HasChanged(data)) {
+                // Special case for tick: no external ut header, it's all in data
+                session.SendUnifiedPacket(new Dictionary<string, object> { 
+                    { "type", StreamType }, 
+                    { "data", data } 
+                });
+                LastSentUT = currentUT; LastSentData = data;
+            }
+        }
+    }
+
+    public class TelemetrySubscription : BaseSubscription
+    {
+        public override string StreamType => "telemetry";
+        private HashSet<string> keys = new HashSet<string>();
+        public override void UpdateConfig(Dictionary<string, object> json)
+        {
+            base.UpdateConfig(json);
+            if (json.ContainsKey("keys")) {
+                var newKeys = (json["keys"] as System.Collections.IEnumerable).Cast<object>().Select(x => x.ToString().Trim());
+                keys.UnionWith(newKeys);
+            }
+            // v18.11: Restore 'rm' support
+            if (json.ContainsKey("rm")) {
+                var delKeys = (json["rm"] as System.Collections.IEnumerable).Cast<object>().Select(x => x.ToString().Trim());
+                keys.ExceptWith(delKeys);
+            }
+            if (json.ContainsKey("clear") && (bool)json["clear"]) keys.Clear();
+        }
+        public override void Execute(KSPUnifiedStreamService session)
+        {
+            if (keys.Count == 0) return;
+            double currentUT = Planetarium.GetUniversalTime();
+            var results = new Dictionary<string, object>();
+            foreach (var key in keys.ToList()) {
+                try { results[key] = session.ProcessAPI(key); } catch { results[key] = null; }
+            }
+            if (HasChanged(results)) {
+                session.SendUnifiedPacket(CreateUnifiedPacket(currentUT, results));
+                LastSentUT = currentUT; LastSentData = results;
+            }
+        }
+    }
+
+    public class SoundtrackSubscription : BaseSubscription
+    {
+        public override string StreamType => "soundtrack";
+        public SoundtrackSubscription() { ChangingOnly = true; }
+        
+        // v18.11: Send current state as soon as started
+        public override void OnStart(StreamSessionController controller) {
+            Execute(controller.Socket); 
+        }
+
+        public override void Execute(KSPUnifiedStreamService session)
+        {
+            if (MusicHandler.Instance == null) return;
+            var status = MusicHandler.Instance.GetCurrentStatus();
+            double currentUT = Planetarium.GetUniversalTime();
+            var data = new Dictionary<string, object> {
+                { "name", status.name }, { "isPlaying", status.isPlaying }, { "time", status.time }, { "duration", status.duration }
+            };
+            var compareData = new { status.name, status.isPlaying };
+            if (HasChanged(compareData)) {
+                session.SendUnifiedPacket(CreateUnifiedPacket(currentUT, data));
+                LastSentUT = currentUT; LastSentData = compareData;
+            }
+        }
+    }
+
+    public class AudioSubscription : ISubscription
+    {
+        public string StreamType => "audio";
+        public string SubscriptionKey => StreamType;
+        public bool ShouldUpdate(double currentUT) => false;
+        public void UpdateConfig(Dictionary<string, object> json) { }
+        public void Execute(KSPUnifiedStreamService session) { }
+
+        // v18.11 Restore: Monotonic UT logic for Audio
+        private ulong _fmodAudioBlockCount = 0;
+        private double _lastAudioCaptureUt = -1.0;
+        private int _downlinkPacketCount = 0;
+        private float _lastDiagTime = 0;
+
+        public void OnStart(StreamSessionController controller)
+        {
+            AudioStreamManager.EnsureInstance();
+            AudioStreamManager.Instance?.Register(controller);
+        }
+
+        public void OnStop(StreamSessionController controller)
+        {
+            AudioStreamManager.Instance?.Unregister(controller);
+        }
+
+        public void ProcessAudio(float[] samples, KSPUnifiedStreamService session)
+        {
+            _fmodAudioBlockCount++;
+            double currentUt = Planetarium.GetUniversalTime();
+            if (_lastAudioCaptureUt < 0) _lastAudioCaptureUt = currentUt;
+            
+            double blockDuration = (double)samples.Length / 22050.0;
+            _lastAudioCaptureUt += blockDuration;
+            if (currentUt > _lastAudioCaptureUt) _lastAudioCaptureUt = currentUt;
+
+            // v18.11: Ensure strictly increasing UT for jitter buffer stability
+            double uniqueUt = _lastAudioCaptureUt + (_fmodAudioBlockCount % 100 * 0.00000001);
+
+            byte[] pcm = new byte[samples.Length * 2];
+            for (int i = 0; i < samples.Length; i++) {
+                short s = (short)Mathf.Clamp(samples[i] * 32767f, -32768, 32767);
+                pcm[i * 2] = (byte)(s & 0xFF); pcm[i * 2 + 1] = (byte)((s >> 8) & 0xFF);
+            }
+
+            byte[] packet = new byte[TelemachusProtocol.HEADER_SIZE + pcm.Length];
+            TelemachusProtocol.FillHeader(packet, (byte)PacketType.AudioDownlink, uniqueUt, 0, 0);
+            Buffer.BlockCopy(pcm, 0, packet, TelemachusProtocol.HEADER_SIZE, pcm.Length);
+            session.SendBinary(packet);
+
+            // v18.11 Restore: Audio Diagnostic Log
+            _downlinkPacketCount++;
+            if (Time.unscaledTime - _lastDiagTime > 2.0f) {
+                PluginLogger.print($"[Radio-Diag] DOWNLINK ({session.ID}): {_downlinkPacketCount} pkts/2s");
+                _downlinkPacketCount = 0; _lastDiagTime = Time.unscaledTime;
+            }
+        }
+    }
+
+    public class CameraSubscription : BaseSubscription
+    {
+        public override string StreamType => "camera";
+        public string CameraName { get; private set; }
+        public byte CameraID { get; private set; }
+        private long lastSentFrameId = -1;
+
+        // v18.11 Restore: Multi-camera logic via unique keys
+        public override string SubscriptionKey => "camera_" + CameraID;
+
+        public override void OnStart(StreamSessionController controller)
+        {
+            if (CameraCaptureManager.classedInstance != null)
+                CameraCaptureManager.classedInstance.EnsureFlightCamera();
+        }
+
+        public override void UpdateConfig(Dictionary<string, object> json)
+        {
+            base.UpdateConfig(json);
+            if (json.ContainsKey("name")) CameraName = json["name"].ToString();
+            if (json.ContainsKey("id")) CameraID = (byte)Convert.ToInt32(json["id"]);
+        }
+        public override void Execute(KSPUnifiedStreamService session)
+        {
+            if (string.IsNullOrEmpty(CameraName)) return;
+            var sensor = GetSensor(CameraName);
+            if (sensor == null) return;
+            sensor.lastRequestTick = Environment.TickCount;
+            if (sensor.imageBytes == null || sensor.lastFrameId == lastSentFrameId) return;
+            byte[] jpeg = sensor.imageBytes;
+            byte[] packet = new byte[TelemachusProtocol.HEADER_SIZE + jpeg.Length];
+            TelemachusProtocol.FillHeader(packet, (byte)PacketType.VideoDownlink, sensor.lastFrameUT, sensor.interpolatedFOV, CameraID);
+            Buffer.BlockCopy(jpeg, 0, packet, TelemachusProtocol.HEADER_SIZE, jpeg.Length);
+            session.SendBinary(packet);
+            lastSentFrameId = sensor.lastFrameId; LastSentUT = Planetarium.GetUniversalTime();
+        }
+        public void ForwardCommand(Dictionary<string, object> json)
+        {
+            var sensor = GetSensor(CameraName);
+            if (sensor != null) sensor.ProcessCameraCommand(json);
+        }
+        private CameraCapture GetSensor(string name)
+        {
+            if (CameraCaptureManager.classedInstance == null) return null;
+            var cameras = CameraCaptureManager.classedInstance.cameras;
+            if (cameras.ContainsKey(name)) return cameras[name];
+            var key = cameras.Keys.FirstOrDefault(k => k.Equals(name, StringComparison.OrdinalIgnoreCase));
+            return key != null ? cameras[key] : null;
+        }
+    }
+}

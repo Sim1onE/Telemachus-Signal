@@ -53,6 +53,10 @@ $(document).ready(function () {
 
     signalLink.on('open', () => {
         console.log("[Monitor] Connected to telemetry stream.");
+        
+        // v17.0: Explicitly subscribe to tick for clock sync (v18.17)
+        signalLink.subscribeTick();
+        
         // Subscribe to all requested keys in tMap
         const keys = Object.values(tMap);
         signalLink.subscribe(keys);
@@ -61,7 +65,8 @@ $(document).ready(function () {
     // Persistent telemetry state to prevent flickering (v16.34)
     const telemetryState = {};
 
-    signalLink.on('status', (status) => {
+    signalLink.on('tick', (packet) => {
+        const status = packet.data;
         // Update persistent metadata (Real-time link info)
         telemetryState.cDel = status.delay;
         telemetryState.cSig = status.quality / 100.0;
@@ -69,7 +74,8 @@ $(document).ready(function () {
         updateUI(telemetryState);
     });
 
-    signalLink.on('smooth_tick', (data) => {
+    signalLink.on('smooth_tick', (packet) => {
+        const data = packet.data;
         // High-frequency clock updates (v16.35)
         telemetryState.ut = data.ut;
         telemetryState.vMet = data.met;
@@ -79,14 +85,15 @@ $(document).ready(function () {
         txt('footer-ut', 'UT: ' + formatUT(data.ut));
     });
 
-    signalLink.on('datalink_update', (data) => {
+    signalLink.on('datalink_update', (packet) => {
         // Update persistent telemetry from delayed stream
-        telemetryState.ut = data.ut;
-        telemetryState.cSig = data.quality / 100.0;
+        telemetryState.ut = packet.ut;
+        telemetryState.cSig = packet.quality / 100.0;
         
+        const data = packet.data;
         Object.entries(tMap).forEach(([alias, key]) => {
-            if (data.values[key] !== undefined) {
-                telemetryState[alias] = data.values[key];
+            if (data[key] !== undefined) {
+                telemetryState[alias] = data[key];
             }
         });
 

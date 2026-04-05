@@ -197,32 +197,45 @@ class TelemachusSignalLink {
 
         this.ws.onopen = () => {
             console.log("[SignalLink] Unified Data Stream Hub Active");
-            this.requestCameraList();
             if (this.listeners.has('open')) this.listeners.get('open').forEach(cb => cb());
         };
 
         this.ws.onmessage = (e) => {
             if (typeof e.data === 'string') {
                 const msg = JSON.parse(e.data);
-                if (msg.type === 'status') {
-                    this.lastPacketUT = msg.ut;
-                    this.lastPacketWarp = msg.warp;
+                const type = msg.type;
+
+                // v18.15: Special handling for 'tick' (Master Clock)
+                if (type === 'tick' && msg.data) {
+                    const d = msg.data;
+                    this.lastPacketUT = d.ut;
+                    this.lastPacketWarp = d.warp;
                     this.lastPacketReceivedAt = performance.now();
-                    this.latestNetworkDelay = msg.delay;
-                    this.latestQuality = msg.quality;
-                    this._lastStatusUT = msg.ut;
-                    this._lastStatusMET = msg.met;
-                    this._isClockSync = true; // v16.43: Sync acquired
+                    this.latestNetworkDelay = d.delay;
+                    this.latestQuality = d.quality;
+                    this._lastStatusUT = d.ut;
+                    this._lastStatusMET = d.met;
+                    this._isClockSync = true;
+                } 
+                else if (msg.ut !== undefined) {
+                    // Standard header for all other types: { type, ut, data }
+                    this.lastPacketUT = msg.ut;
+                    this.lastPacketReceivedAt = performance.now();
                 }
+
+                const dataPayload = msg.data || msg;
 
                 // Generic dispatch for all JSON types (v16.21)
-                if (msg.type && this.listeners.has(msg.type)) {
-                    this.listeners.get(msg.type).forEach(cb => cb(msg));
+                if (type && this.listeners.has(type)) {
+                    this.listeners.get(type).forEach(cb => cb({ 
+                        ut: msg.ut || this.lastPacketUT, 
+                        data: dataPayload 
+                    }, msg));
                 }
 
-                // v16.30: Datalink specific sync insertion
-                if (msg.type === 'datalink') {
-                    this.datalinkSync.pushPacket(msg.ut, this.lastPacketWarp, this.latestNetworkDelay, 0, this.latestQuality, msg.values);
+                // v16.30: Datalink specific sync insertion (v18.18: telemetry unificata a datalink)
+                if (type === 'datalink' || type === 'telemetry') {
+                    this.datalinkSync.pushPacket(msg.ut, this.lastPacketWarp, this.latestNetworkDelay, 0, this.latestQuality, dataPayload);
                 }
                 return;
             }
@@ -284,15 +297,67 @@ class TelemachusSignalLink {
     }
 
     requestCameraList() {
-        this.sendSystemCommand({ list: true });
+        this.sendSystemCommand({ op: "list", resource: "cameras" });
     }
 
-    subscribe(keys) {
-        this.sendSystemCommand({ subscribe: true, keys: Array.isArray(keys) ? keys : [keys] });
+    subscribeTick(options = {}) {
+        this.sendSystemCommand({ op: "sub", stream: "tick", ...options });
+    }
+
+    unsubscribeTick() {
+        this.sendSystemCommand({ op: "unsub", stream: "tick" });
+    }
+
+    // Deprecated alias for subscribeTick
+    subscribeStatus(options) { this.subscribeTick(options); }
+
+    subscribeSoundtrack(options = {}) {
+        this.sendSystemCommand({ op: "sub", stream: "soundtrack", ...options });
+    }
+
+    unsubscribeSoundtrack() {
+        this.sendSystemCommand({ op: "unsub", stream: "soundtrack" });
+    }
+
+    subscribeTelemetry(keys, options = {}) {
+        this.sendSystemCommand({ 
+            op: "sub", 
+            stream: "telemetry", 
+            keys: Array.isArray(keys) ? keys : [keys],
+            ...options 
+        });
+    }
+
+    // v18.11: Multi-camera subscription
+    subscribeCamera(id, name, options = {}) {
+        this.sendSystemCommand({
+            op: "sub",
+            stream: "camera",
+            id: id,
+            name: name,
+            ...options
+        });
+    }
+
+    unsubscribeCamera(id) {
+        this.sendSystemCommand({ op: "unsub", stream: "camera", id: id });
+    }
+
+    subscribeAudio() {
+        this.sendSystemCommand({ op: "sub", stream: "audio" });
+    }
+
+    unsubscribeAudio() {
+        this.sendSystemCommand({ op: "unsub", stream: "audio" });
+    }
+
+    // v18.14: Generic subscribe for backward compatibility
+    subscribe(keys, options = {}) {
+        this.subscribeTelemetry(keys, options);
     }
 
     unsubscribe(keys) {
-        this.sendSystemCommand({ rm: Array.isArray(keys) ? keys : [keys] });
+        this.sendSystemCommand({ op: "unsub", stream: "telemetry", rm: Array.isArray(keys) ? keys : [keys] });
     }
 
     startDatalinkReleaseLoop() {
@@ -328,7 +393,7 @@ class TelemachusSignalLink {
                     this.listeners.get('datalink_update').forEach(cb => cb({
                         ut: packet.ut,
                         quality: packet.quality,
-                        values: data
+                        data: data // v18.14: Standardized to .data
                     }));
                 }
             });
@@ -344,7 +409,10 @@ class TelemachusSignalLink {
                     quality: this.latestQuality
                 };
 
-                this.listeners.get('smooth_tick').forEach(cb => cb(data));
+                this.listeners.get('smooth_tick').forEach(cb => cb({ 
+                    ut: data.ut,
+                    data: data // v18.17: Nested for uniformity with real JSON messages
+                }));
             }
             requestAnimationFrame(tick);
         };

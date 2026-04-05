@@ -5,7 +5,7 @@ using System.Text;
 
 namespace Telemachus.CameraSnapshots
 {
-    class RasterPropMonitorCamera : PartModule
+    public class RasterPropMonitorCamera : PartModule
     {
         protected PartModule rpmPartModule;
         public PartModule rpmCameraModule

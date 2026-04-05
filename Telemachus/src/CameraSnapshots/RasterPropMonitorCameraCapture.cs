@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Telemachus.CameraSnapshots
 {
-    class RasterPropMonitorCameraCapture : CameraCapture
+    public class RasterPropMonitorCameraCapture : CameraCapture
     {
         public RasterPropMonitorCamera rpmCamera;
         protected static string cameraManagerNamePrefix = "RPMCamera-";

@@ -63,8 +63,8 @@ class MusicSync {
 
     waitForSignalLink() {
         if (window.app && window.app.signalLink) {
-            window.app.signalLink.on('soundtrack', (msg) => {
-                this.handleMetadata(msg);
+            window.app.signalLink.on('soundtrack', (packet) => {
+                this.handleMetadata(packet.data);
             });
             window.app.signalLink.on('close', () => {
                 this.stopPlayback();
@@ -75,9 +75,8 @@ class MusicSync {
                     this.elements.name.textContent = 'SILENCE';
                     this.elements.name.style.color = '';
                 }
-                window.app.signalLink.sendSystemCommand({ type: "request-soundtrack" });
+                // v18.11: No manual request needed, subscribeSoundtrack handles initial state
             });
-            window.app.signalLink.sendSystemCommand({ type: "request-soundtrack" });
         } else {
             setTimeout(() => this.waitForSignalLink(), 100);
         }

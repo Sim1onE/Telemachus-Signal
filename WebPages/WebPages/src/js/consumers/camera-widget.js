@@ -90,6 +90,9 @@ class CameraWidget {
     }
 
     start() {
+        // v18.14: Standardized camera subscription API (30 FPS default)
+        this.signalLink.subscribeCamera(this.cameraId, this.camInfo.name, { rate: 33 });
+        
         this.receiver.start(this.camInfo.name);
         this.lastFrameTime = Date.now();
     }
@@ -121,6 +124,8 @@ class CameraWidget {
 
     sendFovCommand() {
         this.signalLink.queueCommand({ 
+            op: "command",
+            target: "camera",
             camera: this.camInfo.name, 
             id: this.cameraId,
             action: "fov", 
@@ -147,8 +152,8 @@ class CameraWidget {
     destroy() {
         this.receiver.stop();
         this.dom.remove();
-        // Tell server to stop streaming this camera
-        this.signalLink.sendSystemCommand({ camera: this.camInfo.name, id: this.cameraId, remove: true });
+        // v18.14: Standardized unsubscribe API
+        this.signalLink.unsubscribeCamera(this.cameraId);
     }
 }
 

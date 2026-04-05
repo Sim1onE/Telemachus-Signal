@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace Telemachus.CameraSnapshots
 {
-    class CameraCaptureManager : MonoBehaviour
+    public class CameraCaptureManager : MonoBehaviour
     {
         #region Singleton management
         private static CameraCaptureManager _instance;

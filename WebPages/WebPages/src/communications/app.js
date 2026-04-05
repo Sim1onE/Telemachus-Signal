@@ -38,14 +38,14 @@ class CommunicationsConsole {
         if (!this.signalLink) {
             this.signalLink = new TelemachusSignalLink(streamUrl, this);
             
-            // Listen for high-frequency status heartbeats (JSON)
-            this.signalLink.on('status', (status) => {
-                this.handleSignalStatus(status);
+            // Listen for high-frequency tick heartbeats (JSON)
+            this.signalLink.on('tick', (packet) => {
+                this.handleSignalStatus(packet.data);
             });
 
             // Camera List Response (JSON)
-            this.signalLink.on('cameraList', (msg) => {
-                this.cameras = msg.cameras || [];
+            this.signalLink.on('cameraList', (packet) => {
+                this.cameras = packet.data || [];
                 this.renderCameraList();
                 
                 if (this.cameras.length === 0) {
@@ -69,6 +69,12 @@ class CommunicationsConsole {
 
             // Connection Re-established (v15.07)
             this.signalLink.on('open', () => {
+                // v18.14: Explicitly subscribe to required streams
+                this.signalLink.subscribeTick();
+                this.signalLink.subscribeSoundtrack();
+                this.signalLink.subscribeAudio();
+                this.signalLink.requestCameraList();
+
                 this.activeWidgets.forEach(widget => {
                     widget.receiver.sync.clear();
                     widget.start();
@@ -78,13 +84,13 @@ class CommunicationsConsole {
             });
 
             // v16.31: Handle delayed datalink updates
-            this.signalLink.on('datalink_update', (data) => {
-                this.handleDelayedTelemetry(data.values);
+            this.signalLink.on('datalink_update', (packet) => {
+                this.handleDelayedTelemetry(packet.data);
             });
 
             // v16.35: High-frequency clock updates
-            this.signalLink.on('smooth_tick', (data) => {
-                if (this.telMet) this.telMet.innerText = `T+ ${this.formatMET(data.met)}`;
+            this.signalLink.on('smooth_tick', (packet) => {
+                if (this.telMet) this.telMet.innerText = `T+ ${this.formatMET(packet.data.met)}`;
             });
 
             this.signalLink.connect();
