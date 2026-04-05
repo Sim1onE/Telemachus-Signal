@@ -279,10 +279,23 @@ class TelemachusSignalLink {
         };
     }
 
+    // Generic send for hierarchical actions with specific targets (v21.5)
+    send(action, target = "", payload = {}) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            const msg = { action };
+            if (target) msg.target = target;
+            if (payload && Object.keys(payload).length > 0) msg.payload = payload;
+            this.ws.send(JSON.stringify(msg));
+        }
+    }
+
     // Sends specific JSON commands immediately (Ignoring delay logic)
     sendSystemCommand(cmdObject) {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify(cmdObject));
+        // Obsolete: redirection to new 'send'
+        if (cmdObject.action) {
+            this.send(cmdObject.action, cmdObject.target || "", cmdObject.payload || {});
+        } else if (cmdObject.op) {
+            console.warn("[SignalLink] Legacy 'op' detected.");
         }
     }
 
@@ -292,37 +305,38 @@ class TelemachusSignalLink {
     }
 
     // Delays JSON commands through the string-synchronizer
-    queueCommand(cmdObject) {
-        this.uplink.queuePacket(null, JSON.stringify(cmdObject));
+    queueCommand(action, target = "", payload = {}) {
+        const msg = { action };
+        if (target) msg.target = target;
+        if (payload && Object.keys(payload).length > 0) msg.payload = payload;
+        this.uplink.queuePacket(null, JSON.stringify(msg));
     }
 
     requestCameraList() {
-        this.sendSystemCommand({ op: "list", resource: "cameras" });
+        this.send("resource/list", "cameras");
     }
 
     subscribeTick(options = {}) {
-        this.sendSystemCommand({ op: "sub", stream: "tick", ...options });
+        this.send("stream/subscribe", "tick", options);
     }
 
     unsubscribeTick() {
-        this.sendSystemCommand({ op: "unsub", stream: "tick" });
+        this.send("stream/unsubscribe", "tick");
     }
 
     // Deprecated alias for subscribeTick
     subscribeStatus(options) { this.subscribeTick(options); }
 
     subscribeSoundtrack(options = {}) {
-        this.sendSystemCommand({ op: "sub", stream: "soundtrack", ...options });
+        this.send("stream/subscribe", "soundtrack", options);
     }
 
     unsubscribeSoundtrack() {
-        this.sendSystemCommand({ op: "unsub", stream: "soundtrack" });
+        this.send("stream/unsubscribe", "soundtrack");
     }
 
     subscribeTelemetry(keys, options = {}) {
-        this.sendSystemCommand({ 
-            op: "sub", 
-            stream: "telemetry", 
+        this.send("stream/subscribe", "telemetry", { 
             keys: Array.isArray(keys) ? keys : [keys],
             ...options 
         });
@@ -330,9 +344,7 @@ class TelemachusSignalLink {
 
     // v18.11: Multi-camera subscription
     subscribeCamera(id, name, options = {}) {
-        this.sendSystemCommand({
-            op: "sub",
-            stream: "camera",
+        this.send("stream/subscribe", "camera", {
             id: id,
             name: name,
             ...options
@@ -340,15 +352,15 @@ class TelemachusSignalLink {
     }
 
     unsubscribeCamera(id) {
-        this.sendSystemCommand({ op: "unsub", stream: "camera", id: id });
+        this.send("stream/unsubscribe", "camera", { id: id });
     }
 
     subscribeAudio() {
-        this.sendSystemCommand({ op: "sub", stream: "audio" });
+        this.send("stream/subscribe", "audio");
     }
 
     unsubscribeAudio() {
-        this.sendSystemCommand({ op: "unsub", stream: "audio" });
+        this.send("stream/unsubscribe", "audio");
     }
 
     // v18.14: Generic subscribe for backward compatibility
@@ -357,7 +369,7 @@ class TelemachusSignalLink {
     }
 
     unsubscribe(keys) {
-        this.sendSystemCommand({ op: "unsub", stream: "telemetry", rm: Array.isArray(keys) ? keys : [keys] });
+        this.send("stream/unsubscribe", "telemetry", { rm: Array.isArray(keys) ? keys : [keys] });
     }
 
     startDatalinkReleaseLoop() {

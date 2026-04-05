@@ -15,17 +15,34 @@ namespace Telemachus
         public static string Encode(object obj) =>
             MiniJSON.jsonEncode(ToMiniJson(obj));
 
-        public static IDictionary<string, object> DecodeObject(string json)
+        public static Dictionary<string, object> DecodeObject(string json)
         {
             var decoded = MiniJSON.jsonDecode(json);
-            if (decoded is Hashtable ht)
+            return FromMiniJson(decoded) as Dictionary<string, object>;
+        }
+
+        private static object FromMiniJson(object value)
+        {
+            if (value is Hashtable ht)
             {
                 var dict = new Dictionary<string, object>(ht.Count);
                 foreach (DictionaryEntry entry in ht)
-                    dict[entry.Key.ToString()] = entry.Value;
+                {
+                    string key = entry.Key?.ToString() ?? "null";
+                    dict[key] = FromMiniJson(entry.Value);
+                }
                 return dict;
             }
-            return null;
+            if (value is ArrayList al)
+            {
+                var list = new List<object>(al.Count);
+                foreach (var item in al)
+                {
+                    list.Add(FromMiniJson(item));
+                }
+                return list;
+            }
+            return value;
         }
 
         /// Converts generic collections to Hashtable/ArrayList for MiniJSON

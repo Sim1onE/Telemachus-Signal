@@ -6,67 +6,56 @@ using Telemachus.CameraSnapshots;
 namespace Telemachus
 {
     /// <summary>
-    /// Handles 'sub' and 'unsub' operations.
-    /// Supports multi-camera via identifier-based keys.
+    /// v21.5: Handles 'stream/subscribe' and 'stream/unsubscribe' operations.
+    /// Simplified to Action/Target structure.
     /// </summary>
     public class SubscriptionOpHandler : IStreamOpHandler
     {
-        public string[] OpCodes => new[] { "sub", "subscribe", "unsub", "unsubscribe" };
+        public string[] Actions => new[] { "stream/subscribe", "stream/unsubscribe" };
 
-        public void Handle(Dictionary<string, object> json, StreamSessionController controller)
+        public void Handle(string action, string target, Dictionary<string, object> payload, StreamSessionController controller)
         {
-            string op = json["op"].ToString();
-            if (!json.ContainsKey("stream")) return;
-            string stream = json["stream"].ToString();
+            if (string.IsNullOrEmpty(target)) return;
 
-            // v18.11 Multi-camera Key Logic
-            string key = stream;
-            if (stream == "camera" && json.ContainsKey("id"))
+            // v18.11 Multi-camera ID logic (Unified target construction)
+            string subKey = target;
+            if (target == "camera" && payload.ContainsKey("id"))
             {
-                // v18.21: Robust numeric parsing via Convert.ToInt32 (handles double/long/int from JSON)
-                try
-                {
-                    key = "camera_" + Convert.ToInt32(json["id"]);
-                }
-                catch
-                {
-                    key = "camera_" + json["id"].ToString();
-                }
+                try { subKey = "camera_" + Convert.ToInt32(payload["id"]); }
+                catch { subKey = "camera_" + payload["id"].ToString(); }
             }
 
-            // Unsubscribe logic (keyed)
-            if (op == "unsub" || op == "unsubscribe")
+            // Route based on action
+            if (action == "stream/unsubscribe")
             {
-                controller.RemoveSubscriptionByKey(key);
-                return;
+                controller.RemoveSubscriptionByKey(subKey);
             }
-
-            // Subscribe logic (keyed)
-            ISubscription sub = controller.GetSubscriptionByKey(key);
-            if (sub == null)
+            else if (action == "stream/subscribe")
             {
-                sub = CreateSubscription(stream);
-                if (sub != null)
+                ISubscription sub = controller.GetSubscriptionByKey(subKey);
+                if (sub == null)
                 {
-                    // Important: Update config BEFORE OnStart so IDs/Keys are set
-                    sub.UpdateConfig(json);
-                    controller.AddSubscription(sub);
-                    sub.OnStart(controller);
+                    sub = CreateSubscription(target);
+                    if (sub != null)
+                    {
+                        sub.UpdateConfig(payload);
+                        controller.AddSubscription(sub);
+                        sub.OnStart(controller);
+                    }
                 }
-            }
-            else
-            {
-                sub.UpdateConfig(json);
+                else
+                {
+                    sub.UpdateConfig(payload);
+                }
             }
         }
 
-        private ISubscription CreateSubscription(string stream)
+        private ISubscription CreateSubscription(string target)
         {
-            switch (stream)
+            switch (target)
             {
                 case "tick": return new TickSubscription();
-                case "telemetry":
-                case "datalink": return new TelemetrySubscription();
+                case "telemetry": return new TelemetrySubscription();
                 case "soundtrack": return new SoundtrackSubscription();
                 case "camera": return new CameraSubscription();
                 case "audio": return new AudioSubscription();
@@ -76,18 +65,15 @@ namespace Telemachus
     }
 
     /// <summary>
-    /// Handles 'list' operations (resource enumeration).
+    /// v21.5: Handles 'resource/list' operations.
     /// </summary>
     public class ResourceListOpHandler : IStreamOpHandler
     {
-        public string[] OpCodes => new[] { "list" };
+        public string[] Actions => new[] { "resource/list" };
 
-        public void Handle(Dictionary<string, object> json, StreamSessionController controller)
+        public void Handle(string action, string target, Dictionary<string, object> payload, StreamSessionController controller)
         {
-            if (!json.ContainsKey("resource")) return;
-            string resource = json["resource"].ToString();
-
-            if (resource == "cameras")
+            if (target == "cameras")
             {
                 if (CameraCaptureManager.classedInstance == null) return;
                 var list = CameraCaptureManager.classedInstance.cameras.Values.Select(c => new Dictionary<string, object> {
@@ -100,22 +86,22 @@ namespace Telemachus
     }
 
     /// <summary>
-    /// Handles 'command' operations (interactive sensor control).
+    /// v21.5: Handles 'command' operations.
     /// </summary>
     public class CommandOpHandler : IStreamOpHandler
     {
-        public string[] OpCodes => new[] { "command" };
+        public string[] Actions => new[] { "command" };
 
-        public void Handle(Dictionary<string, object> json, StreamSessionController controller)
+        public void Handle(string action, string target, Dictionary<string, object> payload, StreamSessionController controller)
         {
-            if (json.ContainsKey("target"))
+            if (target == "camera")
             {
-                string target = json["target"].ToString();
-                if (target == "camera")
+                string subKey = "camera_" + (payload.ContainsKey("id") ? payload["id"].ToString() : "0");
+                var sub = controller.GetSubscriptionByKey(subKey) as CameraSubscription;
+                if (sub != null && payload.ContainsKey("values"))
                 {
-                    string key = "camera_" + (json.ContainsKey("id") ? json["id"].ToString() : "0");
-                    var sub = controller.GetSubscriptionByKey(key) as CameraSubscription;
-                    if (sub != null) sub.ForwardCommand(json);
+                    var values = payload["values"] as Dictionary<string, object>;
+                    if (values != null) sub.ForwardCommand(values);
                 }
             }
         }

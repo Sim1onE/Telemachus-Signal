@@ -10,8 +10,8 @@ namespace Telemachus
     /// </summary>
     public interface IStreamOpHandler
     {
-        string[] OpCodes { get; }
-        void Handle(Dictionary<string, object> json, StreamSessionController controller);
+        string[] Actions { get; }
+        void Handle(string action, string target, Dictionary<string, object> payload, StreamSessionController controller);
     }
 
     /// <summary>
@@ -42,8 +42,8 @@ namespace Telemachus
         }
 
         public void RegisterHandler(IStreamOpHandler handler) {
-            foreach(var op in handler.OpCodes) {
-                _opHandlers[op] = handler;
+            foreach(var action in handler.Actions) {
+                _opHandlers[action] = handler;
             }
         }
 
@@ -77,10 +77,16 @@ namespace Telemachus
             try
             {
                 var json = Json.DecodeObject(text) as Dictionary<string, object>;
-                if (json != null && json.ContainsKey("op"))
+                if (json != null && json.ContainsKey("action"))
                 {
-                    string op = json["op"].ToString();
-                    if (_opHandlers.ContainsKey(op)) _opHandlers[op].Handle(json, this);
+                    string action = json["action"].ToString();
+                    string target = json.ContainsKey("target") ? json["target"].ToString() : "";
+                    var payload = json.ContainsKey("payload") ? json["payload"] as Dictionary<string, object> : new Dictionary<string, object>();
+                    
+                    if (_opHandlers.ContainsKey(action)) 
+                    {
+                        _opHandlers[action].Handle(action, target, payload, this);
+                    }
                 }
             }
             catch { }

@@ -123,13 +123,12 @@ class CameraWidget {
     }
 
     sendFovCommand() {
-        this.signalLink.queueCommand({ 
-            op: "command",
-            target: "camera",
-            camera: this.camInfo.name, 
+        this.signalLink.queueCommand("command", "camera", { 
             id: this.cameraId,
-            action: "fov", 
-            fov: this.currentFov 
+            camera: this.camInfo.name,
+            values: {
+                fov: this.currentFov 
+            }
         });
     }
 
