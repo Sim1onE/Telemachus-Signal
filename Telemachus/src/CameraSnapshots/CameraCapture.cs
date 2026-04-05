@@ -64,7 +64,10 @@ namespace Telemachus.CameraSnapshots
 
         protected Dictionary<string, Camera> cameraDuplicates = new();
         protected List<string> activeCameras = new();
-        protected static readonly string[] skippedCameras = { "UIMainCamera", "UIVectorCamera", "velocity camera" };
+        protected static readonly string[] skippedCameras = {
+            "UIMainCamera", "UIVectorCamera", "velocity camera",
+            "HighlightCamera", "EdgeHighlightCamera", "UICamera"
+        };
 
         public Dictionary<string, Camera> gameCameraMapping = new();
 
@@ -132,7 +135,7 @@ namespace Telemachus.CameraSnapshots
         public IEnumerator newRender()
         {
             int delta = Environment.TickCount - lastRequestTick;
-            if (delta > 5000 || delta < 0) 
+            if (delta > 5000 || delta < 0)
             {
                 nextRenderTime = Time.unscaledTime + 1.0f;
                 mutex = false;
@@ -159,9 +162,10 @@ namespace Telemachus.CameraSnapshots
             {
                 if (overviewTexture != null) overviewTexture.Release();
                 overviewTexture = new RenderTexture(targetRes, targetRes, 24);
-                
+
                 // Update all duplicate cameras to use the new texture
-                foreach (var cam in cameraDuplicates.Values) {
+                foreach (var cam in cameraDuplicates.Values)
+                {
                     cam.targetTexture = overviewTexture;
                 }
             }
@@ -174,7 +178,7 @@ namespace Telemachus.CameraSnapshots
             }
 
             Texture2D texture = getTexture2DFromRenderTexture();
-            
+
             // Adjust JPEG quality based on signal (very low for bad signal)
             int jpgQuality = (int)Mathf.Lerp(2f, 85f, (float)signal);
             this.imageBytes = texture.EncodeToJPG(jpgQuality);
@@ -188,7 +192,7 @@ namespace Telemachus.CameraSnapshots
             // Signal 0.05 -> 0.5 FPS (2.0s)
             float baseWait = Mathf.Lerp(2.0f, 0.033f, (float)Mathf.Pow((float)signal, 0.7f)); // Non-linear curve for "dramatic" drop
             float offset = (delta < 2000) ? 0f : (0.05f * renderOffsetFactor);
-            
+
             nextRenderTime = Time.unscaledTime + baseWait + offset;
             mutex = false;
             yield break;
@@ -196,8 +200,8 @@ namespace Telemachus.CameraSnapshots
 
         public Texture2D getTexture2DFromRenderTexture()
         {
-            if (persistentTexture == null || 
-                persistentTexture.width != overviewTexture.width || 
+            if (persistentTexture == null ||
+                persistentTexture.width != overviewTexture.width ||
                 persistentTexture.height != overviewTexture.height)
             {
                 if (persistentTexture != null) Destroy(persistentTexture);
@@ -250,9 +254,18 @@ namespace Telemachus.CameraSnapshots
 
                     cameraDuplicate.targetTexture = this.overviewTexture;
 
-                    // --- CULLING MASK FIX ---
-                    // bit 10: ScaledSpace (Orbits), bit 24: MapUI, bit 31: MapOverlay
-                    int maskToRemove = (1 << 10) | (1 << 24) | (1 << 31);
+                    // --- FLARE LAYER FIX ---
+                    if (camera.GetComponent<FlareLayer>() != null)
+                    {
+                        cameraDuplicateGameObject.AddComponent<FlareLayer>();
+                    }
+
+                    // --- CULLING MASK FIX (MASSIVE UI/TRIGGER EXCLUSION) ---
+                    // bit 1: TransparentFX, bit 2: IgnoreRaycast, bit 5: UI, bit 8: Icons, 
+                    // bit 11: UIDialog, bit 12: UIVectors, bit 13: UI_Mask, bit 14: Screens, 
+                    // bit 21: Part Triggers, bit 22: KerbalInstructors, bit 23: AeroFXIgnore,
+                    // bit 24: MapFX, bit 25: UIAdditional, bit 29: DragRender, bit 31: Vectors
+                    int maskToRemove = (1 << 1) | (1 << 2) | (1 << 5) | (1 << 8) | (1 << 11) | (1 << 12) | (1 << 13) | (1 << 14) | (1 << 21) | (1 << 22) | (1 << 23) | (1 << 24) | (1 << 25) | (1 << 29) | (1 << 31);
                     cameraDuplicate.cullingMask &= ~maskToRemove;
 
                     // Adjust near clip only for small parts/FX cameras like RPM does,
@@ -302,7 +315,7 @@ namespace Telemachus.CameraSnapshots
             if (customFOV > 0 && !float.IsNaN(customFOV))
             {
                 // Init if needed (should be already synced, but safety first)
-                if (interpolatedFOV <= 0 || float.IsNaN(interpolatedFOV)) 
+                if (interpolatedFOV <= 0 || float.IsNaN(interpolatedFOV))
                     interpolatedFOV = gameCamera.fieldOfView;
 
                 // Move towards target smoothly at 40 deg/sec
@@ -313,7 +326,7 @@ namespace Telemachus.CameraSnapshots
 
             // Continuously track the module's default FOV when not under Houston control
             // This ensures zero-jump transition when zooming starts.
-            interpolatedFOV = defaultFOV; 
+            interpolatedFOV = defaultFOV;
             if (float.IsNaN(interpolatedFOV) || interpolatedFOV <= 0) interpolatedFOV = 60f; // Ultimate fallback
             return interpolatedFOV;
         }
