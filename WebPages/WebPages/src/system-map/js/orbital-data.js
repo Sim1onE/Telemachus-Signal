@@ -10,7 +10,7 @@ class SystemOrbitalPositionData {
     this.mutexTimestamp = null;
     this.rootReferenceBody = null;
     this.options = Object.assign({
-      numberOfSegments: 256,
+      numberOfSegments: 64,
       onRecalculate: null
     }, options);
 
@@ -59,15 +59,22 @@ class SystemOrbitalPositionData {
     this.buildRelativePositionRequestsForManeuverNodeOrbitPatches(requestParams, "vesselManeuverNodes", positionData['o.maneuverNodes'], positionData["currentUniversalTime"]);
 
     if (positionData['tar.type']) {
-      if (positionData['tar.o.orbitPatches'] && positionData['tar.o.orbitPatches'].length > 0) {
-        this.buildRelativePositionRequestsForOrbitPatches(requestParams, "targetCurrentOrbit", positionData['tar.o.orbitPatches'], positionData["currentUniversalTime"], 'tar.o');
-        requestParams["targetCurrentPositionRelativePosition"] = `tar.o.relativePositionAtUTForOrbitPatch[0,${positionData["currentUniversalTime"]}]`;
-      } else {
-        const body = this.datalink.getOrbitalBodyInfo(positionData['tar.name']);
-        if (body) {
-          requestParams[`${body.name}[metadata]radius`] = `b.radius[${body.id}]`;
-          requestParams[`${body.name}[${positionData["currentUniversalTime"]}]TruePosition`] = `b.o.truePositionAtUT[${body.id},${positionData["currentUniversalTime"]}]`;
-        }
+      this.buildRelativePositionRequestsForOrbitPatches(requestParams, "targetCurrentOrbit", positionData['tar.o.orbitPatches'], positionData["currentUniversalTime"], 'tar.o');
+      requestParams["targetCurrentPositionRelativePosition"] = `tar.o.relativePositionAtUTForOrbitPatch[0,${positionData["currentUniversalTime"]}]`;
+
+      // Add orbital elements for physics calculations
+      requestParams["tar.o.sma"] = "tar.o.sma";
+      requestParams["tar.o.eccentricity"] = "tar.o.eccentricity";
+      requestParams["tar.o.inclination"] = "tar.o.inclination";
+      requestParams["tar.o.lan"] = "tar.o.lan";
+      requestParams["tar.o.argumentOfPeriapsis"] = "tar.o.argumentOfPeriapsis";
+      requestParams["tar.o.trueAnomaly"] = "tar.o.trueAnomaly";
+      requestParams["tar.o.period"] = "tar.o.period";
+      requestParams["tar.o.orbitingBody"] = "tar.o.orbitingBody";
+      const body = this.datalink.getOrbitalBodyInfo(positionData['tar.name']);
+      if (body) {
+        requestParams[`${body.name}[metadata]radius`] = `b.radius[${body.id}]`;
+        requestParams[`${body.name}[${positionData["currentUniversalTime"]}]TruePosition`] = `b.o.truePositionAtUT[${body.id},${positionData["currentUniversalTime"]}]`;
       }
     }
 
@@ -78,6 +85,7 @@ class SystemOrbitalPositionData {
 
       requestParams[`${bName}[metadata]radius`] = `b.radius[${bInfo.id}]`;
       requestParams[`${bName}[metadata]currentTruePosition`] = `b.o.truePositionAtUT[${bInfo.id},${positionData["currentUniversalTime"]}]`;
+      requestParams[`${bName}[metadata]gravParameter`] = `b.o.gravParameter[${bInfo.id}]`;
 
       if (!this.planetStaticOrbitsFetched && bName !== "Sun") {
         requestParams[`${bName}[metadata]sma`] = `b.o.sma[${bInfo.id}]`;
@@ -104,7 +112,7 @@ class SystemOrbitalPositionData {
 
       if (positionData['tar.type'] && positionData['tar.o.orbitPatches'] && positionData['tar.o.orbitPatches'].length > 0) {
         if (data["targetCurrentPositionRelativePosition"]) {
-            positionData["targetCurrentPosition"]["relativePosition"] = data["targetCurrentPositionRelativePosition"];
+          positionData["targetCurrentPosition"]["relativePosition"] = data["targetCurrentPositionRelativePosition"];
         }
         this.buildRelativePositionPositionDataForOrbitPatches(data, positionData, "targetCurrentOrbit", 'tar.o.orbitPatches');
       }
@@ -223,9 +231,9 @@ class SystemOrbitalPositionData {
     this.datalink.subscribeToData([
       'o.orbitPatches', 't.universalTime', 'v.body',
       'tar.name', 'tar.type', 'tar.o.orbitingBody',
-      'tar.o.orbitPatches', 'o.maneuverNodes',
-      'v.altitude', 'o.ApA', 'o.PeA', 'o.inclination',
-      'o.eccentricity', 'o.period',
+      'tar.o.orbitPatches', 'tar.o.sma', 'tar.o.period', 'tar.o.trueAnomaly',
+      'o.maneuverNodes', 'v.altitude', 'o.ApA', 'o.PeA', 'o.inclination',
+      'o.eccentricity', 'o.period', 'o.sma', 'o.lan', 'o.argumentOfPeriapsis', 'o.trueAnomaly',
       'n.pitch', 'n.roll', 'n.heading',
       'o.encounterBody', 'o.encounterTime',
       'astg.nextDestination', 'astg.nextBurnCountdown', 'astg.nextDeltaV'

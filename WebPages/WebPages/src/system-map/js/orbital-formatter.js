@@ -75,6 +75,7 @@ class SystemPositionDataFormatter {
       formattedData["referenceBodies"].push({
         name: name, type: type, radius: info.radius,
         truePosition: truePosition,
+        gravParameter: info.gravParameter,
         atmosphericRadius: this.datalink.getOrbitalBodyInfo(name).atmosphericRadius,
         color: this.datalink.getOrbitalBodyInfo(name).color
       });
