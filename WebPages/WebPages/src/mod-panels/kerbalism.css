@@ -1,0 +1,325 @@
+/* KERBALISM SYSTEMS MONITOR - CLINICAL HUD THEME (v16.44) */
+:root {
+    --accent-cyan: #00ddff;
+    --accent-green: #00ff88;
+    --accent-amber: #ffaa00;
+    --accent-red: #ff4444;
+    --bg-dark: #05080a;
+    --panel-bg: rgba(10, 20, 30, 0.4);
+    --border-color: rgba(0, 221, 255, 0.15);
+    --font-header: 'Outfit', sans-serif;
+    --font-data: 'JetBrains Mono', monospace;
+}
+
+body {
+    background-color: var(--bg-dark);
+    color: #eee;
+    font-family: var(--font-header);
+    margin: 0;
+    height: 100vh;
+    overflow: hidden;
+    background-image: radial-gradient(circle at 50% 50%, rgba(0, 136, 255, 0.05) 0%, transparent 100%);
+}
+
+.monitor-container {
+    display: grid;
+    grid-template-columns: 320px 1fr 320px;
+    grid-template-rows: auto 1fr;
+    height: 100vh;
+    padding: 15px;
+    box-sizing: border-box;
+    gap: 15px;
+}
+
+.header-bar {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 10px;
+}
+
+.title-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.main-title {
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: 4px;
+    color: var(--accent-cyan);
+    text-shadow: 0 0 10px rgba(0, 221, 255, 0.3);
+    margin: 0;
+}
+
+.sub-title {
+    font-size: 0.55rem;
+    opacity: 0.5;
+    letter-spacing: 2px;
+}
+
+.panel-section {
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: inset 0 0 30px rgba(0,0,0,0.5);
+    backdrop-filter: blur(5px);
+}
+
+.section-label {
+    font-size: 0.65rem;
+    font-weight: bold;
+    color: var(--accent-cyan);
+    margin-bottom: 12px;
+    border-left: 3px solid var(--accent-cyan);
+    padding-left: 10px;
+    letter-spacing: 2px;
+}
+
+.placeholder-msg {
+    opacity: 0.15;
+    font-size: 0.65rem;
+    text-align: center;
+    padding: 25px;
+}
+
+/* ===== Resource Bar Styling ===== */
+.res-row { margin-bottom: 12px; }
+
+.res-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.res-name { font-size: 0.6rem; font-weight: bold; opacity: 0.8; letter-spacing: 1px; }
+.res-rate { font-size: 0.55rem; font-family: var(--font-data); }
+
+.res-bar-bg {
+    height: 5px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 1px;
+    overflow: hidden;
+}
+
+.res-bar-fill {
+    height: 100%;
+    background: var(--accent-cyan);
+    box-shadow: 0 0 10px var(--accent-cyan);
+    transition: width 0.5s ease;
+}
+
+.res-footer {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 3px;
+    font-size: 0.5rem;
+    font-family: var(--font-data);
+    opacity: 0.6;
+}
+
+/* ===== Biometric Grid ===== */
+.crew-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.crew-card {
+    background: rgba(255,255,255,0.02);
+    padding: 10px;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+
+.crew-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.crew-name { font-size: 0.75rem; font-weight: bold; color: white; }
+.crew-trait { font-size: 0.45rem; opacity: 0.5; text-transform: uppercase; letter-spacing: 1px; }
+
+.bio-val {
+    font-size: 0.5rem;
+    margin-top: 2px;
+    font-family: var(--font-data);
+    text-align: right;
+}
+
+/* ===== Hazard Matrix ===== */
+.hazard-box {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.hazard-cell {
+    background: rgba(0,0,0,0.2);
+    padding: 8px;
+    border: 1px solid rgba(255,255,255,0.03);
+    text-align: center;
+}
+
+.haz-lbl { font-size: 0.45rem; opacity: 0.5; margin-bottom: 4px; letter-spacing: 1px; }
+.haz-val { font-size: 0.85rem; font-family: var(--font-data); }
+.unit { font-size: 0.45rem; opacity: 0.6; }
+
+/* ===== Process Controller Rows ===== */
+.process-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.proc-led {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-red);
+    flex-shrink: 0;
+}
+
+.proc-name {
+    font-size: 0.6rem;
+    flex-grow: 1;
+    letter-spacing: 1px;
+}
+
+.proc-status {
+    font-size: 0.55rem;
+    font-family: var(--font-data);
+    font-weight: bold;
+}
+
+/* ===== Storm Warning Animation ===== */
+@keyframes pulse-orange {
+    0% { background: rgba(255, 170, 0, 0.05); }
+    50% { background: rgba(255, 170, 0, 0.2); }
+    100% { background: rgba(255, 170, 0, 0.05); }
+}
+
+.storm-warning {
+    animation: pulse-orange 2s infinite;
+    border-color: var(--accent-amber) !important;
+}
+
+/* ===== Scrollbar ===== */
+.panel-section::-webkit-scrollbar { width: 4px; }
+.panel-section::-webkit-scrollbar-track { background: transparent; }
+.panel-section::-webkit-scrollbar-thumb { background: rgba(0, 221, 255, 0.2); border-radius: 2px; }
+
+/* ===== Telemetry Pill (compact env matrix) ===== */
+.hazard-box--3col { grid-template-columns: 1fr 1fr 1fr; }
+.hazard-box--4col { grid-template-columns: 1fr 1fr 1fr 1fr; }
+
+.telem-pill {
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.04);
+    padding: 6px 8px 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    position: relative;
+    overflow: hidden;
+}
+
+.telem-pill__label {
+    font-size: 0.38rem;
+    opacity: 0.45;
+    letter-spacing: 1px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.telem-pill__val {
+    font-size: 0.75rem;
+    font-family: var(--font-data);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.telem-pill__bar {
+    height: 1px;
+    opacity: 0.3;
+    margin-top: 2px;
+}
+
+/* ===== Parts Health Rows ===== */
+.section-sublabel {
+    font-size: 0.5rem;
+    opacity: 0.4;
+    letter-spacing: 2px;
+    margin: 8px 0 5px;
+    text-transform: uppercase;
+}
+
+.part-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border-bottom: 1px solid rgba(255,255,255,0.02);
+    font-size: 0.55rem;
+}
+
+.part-led {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.part-type-tag {
+    font-size: 0.38rem;
+    letter-spacing: 1px;
+    font-weight: bold;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    min-width: 42px;
+    font-family: var(--font-data);
+}
+
+.part-name {
+    flex: 1;
+    font-family: var(--font-data);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.85;
+}
+
+.part-badges {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.part-badge {
+    font-size: 0.45rem;
+    font-family: var(--font-data);
+    opacity: 0.7;
+}
+
+.part-status {
+    font-size: 0.5rem;
+    font-family: var(--font-data);
+    font-weight: bold;
+    flex-shrink: 0;
+    min-width: 28px;
+    text-align: right;
+}
+
+/* ===== Crew Bio Grid ===== */
+.bio-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}

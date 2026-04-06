@@ -1,5 +1,7 @@
-using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using KSP.UI.Screens;
 
 namespace Telemachus
 {
@@ -135,6 +137,117 @@ namespace Telemachus
                 return (double)Telemachus.CameraSnapshots.CameraCapture.DebugDelayOverride;
             
             return Telemachus.TelemachusSignalManager.GetSignalDelay(ds.vessel);
+        }
+
+        [TelemetryAPI("sci.parts", "List of Science Parts Aboard (VAB Category Scan)", Plotable = false, Category = "science", ReturnType = "object")]
+        object ScienceParts(DataSources ds)
+        {
+            var partsList = new List<Dictionary<string, object>>();
+            if (ds.vessel == null) return new Dictionary<string, object> { ["parts"] = partsList, ["hasKerbalism"] = false };
+
+            // Check if Kerbalism is installed
+            bool hasKerbalism = AssemblyLoader.loadedAssemblies.Cast<AssemblyLoader.LoadedAssembly>().Any(a => a.assembly.GetName().Name == "Kerbalism");
+
+            foreach (var part in ds.vessel.parts)
+            {
+                bool isScienceCategory = part.partInfo.category == PartCategories.Science;
+                bool hasScienceInterface = part.FindModulesImplementing<IScienceDataContainer>().Count > 0;
+                
+                bool hasScienceKeywords = false;
+                if (!isScienceCategory && !hasScienceInterface)
+                {
+                    foreach(var m in part.Modules)
+                    {
+                        string lowName = m.moduleName.ToLower();
+                        if (lowName.Contains("experiment") || lowName.Contains("science") || lowName.Contains("lab"))
+                        {
+                            hasScienceKeywords = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (isScienceCategory || hasScienceInterface || hasScienceKeywords)
+                {
+                    var info = new Dictionary<string, object>
+                    {
+                        ["id"] = (uint)part.persistentId,
+                        ["title"] = part.partInfo.title,
+                        ["isRunning"] = false,
+                        ["hasData"] = false,
+                        ["canRun"] = false
+                    };
+
+                    foreach (var module in part.Modules)
+                    {
+                        if (module is ModuleScienceExperiment exp)
+                        {
+                            if (exp.GetData()?.Length > 0) info["hasData"] = true;
+                            info["canRun"] = true;
+                            if (exp.Deployed) info["isRunning"] = true;
+                        }
+                        else if (module is ModuleScienceContainer container)
+                        {
+                            if (container.GetScienceCount() > 0) info["hasData"] = true;
+                        }
+                        else if (module is IScienceDataContainer genericContainer)
+                        {
+                            if (genericContainer.GetData()?.Length > 0) info["hasData"] = true;
+                        }
+
+                        if (IsModuleActive(module)) info["isRunning"] = true;
+                    }
+
+                    partsList.Add(info);
+                }
+            }
+            return new Dictionary<string, object> 
+            { 
+                ["parts"] = partsList, 
+                ["hasKerbalism"] = hasKerbalism 
+            };
+        }
+
+        [TelemetryAPI("f.sci.run", "Trigger a science log", IsAction = true, Category = "science", ReturnType = "int", Params = "uint partId")]
+        object RunExperiment(DataSources ds)
+        {
+            if (ds.vessel == null) return 0;
+            uint id = uint.Parse(ds.args[0]);
+            var part = ds.vessel.parts.Find(p => p.persistentId == id);
+            if (part == null) return 0;
+
+            foreach (var exp in part.FindModulesImplementing<ModuleScienceExperiment>())
+            {
+                exp.DeployExperiment();
+            }
+            return 1;
+        }
+
+        private static bool IsModuleActive(PartModule module)
+        {
+            string[] probeNames = { "running", "Deployed", "active", "enabled", "isEnabled" };
+            foreach (var name in probeNames)
+            {
+                object val = ReadMember(module, name);
+                if (val is bool b && b) return true;
+                if (val is int i && i > 0) return true;
+            }
+            return false;
+        }
+
+        private static object ReadMember(object obj, string memberName)
+        {
+            try
+            {
+                var type = obj.GetType();
+                var field = type.GetField(memberName, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (field != null) return field.GetValue(obj);
+
+                var prop = type.GetProperty(memberName, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (prop != null) return prop.GetValue(obj, null);
+            }
+            catch { }
+            return null;
         }
 
         protected override int pausedHandler() => 0;
