@@ -276,4 +276,216 @@ namespace Telemachus
             return key != null ? cameras[key] : null;
         }
     }
+
+    public class OrbitSubscription : BaseSubscription
+    {
+        public override string StreamType => "orbit";
+        public int Resolution { get; set; } = 256;
+        private bool sentMetadata = false;
+
+        public OrbitSubscription()
+        {
+            RateMs = 1000; // v21.8.6: Default to 1Hz for high-volume orbit batches
+        }
+
+        public override void UpdateConfig(Dictionary<string, object> json)
+        {
+            base.UpdateConfig(json);
+            if (json.ContainsKey("resolution"))
+            {
+                try { Resolution = Convert.ToInt32(json["resolution"]); }
+                catch { Resolution = 256; }
+            }
+        }
+
+        public override void Execute(KSPUnifiedStreamService session)
+        {
+            Vessel v = FlightGlobals.ActiveVessel;
+            if (v == null) return;
+
+            // v21.8: Automatic Metadata Push (One-time manifest)
+            if (!sentMetadata)
+            {
+                SendMetadataManifest(session);
+                sentMetadata = true;
+            }
+
+            double currentUT = Planetarium.GetUniversalTime();
+            var orbitData = new Dictionary<string, object>();
+
+            // 1. Vessel Orbit Patches
+            orbitData["vessel"] = GetOrbitGroups(v.orbit, currentUT, v);
+
+            // 2. Target Orbit Patches
+            var target = FlightGlobals.fetch.VesselTarget;
+            if (target != null)
+            {
+                orbitData["target"] = new Dictionary<string, object> {
+                    { "name", target.GetName() },
+                    { "patches", GetOrbitGroups(target.GetOrbit(), currentUT, v) }
+                };
+            }
+            else
+            {
+                orbitData["target"] = null;
+            }
+
+            // 3. Maneuver Nodes
+            if (v.patchedConicSolver != null && v.patchedConicSolver.maneuverNodes.Count > 0)
+            {
+                var maneuverGroups = new List<object>();
+                foreach (var node in v.patchedConicSolver.maneuverNodes)
+                {
+                    maneuverGroups.Add(new Dictionary<string, object> {
+                        { "ut", node.UT },
+                        { "deltaV", new Dictionary<string, double> { { "x", node.DeltaV.x }, { "y", node.DeltaV.y }, { "z", node.DeltaV.z } } },
+                        { "truePosition", new Dictionary<string, double> { { "x", node.nextPatch.getRelativePositionAtUT(node.UT).x }, { "y", node.nextPatch.getRelativePositionAtUT(node.UT).y }, { "z", node.nextPatch.getRelativePositionAtUT(node.UT).z } } },
+                        { "patches", GetOrbitGroups(node.nextPatch, node.UT, v) }
+                    });
+                }
+                orbitData["maneuvers"] = maneuverGroups;
+            }
+            else
+            {
+                orbitData["maneuvers"] = new List<object>();
+            }
+
+            // 4. Current Body Positions & Rotations (v21.8.15: Inertial Hardening)
+            var bodyPositions = new Dictionary<string, object>();
+            var bodyRotations = new Dictionary<string, double>();
+            CelestialBody sun = FlightGlobals.Bodies[0];
+
+            foreach (var body in FlightGlobals.Bodies)
+            {
+                // v21.8.20: Fixed "Focused Body Collapse" 
+                // Force the use of analytical orbital positions relative to SOI parents.
+                // This ensures that Kerbin is reported at ~13.5B meters from the Sun, 
+                // even if the active vessel is currently orbiting Kerbin.
+                Vector3d relPos = Vector3d.zero;
+                if (body != sun && body.orbit != null)
+                {
+                    relPos = body.orbit.getRelativePositionAtUT(currentUT);
+                }
+                
+                bodyPositions[body.name] = new Dictionary<string, double> { { "x", relPos.x }, { "y", relPos.y }, { "z", relPos.z } };
+
+                // v21.8.15: Inject Direct Rotation Angle for visual decoupling
+                bodyRotations[body.name] = body.rotationAngle;
+            }
+            orbitData["bodyPositions"] = bodyPositions;
+            orbitData["bodyRotations"] = bodyRotations;
+
+            var packet = CreateUnifiedPacket(currentUT, orbitData);
+            if (HasChanged(orbitData))
+            {
+                session.SendUnifiedPacket(packet);
+                LastSentUT = currentUT;
+                LastSentData = orbitData;
+            }
+        }
+
+        private void SendMetadataManifest(KSPUnifiedStreamService session)
+        {
+            var bodies = FlightGlobals.Bodies;
+            var manifest = new Dictionary<string, object>();
+
+            foreach (var body in bodies)
+            {
+                var bodyData = new Dictionary<string, object>
+                {
+                    { "name", body.name },
+                    { "id", body.flightGlobalsIndex },
+                    { "parent", body.orbit != null ? body.orbit.referenceBody.name : null },
+                    { "radius", (double)body.Radius },
+                    { "sma", body.orbit != null ? (double)body.orbit.semiMajorAxis : 0 },
+                    { "ecc", body.orbit != null ? (double)body.orbit.eccentricity : 0 },
+                    { "inc", body.orbit != null ? (double)body.orbit.inclination : 0 },
+                    { "argPe", body.orbit != null ? (double)body.orbit.argumentOfPeriapsis : 0 },
+                    { "lan", body.orbit != null ? (double)body.orbit.LAN : 0 },
+                    { "period", body.orbit != null ? (double)body.orbit.period : 0 },
+                    { "m0", body.orbit != null ? (double)body.orbit.meanAnomalyAtEpoch : 0 },
+                    { "epoch", body.orbit != null ? (double)body.orbit.epoch : 0 }
+                };
+                manifest[body.name] = bodyData;
+            }
+
+            session.SendUnifiedPacket(new Dictionary<string, object>
+            {
+                { "type", "orbit_metadata" },
+                { "ut", Planetarium.GetUniversalTime() },
+                { "data", manifest }
+            });
+        }
+
+        private List<Dictionary<string, object>> GetOrbitGroups(Orbit startOrbit, double startUT, Vessel v)
+        {
+            var groups = new List<Dictionary<string, object>>();
+            var patches = OrbitPatches.getPatchesForOrbit(startOrbit);
+            CelestialBody rootBody = v.mainBody;
+
+            foreach (var patch in patches)
+            {
+                double pStart = Math.Max(patch.StartUT, startUT);
+                double pEnd = patch.EndUT;
+
+                if (double.IsInfinity(pEnd) || pEnd < pStart)
+                {
+                    pEnd = pStart + patch.period; 
+                }
+
+                var points = new List<object>();
+                var refBodyPoints = new List<object>();
+                double step = (pEnd - pStart) / Resolution;
+
+                for (int i = 0; i <= Resolution; i++)
+                {
+                    double ut = pStart + (step * i);
+                    
+                    // 1. Relative position in patch frame (Mandatory for all points)
+                    Vector3d pos = patch.getRelativePositionAtUT(ut);
+                    points.Add(new Dictionary<string, double> { { "x", pos.x }, { "y", pos.y }, { "z", pos.z } });
+
+                    // 2. Reference Body Position (Only needed for anchor at i == 0)
+                    if (i == 0 && patch.referenceBody != rootBody)
+                    {
+                        Vector3d refPos = Vector3d.zero;
+                        CelestialBody current = patch.referenceBody;
+                        while (current != null && current != rootBody && current.orbit != null) {
+                            refPos += current.orbit.getPositionAtUT(ut);
+                            current = current.orbit.referenceBody;
+                        }
+                        refBodyPoints.Add(new Dictionary<string, double> { { "x", refPos.x }, { "y", refPos.y }, { "z", refPos.z } });
+                    }
+                    else
+                    {
+                        refBodyPoints.Add(new Dictionary<string, double> { { "x", 0 }, { "y", 0 }, { "z", 0 } });
+                    }
+                }
+
+                groups.Add(new Dictionary<string, object> {
+                    { "patch", patches.IndexOf(patch) },
+                    { "referenceBody", patch.referenceBody.name },
+                    { "startUT", pStart },
+                    { "endUT", pEnd },
+                    { "points", points },
+                    { "refBodyPoints", refBodyPoints }
+                });
+            }
+
+            return groups;
+        }
+
+        private Vector3d GetBodyRelativePosition(CelestialBody body, double ut, CelestialBody relativeTo)
+        {
+            if (body == relativeTo) return Vector3d.zero;
+            Vector3d pos = Vector3d.zero;
+            CelestialBody current = body;
+            while (current != null && current != relativeTo && current.orbit != null)
+            {
+                pos += current.orbit.getPositionAtUT(ut);
+                current = current.orbit.referenceBody;
+            }
+            return pos;
+        }
+    }
 }

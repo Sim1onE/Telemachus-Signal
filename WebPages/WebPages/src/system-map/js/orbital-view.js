@@ -13,13 +13,13 @@ class SystemOrbitalMap {
 
     this.distanceScaleFactor = 1;
     this.referenceBodyScaleFactor = 1;
-    this.sunBodyScaleFactor = 1.5; 
-    this.dashedLineLength = 100000;
+    this.sunBodyScaleFactor = 1.1; // Minimal boost for Sun visibility
+    this.dashedLineLength = 100000; // 100km dashes
     this.maxLengthInThreeJS = 2000;
-    this.vehicleLength = 25000;
+    this.vehicleLength = 20000.0; // 20km indicator in pure meters
     this.defaultZoomFactor = 40;
 
-    this.bodyNames = ['current vessel', 'Sun', 'Kerbin', 'Mun', 'Minmus'];
+    this.bodyNames = []; // v21.8.15: Populated dynamically from manifest
     this.orbitPathColors = [
       "#4d94ff", "#ff00ff", "#00e600", "#ff9900", "#9933ff",
       "#ffcc00", "#00ccff", "#ff5050", "#00cccc", "#ffccff"
@@ -30,21 +30,24 @@ class SystemOrbitalMap {
     this.registry = {
       bodies: {},
       orbits: {},
+      celestialOrbits: {}, // v21.8.15: Registry for static planetary orbits
       vessels: {},
       nodes: {},
       patches: {},
       paths: {}
     };
     this.bodyRadii = {};
-    this.bodyToggles = {}; 
+    this.bodyToggles = {};
     this.isSliderInteracting = false;
     this.activeNodeIndex = 0;
     this.maneuverInterval = null;
 
     this.buildSceneCameraAndRenderer();
-    this.setupCustomUI();
-    
     this.navball = new Navball('navball-container');
+
+    // v21.8.12: Load global planetary texture (shared legacy asset)
+    this.textureLoader = new THREE.TextureLoader();
+    this.planetTexture = this.textureLoader.load('../assets/images/navball.png');
 
     this.positionDataFormatter = positionDataFormatter;
     this.positionDataFormatter.options.onFormat = (data) => this.render(data);
@@ -61,12 +64,28 @@ class SystemOrbitalMap {
       });
     }
 
+    // Dynamic Visibility Toggles (v21.8.8)
+    const bindToggles = () => {
+      const toggles = document.querySelectorAll('#body-toggles input[type="checkbox"]');
+      toggles.forEach(chk => {
+        const bodyName = chk.getAttribute('data-body');
+        this.bodyToggles[bodyName] = chk.checked;
+        chk.onclick = (e) => {
+          this.bodyToggles[bodyName] = e.target.checked;
+          this.triggerRender();
+        };
+      });
+    };
+
+    window.addEventListener('system-map-ui-ready', bindToggles);
+    bindToggles(); // Initial bind
+
     // Node Selector
     const nodeSelector = document.getElementById('node-selector');
     if (nodeSelector) {
       nodeSelector.addEventListener('change', (e) => {
         this.activeNodeIndex = parseInt(e.target.value);
-        this.cameraSet = false; 
+        this.cameraSet = false;
         this.triggerRender();
       });
     }
@@ -74,7 +93,7 @@ class SystemOrbitalMap {
     // Action Buttons
     const btnReset = document.getElementById('btn-reset');
     if (btnReset) btnReset.addEventListener('click', () => this.resetPosition());
-    
+
     const btnFull = document.getElementById('btn-fullscreen');
     if (btnFull) btnFull.addEventListener('click', () => this.toggleFullscreen());
 
@@ -86,7 +105,7 @@ class SystemOrbitalMap {
     if (utInput) {
       utInput.addEventListener('input', () => this.triggerRender());
     }
-    
+
     const btnDel = document.getElementById('btn-del-node');
     if (btnDel) btnDel.addEventListener('click', () => {
       this.datalink.sendNodeAction('del', this.activeNodeIndex);
@@ -142,7 +161,7 @@ class SystemOrbitalMap {
     const currentUT = this.lastFormattedData.currentUniversalTime;
     const d = this.datalink.lastData;
     const offset = parseFloat(document.getElementById('node-ut-offset').value) || 60;
-    
+
     // Logic for Stacking: we want the node to be at (currentBurnUT + offset)
     // If no nodes, currentBurnUT = vesselCurrentUT
     let targetUT = currentUT + offset;
@@ -158,7 +177,7 @@ class SystemOrbitalMap {
 
     // Auto-Select Logic
     const currentNodes = d['o.maneuverNodes'] || [];
-    this.activeNodeIndex = currentNodes.length; 
+    this.activeNodeIndex = currentNodes.length;
     const selector = document.getElementById('node-selector');
     if (selector) selector.value = this.activeNodeIndex;
     this.cameraSet = false;
@@ -172,7 +191,7 @@ class SystemOrbitalMap {
       const normVal = parseFloat(document.getElementById('slider-norm').value);
       const radVal = parseFloat(document.getElementById('slider-rad').value);
       if (proVal === 0 && normVal === 0 && radVal === 0) return;
-      const multiplier = 15; 
+      const multiplier = 15;
       const getDelta = (v) => Math.sign(v) * Math.pow(Math.abs(v), 2) * multiplier;
       this.lastNodeData.deltaV[2] += getDelta(proVal);
       this.lastNodeData.deltaV[1] += getDelta(normVal);
@@ -201,11 +220,11 @@ class SystemOrbitalMap {
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
-    this.renderer.setClearColor(0x000000, 0); 
+    this.renderer.setClearColor(0x000000, 0);
     this.container.appendChild(this.renderer.domElement);
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(75, this.container.clientWidth / this.container.clientHeight, 0.1, 10000000);
-    this.camera.up.set(0, -1, 0); 
+    this.camera = new THREE.PerspectiveCamera(75, this.container.clientWidth / this.container.clientHeight, 0.1, 1e12); // Gigabit scale for full Kerbol system (meters)
+    this.camera.up.set(0, 1, 0);
     this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
@@ -266,11 +285,11 @@ class SystemOrbitalMap {
       // Target Readout Update (Read-only, Safe)
       const targetReadout = document.getElementById('target-readout');
       if (targetReadout) {
-          if (d['tar.name'] && d['tar.name'] !== "No Target" && d['tar.name'] !== "No Target Selected.") {
-              targetReadout.innerText = d['tar.name'].toUpperCase();
-          } else {
-              targetReadout.innerText = "NO TARGET";
-          }
+        if (d['tar.name'] && d['tar.name'] !== "No Target" && d['tar.name'] !== "No Target Selected.") {
+          targetReadout.innerText = d['tar.name'].toUpperCase();
+        } else {
+          targetReadout.innerText = "NO TARGET";
+        }
       }
 
       // Encounter Info
@@ -279,7 +298,7 @@ class SystemOrbitalMap {
         const encBody = d['o.encounterBody'];
         if (encBody && encBody !== 'None' && encBody !== '') {
           const encTime = d['o.encounterTime'] || 0;
-          encElem.innerText = `${encBody.toUpperCase()} ENCOUNTER: T-${(encTime/3600).toFixed(1)}h`;
+          encElem.innerText = `${encBody.toUpperCase()} ENCOUNTER: T-${(encTime / 3600).toFixed(1)}h`;
         } else {
           encElem.innerText = '';
         }
@@ -298,26 +317,26 @@ class SystemOrbitalMap {
 
     if (this.datalink.lastData && this.datalink.lastData['o.maneuverNodes']) {
       const nodes = this.datalink.lastData['o.maneuverNodes'];
-      
+
       // Predicted Stats for Node
       const predElem = document.getElementById('pred-stats');
       if (this.activeNodeIndex < nodes.length) {
         this.lastNodeData = nodes[this.activeNodeIndex];
         this.activeNodePosition = this.lastNodeData.truePosition;
-        
+
         // Sliders Update (dv labels)
         const proLabel = document.getElementById('dv-pro');
         const normLabel = document.getElementById('dv-norm');
         const radLabel = document.getElementById('dv-rad');
-        if (proLabel) proLabel.innerText = this.lastNodeData.deltaV[2].toFixed(1);
-        if (normLabel) normLabel.innerText = this.lastNodeData.deltaV[1].toFixed(1);
-        if (radLabel) radLabel.innerText = this.lastNodeData.deltaV[0].toFixed(1);
+        if (proLabel) proLabel.innerText = this.lastNodeData.deltaV.z.toFixed(1);
+        if (normLabel) normLabel.innerText = this.lastNodeData.deltaV.y.toFixed(1);
+        if (radLabel) radLabel.innerText = this.lastNodeData.deltaV.x.toFixed(1);
 
         if (predElem && formattedData.maneuverNodes[this.activeNodeIndex]) {
           const node = formattedData.maneuverNodes[this.activeNodeIndex];
           const lastPatch = node.orbitPatches[node.orbitPatches.length - 1];
           if (lastPatch && lastPatch.ApA !== undefined) {
-             predElem.innerText = `PRED AP: ${(lastPatch.ApA / 1000).toFixed(1)}km | PE: ${(lastPatch.PeA / 1000).toFixed(1)}km`;
+            predElem.innerText = `PRED AP: ${(lastPatch.ApA / 1000).toFixed(1)}km | PE: ${(lastPatch.PeA / 1000).toFixed(1)}km`;
           }
         }
       }
@@ -327,9 +346,9 @@ class SystemOrbitalMap {
       if (summaryElem) {
         let summaryHTML = '';
         nodes.forEach((n, idx) => {
-          const totalDV = Math.sqrt(Math.pow(n.deltaV[0], 2) + Math.pow(n.deltaV[1], 2) + Math.pow(n.deltaV[2], 2)).toFixed(1);
+          const totalDV = Math.sqrt(Math.pow(n.deltaV.x, 2) + Math.pow(n.deltaV.y, 2) + Math.pow(n.deltaV.z, 2)).toFixed(1);
           const activeStyle = (idx === this.activeNodeIndex) ? 'color: #00ffff; font-weight: bold;' : '';
-          summaryHTML += `<div style="${activeStyle}">NODE ${idx+1}: ${totalDV} m/s</div>`;
+          summaryHTML += `<div style="${activeStyle}">NODE ${idx + 1}: ${totalDV} m/s</div>`;
         });
         summaryElem.innerHTML = summaryHTML;
       }
@@ -348,21 +367,52 @@ class SystemOrbitalMap {
         }
         continue;
       }
-      
-      var radius = info.radius * this.referenceBodyScaleFactor;
-      if (name === "Sun") radius *= this.sunBodyScaleFactor;
+
+      var radius = (info.radius || 600000); 
+      if (name === "Sun") radius = 261600000; 
       this.bodyRadii[name] = radius;
 
       let mesh = this.registry.bodies[name];
       if (!mesh) {
-        var material = name === "Sun" ? new THREE.MeshBasicMaterial({ color: 'yellow' }) : new THREE.MeshPhongMaterial({ color: info.type === "targetBodyCurrentPosition" ? this.targetColor : info.color, shininess: 30 });
+        var material = name === "Sun" ? new THREE.MeshBasicMaterial({ color: 'yellow' }) : new THREE.MeshPhongMaterial({
+          color: info.type === "targetBodyCurrentPosition" ? this.targetColor : info.color,
+          shininess: 30,
+          map: (name !== "Sun") ? this.planetTexture : null
+        });
         mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 32), material);
         this.group.add(mesh);
         this.registry.bodies[name] = mesh;
       }
 
-      if (info.truePosition) mesh.position.set(info.truePosition[0], info.truePosition[1], info.truePosition[2]);
-      if (name === "Sun") this.sunLight.position.set(info.truePosition[0], info.truePosition[1], info.truePosition[2]);
+      if (info.truePosition) mesh.position.set(info.truePosition.x, info.truePosition.y, info.truePosition.z);
+      if (name === "Sun") this.sunLight.position.set(info.truePosition.x, info.truePosition.y, info.truePosition.z);
+
+      // v21.8.20: Standard rotation around UP axis.
+      mesh.rotation.y = (info.rotationAngle || 0) * (Math.PI / 180);
+
+      // v21.8.15: Handle Celestial Orbit Rendering (Ellipse)
+      this.updateCelestialOrbitGeometry(name, info);
+    }
+  }
+
+  updateCelestialOrbitGeometry(name, info) {
+    if (!info.orbitPath || info.orbitPath.length < 2) return;
+    const id = "celestial-orbit-" + name;
+    let line = this.registry.celestialOrbits[id];
+    const points = info.orbitPath.map(p => new THREE.Vector3(p.x, p.y, p.z));
+    const colorVal = info.color || '#555555';
+
+    if (!line) {
+      const geometry = this.createGeometryFromPoints(points, 256);
+      line = new THREE.Line(geometry, new THREE.LineBasicMaterial({
+        color: colorVal,
+        transparent: true,
+        opacity: 0.4 // Subtle for planetary paths
+      }));
+      this.group.add(line);
+      this.registry.celestialOrbits[id] = line;
+    } else {
+      this.updateLineGeometry(line, points);
     }
   }
 
@@ -379,7 +429,7 @@ class SystemOrbitalMap {
         this.group.add(mesh);
         this.registry.vessels[id] = mesh;
       }
-      mesh.position.set(info.truePosition[0], info.truePosition[1], info.truePosition[2]);
+      mesh.position.set(info.truePosition.x, info.truePosition.y, info.truePosition.z);
       if (info.type === "currentVessel") this.currentVesselMesh = mesh;
     }
     // Cleanup old vessels
@@ -395,28 +445,28 @@ class SystemOrbitalMap {
     var patches = formattedData.orbitPatches || [];
     var seenPatches = {};
     for (var i = 0; i < patches.length; i++) {
-        var patch = patches[i];
-        var id = "patch-" + i;
-        seenPatches[id] = true;
-        var points = patch.truePositions.map(p => new THREE.Vector3(p[0], p[1], p[2]));
-        let line = this.registry.orbits[id];
-        const colorVal = patch.parentType === "targetVessel" ? this.targetColor : this.orbitPathColors[i % 10];
-        if (!line) {
-            var geometry = this.createGeometryFromPoints(points, 256);
-            line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: colorVal }));
-            this.group.add(line);
-            this.registry.orbits[id] = line;
-        } else {
-            line.material.color.set(colorVal);
-            this.updateLineGeometry(line, points);
-        }
+      var patch = patches[i];
+      var id = "patch-" + i;
+      seenPatches[id] = true;
+      var points = patch.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
+      let line = this.registry.orbits[id];
+      const colorVal = patch.parentType === "targetVessel" ? this.targetColor : this.orbitPathColors[i % 10];
+      if (!line) {
+        var geometry = this.createGeometryFromPoints(points, 256);
+        line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: colorVal }));
+        this.group.add(line);
+        this.registry.orbits[id] = line;
+      } else {
+        line.material.color.set(colorVal);
+        this.updateLineGeometry(line, points);
+      }
     }
     // Cleanup
     for (var key in this.registry.orbits) {
-        if (!seenPatches[key]) {
-            this.group.remove(this.registry.orbits[key]);
-            delete this.registry.orbits[key];
-        }
+      if (!seenPatches[key]) {
+        this.group.remove(this.registry.orbits[key]);
+        delete this.registry.orbits[key];
+      }
     }
   }
 
@@ -424,88 +474,88 @@ class SystemOrbitalMap {
     var nodes = formattedData.maneuverNodes || [];
     var seenNodes = {};
     for (var i = 0; i < nodes.length; i++) {
-        var node = nodes[i];
-        var id = "node-" + i;
-        seenNodes[id] = true;
-        let marker = this.registry.nodes[id];
-        if (!marker) {
-            marker = new THREE.Mesh(new THREE.SphereGeometry(this.vehicleLength * 0.5, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
-            this.group.add(marker);
-            this.registry.nodes[id] = marker;
-        }
-        if (node.truePosition) marker.position.set(node.truePosition[0], node.truePosition[1], node.truePosition[2]);
+      var node = nodes[i];
+      var id = "node-" + i;
+      seenNodes[id] = true;
+      let marker = this.registry.nodes[id];
+      if (!marker) {
+        marker = new THREE.Mesh(new THREE.SphereGeometry(this.vehicleLength * 0.5, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
+        this.group.add(marker);
+        this.registry.nodes[id] = marker;
+      }
+      if (node.truePosition) marker.position.set(node.truePosition.x, node.truePosition.y, node.truePosition.z);
 
-        // Maneuver Orbits
-        var nodePatches = node.orbitPatches || [];
-        for (var j = 0; j < nodePatches.length; j++) {
-            var patch = nodePatches[j];
-            var patchId = "node-" + i + "-patch-" + j;
-            seenNodes[patchId] = true;
-            var points = patch.truePositions.map(p => new THREE.Vector3(p[0], p[1], p[2]));
-            let line = this.registry.patches[patchId];
-            if (!line) {
-                var geometry = this.createGeometryFromPoints(points, 256);
-                geometry.computeBoundingBox();
-                var dashSize = geometry.boundingBox.size().x / 40;
-                line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: '#00ffff', dashSize: dashSize, gapSize: dashSize / 2, linewidth: 3 }));
-                this.group.add(line);
-                this.registry.patches[patchId] = line;
-            } else {
-                this.updateLineGeometry(line, points);
-            }
+      // Maneuver Orbits
+      var nodePatches = node.orbitPatches || [];
+      for (var j = 0; j < nodePatches.length; j++) {
+        var patch = nodePatches[j];
+        var patchId = "node-" + i + "-patch-" + j;
+        seenNodes[patchId] = true;
+        var points = patch.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
+        let line = this.registry.patches[patchId];
+        if (!line) {
+          var geometry = this.createGeometryFromPoints(points, 256);
+          geometry.computeBoundingBox();
+          var dashSize = geometry.boundingBox.size().x / 40;
+          line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: '#00ffff', dashSize: dashSize, gapSize: dashSize / 2, linewidth: 3 }));
+          this.group.add(line);
+          this.registry.patches[patchId] = line;
+        } else {
+          this.updateLineGeometry(line, points);
         }
+      }
     }
 
     // Ghost Preview Sphere with Multi-Patch Support
     const utInput = document.getElementById('node-ut-offset');
     if (utInput) {
-        const offset = parseFloat(utInput.value) || 0;
-        const targetUT = formattedData.currentUniversalTime + offset;
-        const ghostId = "ghost-node";
-        let ghost = this.registry.nodes[ghostId];
-        
-        if (!ghost) {
-            ghost = new THREE.Mesh(new THREE.SphereGeometry(this.vehicleLength * 0.4, 32, 32), new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 }));
-            this.group.add(ghost);
-            this.registry.nodes[ghostId] = ghost;
+      const offset = parseFloat(utInput.value) || 0;
+      const targetUT = formattedData.currentUniversalTime + offset;
+      const ghostId = "ghost-node";
+      let ghost = this.registry.nodes[ghostId];
+
+      if (!ghost) {
+        ghost = new THREE.Mesh(new THREE.SphereGeometry(this.vehicleLength * 0.4, 32, 32), new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 }));
+        this.group.add(ghost);
+        this.registry.nodes[ghostId] = ghost;
+      }
+
+      // Target the ACTIVE maneuver node's patches for stacked planning
+      let targetPatches = formattedData.orbitPatches || [];
+      if (formattedData.maneuverNodes && formattedData.maneuverNodes[this.activeNodeIndex]) {
+        const activeNode = formattedData.maneuverNodes[this.activeNodeIndex];
+        if (activeNode.orbitPatches && activeNode.orbitPatches.length > 0) {
+          targetPatches = activeNode.orbitPatches;
         }
+      }
 
-        // Target the ACTIVE maneuver node's patches for stacked planning
-        let targetPatches = formattedData.orbitPatches || [];
-        if (formattedData.maneuverNodes && formattedData.maneuverNodes[this.activeNodeIndex]) {
-            const activeNode = formattedData.maneuverNodes[this.activeNodeIndex];
-            if (activeNode.orbitPatches && activeNode.orbitPatches.length > 0) {
-                targetPatches = activeNode.orbitPatches;
-            }
+      // Find the correct orbit patch for targetUT across all available paths
+      let foundPoint = null;
+      let selectedPatch = null;
+
+      // Traverse patches to find where targetUT fits temporally
+      for (let patch of targetPatches) {
+        if (targetUT >= patch.startUT && targetUT <= patch.endUT) {
+          selectedPatch = patch;
+          break;
         }
+      }
 
-        // Find the correct orbit patch for targetUT across all available paths
-        let foundPoint = null;
-        let selectedPatch = null;
+      // Fallback to first patch if outside range (e.g. initial setup)
+      if (!selectedPatch && targetPatches.length > 0) selectedPatch = targetPatches[0];
 
-        // Traverse patches to find where targetUT fits temporally
-        for (let patch of targetPatches) {
-            if (targetUT >= patch.startUT && targetUT <= patch.endUT) {
-                selectedPatch = patch;
-                break;
-            }
-        }
+      if (selectedPatch && selectedPatch.truePositions) {
+        const points = selectedPatch.truePositions;
+        const duration = selectedPatch.endUT - selectedPatch.startUT;
+        const progress = (targetUT - selectedPatch.startUT) / (duration || 1);
+        const index = Math.min(points.length - 1, Math.max(0, Math.floor(progress * points.length)));
+        foundPoint = points[index];
+      }
 
-        // Fallback to first patch if outside range (e.g. initial setup)
-        if (!selectedPatch && targetPatches.length > 0) selectedPatch = targetPatches[0];
-
-        if (selectedPatch && selectedPatch.truePositions) {
-            const points = selectedPatch.truePositions;
-            const duration = selectedPatch.endUT - selectedPatch.startUT;
-            const progress = (targetUT - selectedPatch.startUT) / (duration || 1);
-            const index = Math.min(points.length - 1, Math.max(0, Math.floor(progress * points.length)));
-            foundPoint = points[index];
-        }
-
-        if (foundPoint) {
-            ghost.position.set(foundPoint[0], foundPoint[1], foundPoint[2]);
-            seenNodes[ghostId] = true;
-        }
+      if (foundPoint) {
+        ghost.position.set(foundPoint.x, foundPoint.y, foundPoint.z);
+        seenNodes[ghostId] = true;
+      }
     }
 
     // Cleanup
@@ -517,23 +567,35 @@ class SystemOrbitalMap {
     var paths = formattedData.referenceBodyPaths || [];
     var seenPaths = {};
     for (var i = 0; i < paths.length; i++) {
-        var path = paths[i];
-        var name = path.referenceBodyName;
-        seenPaths[name] = true;
-        if (this.bodyToggles[name] === false) {
-            if (this.registry.paths[name]) { this.group.remove(this.registry.paths[name]); delete this.registry.paths[name]; }
-            continue;
+      var path = paths[i];
+      var name = path.referenceBodyName;
+      seenPaths[name] = true;
+      if (this.bodyToggles[name] === false) {
+        if (this.registry.paths[name]) { this.group.remove(this.registry.paths[name]); delete this.registry.paths[name]; }
+        continue;
+      }
+      var points = path.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
+      let line = this.registry.paths[name];
+      if (!line) {
+        var geometry = this.createGeometryFromPoints(points, 256);
+        if (!geometry) continue;
+        
+        // v21.8.21: Dynamic Color Sync (fixes THREE.Color Alpha warning)
+        const bodyColor = path.color || '#ffffff';
+        line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ 
+            color: new THREE.Color(bodyColor), 
+            transparent: true, 
+            opacity: 0.2 
+        }));
+        
+        this.group.add(line);
+        this.registry.paths[name] = line;
+      } else {
+        this.updateLineGeometry(line, points);
+        if (path.color) {
+            line.material.color.set(path.color);
         }
-        var points = path.truePositions.map(p => new THREE.Vector3(p[0], p[1], p[2]));
-        let line = this.registry.paths[name];
-        if (!line) {
-            var geometry = this.createGeometryFromPoints(points, 256);
-            line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 'rgba(255,255,255,0.2)', transparent: true, opacity: 0.2 }));
-            this.group.add(line);
-            this.registry.paths[name] = line;
-        } else {
-            this.updateLineGeometry(line, points);
-        }
+      }
     }
     // Cleanup
     for (var key in this.registry.paths) { if (!seenPaths[key]) { this.group.remove(this.registry.paths[key]); delete this.registry.paths[key]; } }
@@ -545,37 +607,51 @@ class SystemOrbitalMap {
     line.geometry.vertices = newPoints;
     line.geometry.verticesNeedUpdate = true;
     if (line.material.type === "LineDashedMaterial") {
-        line.geometry.computeLineDistances();
-        line.geometry.computeBoundingBox();
-        var dashSize = line.geometry.boundingBox.size().x / 40;
+      line.geometry.computeLineDistances();
+      line.geometry.computeBoundingBox();
+      if (line.geometry.boundingBox) {
+        var size = new THREE.Vector3();
+        line.geometry.boundingBox.getSize(size);
+        var dashSize = size.x / 40;
         line.material.dashSize = dashSize;
         line.material.gapSize = dashSize / 2;
+      }
     }
   }
 
   createGeometryFromPoints(points, resolution) {
+    if (!points || points.length < 2) return null;
     var curve = new THREE.CatmullRomCurve3(points);
     var geometry = new THREE.Geometry();
     geometry.vertices = curve.getPoints(resolution || 256);
-    geometry.computeLineDistances(); 
+    geometry.computeLineDistances();
     return geometry;
   }
 
   updateCamera(formattedData) {
     if (this.lastFocusBody !== this.GUIParameters.focusBody) {
-      var boundingBox = new THREE.Box3().setFromObject(this.group);
-      if (!boundingBox.isEmpty()) {
-        var size = boundingBox.size(new THREE.Vector3());
-        this.mapScaleFactor = this.maxLengthInThreeJS / (Math.max(size.x, size.y, size.z) || 1);
-        this.group.scale.set(this.mapScaleFactor, this.mapScaleFactor, this.mapScaleFactor);
+      // v21.8.15: Optimized Local System Scaling
+      // We no longer scale based on the entire sun-centric system.
+      // Instead, we scale based on the local neighborhood of the focus target.
+      let localFocusRadius = 600000;
+      if (this.GUIParameters.focusBody === 'current vessel') {
+        localFocusRadius = 100000; // Small radius for precision around vessel
+      } else {
+        const bodyInfo = (formattedData.referenceBodies || []).find(b => b.name === this.GUIParameters.focusBody);
+        localFocusRadius = (bodyInfo ? bodyInfo.radius : 600000) * 12; // 12x radius covers moons
       }
+
+      // v21.8.20: Pure Meter Scale (1:1). Precision is handled by rootOrigin subtraction.
+      this.mapScaleFactor = 1.0; 
+      this.group.scale.set(1, 1, 1);
+
       this.lastFocusBody = this.GUIParameters.focusBody;
     }
 
     var focusPos = new THREE.Vector3(), focusRadius = 600000;
     if (this.GUIParameters.focusBody === 'current vessel' && this.currentVesselMesh) {
       if (this.isSliderInteracting && this.activeNodePosition) {
-        focusPos.set(this.activeNodePosition[0], this.activeNodePosition[1], this.activeNodePosition[2]);
+        focusPos.set(this.activeNodePosition.x, this.activeNodePosition.y, this.activeNodePosition.z);
         focusRadius = this.vehicleLength;
       } else {
         focusPos.copy(this.currentVesselMesh.position);
@@ -586,18 +662,62 @@ class SystemOrbitalMap {
       focusRadius = this.bodyRadii[this.GUIParameters.focusBody] || 600000;
     }
 
-    var scaledTarget = focusPos.clone().multiplyScalar(this.mapScaleFactor);
-    this.controls.target.copy(scaledTarget);
+    // v21.8.20: Camera-Follow with Preserved Offset (KSP Map View Style)
+    // Every frame we shift camera+target by the same delta, preserving user's orbit rotation.
+    this.group.position.set(0, 0, 0);
+
     if (!this.cameraSet) {
-      var offset = (focusRadius * 10 + this.vehicleLength * 20) * this.mapScaleFactor;
-      this.camera.position.set(scaledTarget.x + offset, scaledTarget.y + offset/2, scaledTarget.z + offset);
-      this.camera.lookAt(scaledTarget);
+      // First frame: initialize camera position and target
+      var offset = (focusRadius * 15 + this.vehicleLength * 2);
+      this.camera.position.set(focusPos.x + offset, focusPos.y + offset / 2, focusPos.z + offset);
+      this.controls.target.copy(focusPos);
+      this.controls.update();
+      this._lastFocusPos = focusPos.clone();
       this.cameraSet = true;
+    } else {
+      // Subsequent frames: shift camera by the delta of the focus body movement
+      // This keeps the same viewing angle while following the target
+      if (this._lastFocusPos) {
+        const delta = focusPos.clone().sub(this._lastFocusPos);
+        this.camera.position.add(delta);
+        this.controls.target.copy(focusPos);
+      }
+      this._lastFocusPos = focusPos.clone();
+    }
+
+    // === DIAGNOSTIC LOGGING (every 120 frames) ===
+    if (!this._diagFrame) this._diagFrame = 0;
+    this._diagFrame++;
+    if (this._diagFrame % 120 === 0 && formattedData) {
+      const ut = formattedData.currentUniversalTime;
+      const bodies = formattedData.referenceBodies || [];
+
+      ['Kerbin', 'Jool', 'Eve', 'Duna'].forEach(name => {
+        const mesh = this.registry.bodies[name];
+        const fmtBody = bodies.find(b => b.name === name);
+        if (mesh && fmtBody) {
+          console.log(
+            `[DIAG] UT=${ut?.toFixed(0)} | ${name} | ` +
+            `scene=[${mesh.position.x.toExponential(3)}, ${mesh.position.y.toExponential(3)}, ${mesh.position.z.toExponential(3)}] | ` +
+            `formatted=[${fmtBody.truePosition?.x.toExponential(3)}, ${fmtBody.truePosition?.y.toExponential(3)}, ${fmtBody.truePosition?.z.toExponential(3)}]`
+          );
+        }
+      });
+
+      const raw = this.datalink?.lastData;
+      if (raw && raw['referenceBodies']) {
+        const kerbinRaw = raw['referenceBodies']['Kerbin'];
+        if (kerbinRaw && kerbinRaw.currentTruePosition) {
+          const p = kerbinRaw.currentTruePosition;
+          console.log(`[DIAG] UT=${ut?.toFixed(0)} | Kerbin RAW currentTruePosition=[${p.x.toExponential(3)}, ${p.y.toExponential(3)}, ${p.z.toExponential(3)}]`);
+        }
+      }
     }
   }
 
-  resetPosition() { 
-    this.cameraSet = false; 
+
+  resetPosition() {
+    this.cameraSet = false;
     this.lastFocusBody = null; // Force rescale
   }
 }

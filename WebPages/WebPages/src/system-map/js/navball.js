@@ -12,7 +12,7 @@ function Navball(containerID) {
   const h = this.container.clientHeight;
 
   this.scene = new THREE.Scene();
-  this.camera = new THREE.PerspectiveCamera(32, w / h, 0.1, 1000);
+  this.camera = new THREE.PerspectiveCamera(32, w / h, 0.001, 1000);
   this.camera.position.z = 190; 
 
   // Lighting with enhanced instrument visibility
@@ -110,7 +110,7 @@ Navball.prototype.createSphere = function() {
 
   // Use high-fidelity texture if available, fallback to procedural
   const loader = new THREE.TextureLoader();
-  const texture = loader.load('assets/images/navball.png', function() {
+  const texture = loader.load('../assets/images/navball.png', function() {
     // Loaded successfully
     material.map = texture;
     material.needsUpdate = true;
@@ -124,8 +124,7 @@ Navball.prototype.createSphere = function() {
 
   const geometry = new THREE.SphereGeometry(50, 128, 128);
   const material = new THREE.MeshLambertMaterial({
-    map: canvasTexture,
-    shading: THREE.SmoothShading
+    map: canvasTexture
   });
 
   // Global High-Fidelity Lighting

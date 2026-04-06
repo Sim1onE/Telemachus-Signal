@@ -135,7 +135,9 @@ class TelemachusSignalLink {
         this.listeners = new Map();
         this.uplink = new UplinkSynchronizer(this);
         this.datalinkSync = new DownlinkSynchronizer();
-        this.lastDatalinkData = {}; // v16.32: Persistent delayed data store
+        this.lastDatalinkData = {
+            "referenceBodies": {} // v21.8.4: Pre-initialize for formatter stability
+        }; 
 
         // v16.35: Smoothing & Interpolation props
         this._lastStatusMET = 0;
@@ -189,6 +191,29 @@ class TelemachusSignalLink {
         this.listeners.get(typeOrName).push(callback);
     }
 
+    off(typeOrName, callback) {
+        if (!this.listeners.has(typeOrName)) return;
+        const list = this.listeners.get(typeOrName);
+        const idx = list.indexOf(callback);
+        if (idx !== -1) list.splice(idx, 1);
+    }
+
+    sendRequest(action, target, payload, callback) {
+        const id = Math.random().toString(36).substr(2, 9);
+        payload.id = id;
+
+        const responseType = target + "_response";
+        const handler = (msg) => {
+            if (msg.id === id || (msg.data && msg.data.id === id)) {
+                this.off(responseType, handler);
+                callback(msg.data);
+            }
+        };
+
+        this.on(responseType, handler);
+        this.send(action, target, payload);
+    }
+
     connect() {
         if (this.isRunning) return;
         this.isRunning = true;
@@ -234,7 +259,7 @@ class TelemachusSignalLink {
                 }
 
                 // v16.30: Datalink specific sync insertion (v18.18: telemetry unificata a datalink)
-                if (type === 'datalink' || type === 'telemetry') {
+                if (type === 'datalink' || type === 'telemetry' || type === 'orbit') {
                     this.datalinkSync.pushPacket(msg.ut, this.lastPacketWarp, this.latestNetworkDelay, 0, this.latestQuality, dataPayload);
                 }
                 return;
@@ -361,6 +386,14 @@ class TelemachusSignalLink {
 
     unsubscribeAudio() {
         this.send("stream/unsubscribe", "audio");
+    }
+
+    subscribeOrbit(options = {}) {
+        this.send("stream/subscribe", "orbit", options);
+    }
+
+    unsubscribeOrbit() {
+        this.send("stream/unsubscribe", "orbit");
     }
 
     // v18.14: Generic subscribe for backward compatibility

@@ -11,21 +11,40 @@ class Telemachus {
     this.receiverFunctions = [];
     this.subscribedFields = {};
     this.orbitingBodies = this.getOrbitalBodies();
-    this.rate = 500;
-    this.loopTimeout = null;
+    
+    // v21.8: WebSocket Connection (SignalLink)
+    const streamUrl = TelemachusSignalLink.detectStreamUrl();
+    this.signalLink = new TelemachusSignalLink(streamUrl, this);
 
-    // Start the polling loop
-    this.startPolling();
+    this.signalLink.on('open', () => {
+        console.log("[SystemMap] WebSocket Link established.");
+        this.signalLink.subscribeTick(); // Basic clock
+        this.resubscribeAll();
+    });
+
+    this.signalLink.on('datalink_update', (msg) => {
+        this.dispatchMessages(msg.data);
+    });
+
+    this.signalLink.connect();
   }
 
-  get url() {
-    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-    return `${protocol}//${this.host}:${this.port}/telemachus/datalink`;
+  get lastDatalinkData() {
+    return this.signalLink ? this.signalLink.lastDatalinkData : {};
+  }
+
+  resubscribeAll() {
+    const keys = Object.keys(this.subscribedFields);
+    if (keys.length > 0) {
+        this.signalLink.subscribeTelemetry(keys);
+    }
   }
 
   updateConnection(host, port) {
     this.host = host;
     this.port = port;
+    // SignalLink normally detects the URL automatically, 
+    // but if we force it, we'd need to recreate the link.
   }
 
   addReceiverFunction(func) {
@@ -36,34 +55,22 @@ class Telemachus {
     fields.forEach(field => {
       this.subscribedFields[field] = field;
     });
-  }
-
-  /**
-   * Sending generic datalink parameters (polling strategy).
-   */
-  async sendMessage(params, callback) {
-    try {
-      const response = await fetch(this.url, {
-        method: "POST",
-        body: JSON.stringify(params),
-        headers: {
-          "Content-Type": "application/json"
-        }
-      });
-
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-      const rawData = await response.json();
-      const data = this.convertData(rawData);
-      if (callback) callback(data);
-    } catch (e) {
-      console.error("Telemachus POST Error:", e);
+    if (this.signalLink.ws && this.signalLink.ws.readyState === WebSocket.OPEN) {
+        this.signalLink.subscribeTelemetry(fields);
     }
   }
 
   /**
+   * v21.8: Sending generic datalink parameters via WebSocket command.
+   */
+  async sendMessage(params, callback) {
+    this.signalLink.sendRequest("command", "telemetry", { values: params }, (data) => {
+        if (callback) callback(data);
+    });
+  }
+
+  /**
    * Command Bridge (SEND commands instead of polling data).
-   * Houston Parity: o.addManeuverNode, o.updateManeuverNode.
    */
   sendManeuverUpdate(index, ut, radial, normal, prograde) {
     const cmd = `o.updateManeuverNode[${index},${ut},${radial},${normal},${prograde}]`;
@@ -72,7 +79,6 @@ class Telemachus {
 
   sendNodeAction(action, nodeIndex = 0, utOffset = 1000) {
     if (action === 'add') {
-      // We need current UT to place the node
       this.sendMessage({ "t.universalTime": "t.universalTime" }, (data) => {
         const ut = data["t.universalTime"] + utOffset;
         const cmd = `o.addManeuverNode[${ut},0,0,0]`;
@@ -93,44 +99,39 @@ class Telemachus {
     return data;
   }
 
-  async poll() {
-    const fieldsToPoll = this.subscribedFields;
-    const params = Object.keys(fieldsToPoll).map(field => {
-      const sanitizedFieldName = field.replace(/\[/g, "{").replace(/\]/g, "}");
-      return `${sanitizedFieldName}=${field}`;
-    });
-    const requestURL = `${this.url}?${params.join("&")}`;
-
-    try {
-      const response = await fetch(requestURL);
-      if (response.ok) {
-        const rawData = await response.json();
-        const data = this.convertData(rawData);
-        this.lastData = data; // Cache for easy access
-        this.dispatchMessages(data);
-      }
-    } catch (e) {
-      console.warn("Telemachus Poll Error (Likely LOS):", e);
-      document.dispatchEvent(new CustomEvent('telemachus:loss-of-signal'));
+  dispatchMessages(data) {
+    // v21.8.10: Enrich data with last known UT to satisfy legacy modules
+    if (data && !data['t.universalTime'] && this.signalLink && this.signalLink.lastPacketUT) {
+        data['t.universalTime'] = this.signalLink.lastPacketUT;
     }
 
-    this.loopTimeout = setTimeout(() => this.poll(), this.rate);
-  }
-
-  dispatchMessages(data) {
     this.receiverFunctions.forEach(func => {
       try { func(data); } catch (e) { console.error("Telemachus Dispatch Error:", e); }
     });
   }
 
   startPolling() {
-    if (this.loopTimeout) clearTimeout(this.loopTimeout);
-    this.poll();
+      // Obsolete in WebSocket mode
   }
 
   getOrbitalBodyInfo(name) {
-    const properties = this.orbitingBodies[name];
-    return properties ? Object.assign({ name: name }, properties) : null;
+    // Case-insensitive lookup
+    const key = Object.keys(this.orbitingBodies).find(k => k.toLowerCase() === (name || '').toLowerCase()) || name;
+    const properties = this.orbitingBodies[key];
+    return properties ? Object.assign({ name: key }, properties) : null;
+  }
+
+  // v21.8.19: Update orbital body registry from dynamic server manifest
+  updateOrbitalBodies(manifest) {
+    Object.keys(manifest).forEach(bodyName => {
+      const body = manifest[bodyName];
+      if (!this.orbitingBodies[bodyName]) {
+        this.orbitingBodies[bodyName] = {};
+      }
+      // Overwrite with authoritative server data
+      if (body.parent !== undefined) this.orbitingBodies[bodyName].referenceBodyName = body.parent;
+      if (body.radius !== undefined) this.orbitingBodies[bodyName].radius = body.radius;
+    });
   }
 
   getOrbitalBodies() {

@@ -59,6 +59,7 @@ namespace Telemachus
                 case "soundtrack": return new SoundtrackSubscription();
                 case "camera": return new CameraSubscription();
                 case "audio": return new AudioSubscription();
+                case "orbit": return new OrbitSubscription();
                 default: return null;
             }
         }
@@ -102,6 +103,34 @@ namespace Telemachus
                 {
                     var values = payload["values"] as Dictionary<string, object>;
                     if (values != null) sub.ForwardCommand(values);
+                }
+            }
+            else if (target == "telemetry")
+            {
+                // v21.8: 'telemetry' target in 'command' action is exclusively for COMMANDS (SET actions)
+                // legacy GET telemetry must use 'stream/subscribe' with target 'telemetry'.
+                var values = payload.ContainsKey("values") ? payload["values"] as Dictionary<string, object> : null;
+                if (values != null)
+                {
+                    var results = new Dictionary<string, object>();
+                    foreach (var kvp in values)
+                    {
+                        try 
+                        {
+                            // Fix: Evaluate Value, not Key. 
+                            // Syntax Fix: Convert [0] to {0} for legacy compatibility.
+                            string apiString = kvp.Value.ToString().Replace("[", "{").Replace("]", "}");
+                            results[kvp.Key] = controller.Socket.ProcessAPI(apiString); 
+                        }
+                        catch { results[kvp.Key] = null; }
+                    }
+
+                    var response = new Dictionary<string, object> {
+                        { "type", "telemetry_response" },
+                        { "data", results }
+                    };
+                    if (payload.ContainsKey("id")) response["id"] = payload["id"];
+                    controller.SendUnified(response);
                 }
             }
         }

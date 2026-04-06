@@ -902,7 +902,6 @@ namespace Telemachus
             Plotable = false, Formatter = "ManeuverNodeList", Category = "maneuver", ReturnType = "object")]
         object ManeuverNodes(DataSources ds)
         {
-            PluginLogger.debug("Start GET");
             return ds.vessel.patchedConicSolver.maneuverNodes;
         }
 
