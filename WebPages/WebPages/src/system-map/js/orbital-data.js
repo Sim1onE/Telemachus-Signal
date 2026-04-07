@@ -215,6 +215,16 @@ class SystemOrbitalPositionData {
 
             if (batch.vessel.length > 0) {
                 const firstPatch = batch.vessel[0];
+                
+                // v21.8.72: Mapping elements to legacy keys for Rendezvous logic
+                positionData['o.sma'] = firstPatch.sma;
+                positionData['o.period'] = firstPatch.period;
+                positionData['o.eccentricity'] = firstPatch.ecc;
+                positionData['o.inclination'] = firstPatch.inc;
+                positionData['o.lan'] = firstPatch.lan;
+                positionData['o.argumentOfPeriapsis'] = firstPatch.argPe;
+                positionData['o.trueAnomaly'] = firstPatch.trueAnomaly || 0;
+
                 if (firstPatch.referenceBody) {
                     positionData["vesselBody"] = firstPatch.referenceBody;
                     positionData["v.body"] = firstPatch.referenceBody;
@@ -227,12 +237,22 @@ class SystemOrbitalPositionData {
         }
 
         // 2. Map Target (Direct Array Storage)
-        if (batch.target) {
-            positionData["tar.name"] = batch.target.name;
-            positionData["tar.o.orbitPatches"] = batch.target.patches || [];
+        if (batch.target && Array.isArray(batch.target)) {
+            positionData["tar.o.orbitPatches"] = batch.target;
 
-            if (batch.target.patches && batch.target.patches.length > 0) {
-                const firstPatch = batch.target.patches[0];
+            if (batch.target.length > 0) {
+                const firstPatch = batch.target[0];
+                
+                // v21.8.72: Mapping target elements for Rendezvous logic
+                positionData['tar.o.sma'] = firstPatch.sma;
+                positionData['tar.o.period'] = firstPatch.period;
+                positionData['tar.o.eccentricity'] = firstPatch.ecc;
+                positionData['tar.o.inclination'] = firstPatch.inc;
+                positionData['tar.o.lan'] = firstPatch.lan;
+                positionData['tar.o.argumentOfPeriapsis'] = firstPatch.argPe;
+                positionData['tar.o.trueAnomaly'] = firstPatch.trueAnomaly || 0;
+                positionData['tar.o.orbitingBody'] = firstPatch.referenceBody;
+
                 if (firstPatch.points && firstPatch.points.length > 0) {
                     const pt = firstPatch.points[0];
                     positionData["targetCurrentPosition"] = { relativePosition: { x: pt.x, y: pt.y, z: pt.z } };
@@ -276,13 +296,13 @@ class SystemOrbitalPositionData {
     }
 
     initializeDatalink() {
+        // v21.8.71: Merged with colleague subscriptions while keeping WebSocket architecture
         this.datalink.subscribeToData([
-            't.universalTime', 'v.body',
+            't.universalTime', 'v.body', 'v.altitude',
             'tar.name', 'tar.type',
-            'v.altitude', 'o.ApA', 'o.PeA',
             'n.pitch', 'n.roll', 'n.heading',
-            'o.encounterBody', 'o.encounterTime',
-            'astg.nextDestination', 'astg.nextBurnCountdown', 'astg.nextDeltaV',
+            'o.ApA', 'o.PeA', 'o.encounterBody', 'o.encounterTime',
+            'astg.nextDestination', 'astg.nextBurnCountdown', 'astg.nextDeltaV', // Aggiunti dal collega
             'pl.rotationX', 'pl.rotationY', 'pl.rotationZ', 'pl.meridianOffset', 'b.rotationAngle'
         ]);
 
@@ -303,6 +323,7 @@ class SystemOrbitalPositionData {
 
         this.datalink.addReceiverFunction(this.recalculate.bind(this));
     }
+
 }
 
 window.SystemOrbitalPositionData = SystemOrbitalPositionData;

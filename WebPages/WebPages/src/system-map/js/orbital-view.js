@@ -8,7 +8,7 @@ class SystemOrbitalMap {
     this.datalink = datalink;
     this.targetReadout = null;
     this.btnRendezvous = null;
-    
+
     this.lastNodeData = {
       UT: 0,
       deltaV: [0, 0, 0]
@@ -199,14 +199,14 @@ class SystemOrbitalMap {
 
     // 3. Get Mu from formatted reference body
     const bodyName = d['v.body'];
-    const refBody = this.lastFormattedData && this.lastFormattedData.referenceBodies 
-      ? this.lastFormattedData.referenceBodies.find(b => b.name === bodyName) 
+    const refBody = this.lastFormattedData && this.lastFormattedData.referenceBodies
+      ? this.lastFormattedData.referenceBodies.find(b => b.name === bodyName)
       : null;
     const mu = refBody ? refBody.gravParameter : null;
     const ut = d['t.universalTime'];
 
     if (!vessel.sma || !target.sma || !mu) {
-      console.warn("Rendezvous calculation data check failed:", {vessel, target, mu});
+      console.warn("Rendezvous calculation data check failed:", { vessel, target, mu });
       alert("INSUFFICIENT ORBITAL DATA FOR RENDEZVOUS CALCULATION.\n\nEnsure you have a vessel targeted and the map has refreshed.");
       return;
     }
@@ -218,7 +218,7 @@ class SystemOrbitalMap {
       const utStr = result.ut.toFixed(2);
       const dvStr = result.dv.toFixed(3);
       const distStr = (result.separation || 0).toFixed(0);
-      
+
       // Confirm with user
       if (confirm(`BEST ENCOUNTER FOUND (Window #${result.window + 1})\n\nBurn in: ${Math.floor(result.waitTime / 3600)}h ${Math.floor((result.waitTime % 3600) / 60)}m\nPredicted Separation: ${distStr}m\nDelta-V: ${dvStr} m/s\n\nCreate maneuver node?`)) {
         const cmd = `o.addManeuverNode[${result.ut},0,0,${result.dv}]`;
@@ -369,10 +369,13 @@ class SystemOrbitalMap {
       if (targetReadout) {
         if (d['tar.name'] && d['tar.name'] !== "No Target" && d['tar.name'] !== "No Target Selected.") {
           targetReadout.innerText = d['tar.name'].toUpperCase();
+          if (this.btnRendezvous) this.btnRendezvous.style.display = 'block';
         } else {
           targetReadout.innerText = "NO TARGET";
+          if (this.btnRendezvous) this.btnRendezvous.style.display = 'none';
         }
       }
+
 
       // Encounter Info
       const encElem = document.getElementById('encounter-info');
@@ -580,43 +583,43 @@ class SystemOrbitalMap {
     var nodes = formattedData.maneuverNodes || [];
     var seenNodes = {};
     for (var i = 0; i < nodes.length; i++) {
-        var node = nodes[i];
-        // v21.8.39: Revert to stable index-based IDs for nodes
-        // This is the most reliable anchor when UT is sliding during a countdown.
-        var id = "node-" + i;
-        seenNodes[id] = true;
-        let marker = this.registry.nodes[id];
-        if (!marker) {
-          marker = new THREE.Mesh(new THREE.SphereGeometry(this.vehicleLength * 0.5, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
-          this.group.add(marker);
-          this.registry.nodes[id] = marker;
-        }
-        if (node.truePosition) marker.position.set(node.truePosition.x, node.truePosition.y, node.truePosition.z);
-  
-        // Maneuver Orbits
-        var nodePatches = node.orbitPatches || [];
-        for (var j = 0; j < nodePatches.length; j++) {
-          var patch = nodePatches[j];
-          var isFirstForNode = (j === 0);
-          
-          // v21.8.39: Stable Maneuver Patch ID based on Node Index
-          // This prevents object recycling during UT slides.
-          var patchId = id + "-patch-" + j;
-          seenNodes[patchId] = true;
-          var points = patch.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
-          let line = this.registry.patches[patchId];
-          if (!line) {
-            var geometry = this.createGeometryFromPoints(points, 256);
-            geometry.computeBoundingBox();
-            var dashSize = geometry.boundingBox.size().x / 40;
-            line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: '#00ffff', dashSize: dashSize, gapSize: dashSize / 2, linewidth: 3 }));
-            this.group.add(line);
-            this.registry.patches[patchId] = line;
-          } else {
-            this.updateLineGeometry(line, points);
-          }
+      var node = nodes[i];
+      // v21.8.39: Revert to stable index-based IDs for nodes
+      // This is the most reliable anchor when UT is sliding during a countdown.
+      var id = "node-" + i;
+      seenNodes[id] = true;
+      let marker = this.registry.nodes[id];
+      if (!marker) {
+        marker = new THREE.Mesh(new THREE.SphereGeometry(this.vehicleLength * 0.5, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
+        this.group.add(marker);
+        this.registry.nodes[id] = marker;
+      }
+      if (node.truePosition) marker.position.set(node.truePosition.x, node.truePosition.y, node.truePosition.z);
+
+      // Maneuver Orbits
+      var nodePatches = node.orbitPatches || [];
+      for (var j = 0; j < nodePatches.length; j++) {
+        var patch = nodePatches[j];
+        var isFirstForNode = (j === 0);
+
+        // v21.8.39: Stable Maneuver Patch ID based on Node Index
+        // This prevents object recycling during UT slides.
+        var patchId = id + "-patch-" + j;
+        seenNodes[patchId] = true;
+        var points = patch.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
+        let line = this.registry.patches[patchId];
+        if (!line) {
+          var geometry = this.createGeometryFromPoints(points, 256);
+          geometry.computeBoundingBox();
+          var dashSize = geometry.boundingBox.size().x / 40;
+          line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: '#00ffff', dashSize: dashSize, gapSize: dashSize / 2, linewidth: 3 }));
+          this.group.add(line);
+          this.registry.patches[patchId] = line;
+        } else {
+          this.updateLineGeometry(line, points);
         }
       }
+    }
 
     // Ghost Preview Sphere with Multi-Patch Support
     const utInput = document.getElementById('node-ut-offset');
