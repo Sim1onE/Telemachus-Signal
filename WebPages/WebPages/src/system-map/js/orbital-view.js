@@ -472,8 +472,8 @@ class SystemOrbitalMap {
       if (info.truePosition) mesh.position.set(info.truePosition.x, info.truePosition.y, info.truePosition.z);
       if (name === "Sun") this.sunLight.position.set(info.truePosition.x, info.truePosition.y, info.truePosition.z);
 
-      // v21.8.20: Standard rotation around UP axis.
-      mesh.rotation.y = (info.rotationAngle || 0) * (Math.PI / 180);
+      // v21.8.75: Planet rotation includes initial offset (Prime Meridian alignment)
+      mesh.rotation.y = ((info.rotationAngle || 0) + (info.initialRotation || 0)) * (Math.PI / 180);
 
       // v21.8.15: Handle Celestial Orbit Rendering (Ellipse)
       this.updateCelestialOrbitGeometry(name, info);

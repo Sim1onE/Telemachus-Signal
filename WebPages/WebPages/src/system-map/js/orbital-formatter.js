@@ -197,6 +197,7 @@ class SystemPositionDataFormatter {
         gravParameter: info.gravParameter,
         orbitPath: worldOrbitPoints,
         rotationAngle: orbitInfo.rotationAngle || (positionData.bodyRotations && positionData.bodyRotations[name]) || 0,
+        initialRotation: orbitInfo.initialRotation || 0,
         atmosphericRadius: (this.datalink.getOrbitalBodyInfo(name) || {}).atmosphericRadius || 0,
         color: (this.datalink.getOrbitalBodyInfo(name) || {}).color || '#ffffff'
       });
