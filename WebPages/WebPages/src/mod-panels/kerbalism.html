@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KERBALISM SYSTEMS MONITOR | TELEMACHUS</title>
+    <link rel="stylesheet" href="kerbalism.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@400;800&display=swap" rel="stylesheet">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="../js/telemachus-signal-link.js"></script>
+</head>
+<body>
+    <main class="monitor-container">
+        <!-- GLOBAL HEADER -->
+        <header class="header-bar">
+            <div class="title-group">
+                <span class="sub-title">MISSION CONTROL STANDALONE PANEL</span>
+                <h1 class="main-title">KERBALISM SYSTEMS MONITOR</h1>
+            </div>
+            <div id="vessel-id" style="text-align: right;">
+                <div style="font-size: 1.2rem; font-weight: 800; color: white;" id="v-name">AWAITING SIGNAL...</div>
+                <div style="font-size: 0.6rem; opacity: 0.5;" id="v-type">EXTRACTING METADATA</div>
+            </div>
+        </header>
+
+        <!-- COLUMN 1: LIFE SUPPORT MONITOR -->
+        <section class="panel-section" style="overflow-y: auto;">
+            <div class="section-label">LIFE SUPPORT CONSUMABLES</div>
+            <div id="ls-container">
+                <div class="placeholder-msg">CONNECTING TO RESOURCE CACHE...</div>
+            </div>
+
+            <div style="margin-top: 25px;" class="section-label">WASTE PRODUCTS</div>
+            <div id="waste-container"></div>
+
+            <div style="margin-top: 25px;" class="section-label">PROCESS CONTROLLERS</div>
+            <div id="process-container">
+                <div class="placeholder-msg">SCANNING MODULES...</div>
+            </div>
+        </section>
+
+        <!-- COLUMN 2: THE MATRIX (ENVIRONMENT & SYSTEMS) -->
+        <section class="panel-section" style="gap: 15px; overflow-y: auto;">
+            <!-- Storm Banner (hidden by default) -->
+            <div id="storm-banner" class="hazard-cell storm-warning" style="display: none; border-color: var(--accent-amber); margin-bottom: 5px;">
+                <div class="haz-lbl" style="color: var(--accent-amber);">⚠ SOLAR STORM INBOUND</div>
+                <div class="haz-val" id="storm-timer" style="color: var(--accent-amber); font-size: 1.5rem;">00:00:00</div>
+            </div>
+
+            <div class="section-label">☢ ENVIRONMENTAL THREAT MATRIX</div>
+            <div class="hazard-box hazard-box--3col">
+                <div class="telem-pill">
+                    <div class="telem-pill__label">EXT. RADIATION</div>
+                    <div class="telem-pill__val" id="env-rad">--</div>
+                    <div class="telem-pill__bar" style="background: var(--accent-red);"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">HAB. RADIATION</div>
+                    <div class="telem-pill__val" id="hab-rad">--</div>
+                    <div class="telem-pill__bar" style="background: var(--accent-amber);"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">RAD. SHIELDING</div>
+                    <div class="telem-pill__val" id="env-shield">--</div>
+                    <div class="telem-pill__bar" style="background: var(--accent-cyan);"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">CO₂ TOXICITY</div>
+                    <div class="telem-pill__val" id="env-co2">--</div>
+                    <div class="telem-pill__bar" style="background: #ff6644;"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">EXT. TEMP</div>
+                    <div class="telem-pill__val" id="env-temp">--</div>
+                    <div class="telem-pill__bar" style="background: #ff8800;"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">HAB. PRESSURE</div>
+                    <div class="telem-pill__val" id="hab-pres">--</div>
+                    <div class="telem-pill__bar" style="background: #4488ff;"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">MAG. SHIELD</div>
+                    <div class="telem-pill__val" id="env-mag">--</div>
+                    <div class="telem-pill__bar" style="background: var(--accent-green);"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">BELT STATUS</div>
+                    <div class="telem-pill__val" id="env-belt">CLEAN</div>
+                    <div class="telem-pill__bar" style="background: var(--accent-cyan);"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">SOLAR ACTIVITY</div>
+                    <div class="telem-pill__val" id="env-solar">--</div>
+                    <div class="telem-pill__bar" style="background: var(--accent-amber);"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">COMFORT</div>
+                    <div class="telem-pill__val" id="env-comfort">--</div>
+                    <div class="telem-pill__bar" style="background: var(--accent-green);"></div>
+                </div>
+            </div>
+
+            <div style="margin-top: 20px;" class="section-label">⚙ VESSEL DIAGNOSTICS &amp; PARTS HEALTH</div>
+            <div class="hazard-box hazard-box--4col" style="margin-bottom: 10px;">
+                <div class="telem-pill">
+                    <div class="telem-pill__label">MALFUNCTIONS</div>
+                    <div class="telem-pill__val" id="sys-malf" style="color: var(--accent-green);">0</div>
+                    <div class="telem-pill__bar" style="background: var(--accent-red);"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">NET EC</div>
+                    <div class="telem-pill__val" id="sys-ec">--- <span class="unit">u/s</span></div>
+                    <div class="telem-pill__bar" style="background: #ffcc00;"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">DRIVE USED</div>
+                    <div class="telem-pill__val" id="sys-drive">0/0 <span class="unit">MB</span></div>
+                    <div class="telem-pill__bar" style="background: var(--accent-cyan);"></div>
+                </div>
+                <div class="telem-pill">
+                    <div class="telem-pill__label">TX RATE</div>
+                    <div class="telem-pill__val" id="sys-tx">0.00 <span class="unit">MB/s</span></div>
+                    <div class="telem-pill__bar" style="background: var(--accent-cyan);"></div>
+                </div>
+            </div>
+            <div class="section-sublabel">PARTS MANIFEST</div>
+            <div id="parts-container" style="overflow-y: auto; max-height: 220px;">
+                <div class="placeholder-msg">SCANNING VESSEL PARTS...</div>
+            </div>
+
+        <!-- COLUMN 3: BIOMETRIC CREW HEALTH -->
+        <section class="panel-section" style="overflow-y: auto;">
+            <div class="section-label">🧠 BIOMETRIC CREW MATRIX</div>
+            <div id="crew-list" class="crew-grid">
+                <!-- Crew cards injected via JS -->
+            </div>
+
+            <div style="margin-top: auto; padding: 15px; border: 1px solid rgba(255,255,255,0.05); background: rgba(0,0,0,0.2);">
+                <div style="font-size: 0.5rem; opacity: 0.5; margin-bottom: 8px;">MISSION CONTROL UPLINK</div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div id="link-led" style="width: 10px; height: 10px; border-radius: 50%; background: var(--accent-red); box-shadow: 0 0 5px var(--accent-red);"></div>
+                    <span id="link-status" style="font-size: 0.7rem; letter-spacing: 1px;">AWAITING SIGNAL</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="kerbalism.js"></script>
+</body>
+</html>

@@ -6,6 +6,13 @@ class SystemOrbitalMap {
   constructor(positionDataFormatter, datalink, containerID) {
     this.container = document.getElementById(containerID);
     this.datalink = datalink;
+    this.targetReadout = null;
+    this.btnRendezvous = null;
+    
+    this.lastNodeData = {
+      UT: 0,
+      deltaV: [0, 0, 0]
+    };
 
     this.GUIParameters = {
       "focusBody": 'current vessel'
@@ -158,6 +165,67 @@ class SystemOrbitalMap {
         });
         toggleContainer.appendChild(item);
       });
+    }
+
+    this.btnRendezvous = document.getElementById('btn-rendezvous');
+    if (this.btnRendezvous) {
+      this.btnRendezvous.addEventListener('click', () => this.initiateRendezvous());
+    }
+  }
+
+  initiateRendezvous() {
+    const d = this.datalink.lastData;
+    if (!d || !d['tar.type']) return;
+
+    // 1. Gather Vessel Elements
+    const vessel = {
+      sma: d['o.sma'],
+      period: d['o.period'],
+      trueAnomaly: d['o.trueAnomaly'],
+      lan: d['o.lan'],
+      argumentOfPeriapsis: d['o.argumentOfPeriapsis'],
+      eccentricity: d['o.eccentricity'] || 0
+    };
+
+    // 2. Gather Target Elements
+    const target = {
+      sma: d['tar.o.sma'],
+      period: d['tar.o.period'],
+      trueAnomaly: d['tar.o.trueAnomaly'],
+      lan: d['tar.o.lan'],
+      argumentOfPeriapsis: d['tar.o.argumentOfPeriapsis'],
+      eccentricity: d['tar.o.eccentricity'] || 0
+    };
+
+    // 3. Get Mu from formatted reference body
+    const bodyName = d['v.body'];
+    const refBody = this.lastFormattedData && this.lastFormattedData.referenceBodies 
+      ? this.lastFormattedData.referenceBodies.find(b => b.name === bodyName) 
+      : null;
+    const mu = refBody ? refBody.gravParameter : null;
+    const ut = d['t.universalTime'];
+
+    if (!vessel.sma || !target.sma || !mu) {
+      console.warn("Rendezvous calculation data check failed:", {vessel, target, mu});
+      alert("INSUFFICIENT ORBITAL DATA FOR RENDEZVOUS CALCULATION.\n\nEnsure you have a vessel targeted and the map has refreshed.");
+      return;
+    }
+
+    const result = OrbitalPhysics.calculateBestRendezvous(vessel, target, mu, ut, 5);
+
+    if (result) {
+      console.log("Best Rendezvous calculated:", result);
+      const utStr = result.ut.toFixed(2);
+      const dvStr = result.dv.toFixed(3);
+      const distStr = (result.separation || 0).toFixed(0);
+      
+      // Confirm with user
+      if (confirm(`BEST ENCOUNTER FOUND (Window #${result.window + 1})\n\nBurn in: ${Math.floor(result.waitTime / 3600)}h ${Math.floor((result.waitTime % 3600) / 60)}m\nPredicted Separation: ${distStr}m\nDelta-V: ${dvStr} m/s\n\nCreate maneuver node?`)) {
+        const cmd = `o.addManeuverNode[${result.ut},0,0,${result.dv}]`;
+        this.datalink.sendMessage({ [cmd]: cmd });
+      }
+    } else {
+      alert("ERROR: COULD NOT CALCULATE RENDEZVOUS. CHECK RELATIVE INCLINATION.");
     }
   }
 

@@ -194,6 +194,7 @@ class SystemPositionDataFormatter {
         type: type,
         radius: info.radius || 1000,
         truePosition: truePosition,
+        gravParameter: info.gravParameter,
         orbitPath: worldOrbitPoints,
         rotationAngle: orbitInfo.rotationAngle || (positionData.bodyRotations && positionData.bodyRotations[name]) || 0,
         atmosphericRadius: (this.datalink.getOrbitalBodyInfo(name) || {}).atmosphericRadius || 0,

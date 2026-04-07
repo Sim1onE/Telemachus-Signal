@@ -43,7 +43,8 @@ $(document).ready(function () {
         fThr: "f.throttle", dvReady: "dv.ready", dvStages: "dv.stages", vCurStage: "v.currentStage",
 
         // Global
-        ut: "t.universalTime"
+        ut: "t.universalTime",
+        vSci: "sci.parts"
     };
 
     // WebSocket Data Stream Integration (v16.33)
@@ -333,6 +334,9 @@ $(document).ready(function () {
         txt('throttle-read', String(throttlePerc).padStart(3, '0') + '%');
         updateStages(d.dvStages, d.vCurStage, d.dvReady, d.vName);
 
+        // Science Inventory
+        updateScience(d.vSci);
+
         // Footer Connection Check
         // txt('footer-ut', 'UT: ' + formatUT(d.ut)); // v16.35: Moved to smooth_tick
         txt('footer-conn', (sig > 0) ? 'STREAM ACTIVE' : 'NO SIGNAL');
@@ -403,6 +407,79 @@ $(document).ready(function () {
     function updateBarRaw(id, perc, text) {
         $(`#b-${id}`).css('width', perc + '%');
         $(`#v-${id}`).text(text);
+    }
+
+    function updateScience(sciResponse) {
+        if (!sciResponse) return;
+        const sciData = sciResponse.parts;
+        const hasKerbalism = sciResponse.hasKerbalism;
+
+        const list = $('#sci-inventory-list');
+        if (!sciData || !Array.isArray(sciData) || sciData.length === 0) {
+            if (list.children().length === 0 || list.find('.empty-msg').length === 0) {
+                list.html('<div class="empty-msg" style="opacity:0.3; font-size:0.6rem; padding:5px;">NO INSTRUMENTS DETECTED</div>');
+            }
+            return;
+        }
+
+        // Only redraw if content changed or is empty
+        list.empty();
+
+        // Status Header / Global Actions
+        if (hasKerbalism) {
+            list.append(`
+                <div style="margin-bottom:6px; display:flex; align-items:center; gap:6px; border:1px solid rgba(0,136,255,0.3); padding:4px 8px; background:rgba(0,136,255,0.1); border-radius:1px;">
+                    <div class="led-mini cyan" style="width:6px; height:6px;"></div>
+                    <span style="font-size:0.55rem; color:var(--accent-cyan); font-weight:bold; letter-spacing:1px;">KERBALISM AUTOMATION ACTIVE</span>
+                </div>
+            `);
+        }
+
+        sciData.forEach(p => {
+            const hasData = p.hasData;
+            const isRun = p.isRunning;
+            const canRun = p.canRun;
+            
+            // Revised Status Logic (v16.39: Data Priority)
+            let statusText = "IDLE";
+            let statusColor = "var(--text-secondary)";
+            let ledClass = "";
+
+            if (hasData) {
+                statusText = "FULL";
+                statusColor = "var(--accent-green)";
+                ledClass = "green";
+            } else if (isRun) {
+                statusText = "LOGGING...";
+                statusColor = "var(--accent-amber)";
+                ledClass = "amber";
+            } else if (canRun) {
+                statusText = "READY";
+                statusColor = "var(--accent-cyan)";
+                ledClass = "cyan";
+            }
+
+            let controlHtml = '';
+            if (!hasKerbalism && canRun && !isRun && !hasData) {
+                controlHtml = `<button class="map-btn" onclick="sendApiCommand('f.sci.run[${p.id}]')" style="font-size:0.5rem; padding:1px 6px; margin-right:8px; border-color:var(--accent-amber); color:var(--accent-amber);">LOG DATA</button>`;
+            }
+
+            list.append(`
+                <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); padding: 4px 8px; border-left: 2px solid ${statusColor}; margin-bottom:4px; border-radius:0 2px 2px 0;">
+                    <div style="display:flex; flex-direction:column;">
+                        <span style="font-size:0.7rem; font-weight:bold; color:white; letter-spacing:0.5px;">${p.title.toUpperCase()}</span>
+                        <span style="font-size:0.5rem; opacity:0.4; font-family:var(--font-data);">#${p.id}</span>
+                    </div>
+                    <div style="display:flex; align-items:center;">
+                        ${controlHtml}
+                        <div style="display:flex; align-items:center; gap:6px; min-width:75px; justify-content:flex-end;">
+                            <span style="font-size:0.55rem; color:${statusColor}; font-weight:bold;">${statusText}</span>
+                            <div class="led-mini ${ledClass}" style="background:${statusColor}"></div>
+                        </div>
+                    </div>
+                </div>
+            `);
+        });
     }
 
     function updateCrewHealth(crewData) {
@@ -704,6 +781,11 @@ $(document).ready(function () {
             ctx.stroke();
         }
     }
+
+    window.sendApiCommand = function(cmd) {
+        console.log("[Science] Executing command:", cmd);
+        signalLink.send(cmd);
+    };
 
     function formatMET(s) {
         if (!s) return "00:00:00";

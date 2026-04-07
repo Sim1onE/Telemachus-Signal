@@ -153,12 +153,14 @@
                     <div class="sun-led" id="led-sun"></div>
                 </div>
             </div>
-            
-
-
+            <!-- Mission Monitors -->
+            <div style="margin-top:20px; display:flex; gap:10px;">
+                <button class="map-btn" style="flex:1; border-color:var(--accent-cyan); color:var(--accent-cyan); font-size:0.6rem; padding:4px;" onclick="window.location.reload()">REFRESH</button>
+                <button class="map-btn" style="flex:1; border-color:var(--accent-amber); color:var(--accent-amber); font-size:0.6rem; padding:4px;" onclick="window.open('../mod-panels/kerbalism.html', '_blank')">MOD PANELS</button>
+            </div>
         </section>
-
-        <!-- COL 2: MAP & GNC -->
+ 
+         <!-- COL 2: MAP & GNC -->
         <section class="panel-section" style="display: flex; flex-direction: column;">
             <div class="section-title"><span>ORBITAL MAP & GNC</span><span>C-2</span></div>
             
@@ -187,15 +189,15 @@
                 <canvas id="orbit-canvas" style="position: absolute; top:0; left:0; width:100%; height:100%; z-index: 10; pointer-events: none;"></canvas>
             </div>
 
-            <!-- 2. Docking Camera Interface -->
-            <div class="docking-cam-box">
-                <div class="cam-overlay">DOCKING-CAM-01 / RAW</div>
-                <div class="cam-bracket cam-tl"></div>
-                <div class="cam-bracket cam-tr"></div>
-                <div class="cam-bracket cam-bl"></div>
-                <div class="cam-bracket cam-br"></div>
-                <div class="cam-noise"></div>
-                <div style="color:var(--text-secondary); font-family:var(--font-header); font-size:0.6rem; letter-spacing:3px;">NO VIDEO SIGNAL</div>
+            <!-- 2. Science Inventory (Relocated) -->
+            <div class="science-inventory-box" style="margin-top:10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(0, 221, 255, 0.15); padding: 12px; border-radius: 2px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid rgba(0, 221, 255, 0.1); padding-bottom: 5px;">
+                    <div class="group-header" style="color:var(--accent-cyan); border-bottom: none; margin-bottom: 0; font-size: 0.75rem; letter-spacing: 2px;">SCIENCE INSTRUMENT RACK</div>
+                    <div style="font-size: 0.5rem; opacity: 0.4; color: var(--accent-cyan);">RACK_SLOT: C2-05</div>
+                </div>
+                <div id="sci-inventory-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 250px; overflow-y: auto; padding-right: 5px;">
+                    <div class="empty-msg" style="opacity:0.3; font-size:0.6rem; padding:15px; text-align: center; font-style: italic;">AWAITING SCANNER LINK...</div>
+                </div>
             </div>
 
             <!-- 3. GNC Docking HUD -->
