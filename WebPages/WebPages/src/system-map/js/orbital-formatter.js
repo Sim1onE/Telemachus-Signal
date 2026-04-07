@@ -53,29 +53,34 @@ class SystemPositionDataFormatter {
     const bodies = positionData.referenceBodies || {};
     const refKeys = Object.keys(bodies);
 
-    // v21.8.21: Define Synchronized Solver BEFORE camera focus calculation
-    this.getSynchronizedRelativePosition = (name, pData) => {
-      const bodiesRef = pData.referenceBodies || {};
-      const actualKey = Object.keys(bodiesRef).find(k => k.toLowerCase() === name.toLowerCase()) || name;
-      const info = bodiesRef[actualKey] || {};
+    // v21.8.45: Universal Orbital Propagator
+    // Resolves any entity's relative position using Keplerian formulas or raw fallbacks.
+    this.solveOrbitalPosition = (info, ut) => {
+      if (!info) return { x: 0, y: 0, z: 0 };
 
-      // v21.8.32: Hierarchical Meta Lookup (Batch -> Global Cache -> Datalink Static)
-      let orbitInfo = (info.sma !== undefined) ? info : null;
+      // v21.8.45: Map authoritative Keplerian elements (favor direct info, then registry, then datalink)
+      let orbit = (info.sma !== undefined) ? info : null;
 
-      if (!orbitInfo && this.registry && this.registry.bodies && this.registry.bodies[actualKey]) {
-        orbitInfo = this.registry.bodies[actualKey].metadata;
+      if (!orbit && info.name && this.registry && this.registry.bodies && this.registry.bodies[info.name]) {
+        orbit = this.registry.bodies[info.name].metadata;
       }
 
-      // v21.8.32: Last-resort fallback to datalink body info
-      if (!orbitInfo) {
-        orbitInfo = this.datalink.getOrbitalBodyInfo(actualKey) || {};
+      if (!orbit && info.name) {
+        orbit = this.datalink.getOrbitalBodyInfo(info.name) || {};
       }
 
-      if (orbitInfo.sma !== undefined && orbitInfo.period) {
-        const rawOrbitPoints = this.generateOrbitFromKeplerian(orbitInfo.sma, orbitInfo.eccentricity, orbitInfo.inclination, orbitInfo.argPe, orbitInfo.lan);
-        return this.getPointAtUT(rawOrbitPoints, orbitInfo, pData.currentUniversalTime);
+      // v21.8.46: High-Precision Keplerian Solver
+      if (orbit && orbit.sma !== undefined && orbit.period) {
+        const rawPoints = this.generateOrbitFromKeplerian(
+          orbit.sma, orbit.eccentricity || orbit.ecc || 0,
+          orbit.inclination || orbit.inc || 0,
+          orbit.argPe || 0, orbit.lan || 0
+        );
+        return this.getPointAtUT(rawPoints, orbit, ut);
       }
-      return info.currentTruePosition || { x: 0, y: 0, z: 0 };
+
+      // Fallback to static point or sample
+      return info.currentTruePosition || (info.points ? info.points[0] : { x: 0, y: 0, z: 0 });
     };
 
     // Helper: Recursively sum relative positions to find absolute sun-centric pos (64-bit)
@@ -88,11 +93,11 @@ class SystemPositionDataFormatter {
         const bodiesRef = positionData.referenceBodies || {};
         const actualKey = Object.keys(bodiesRef).find(k => k.toLowerCase() === current.toLowerCase()) || current;
 
-        // v21.8.21: Use synchronized relative position for camera focus consistency
-        const relPos = this.getSynchronizedRelativePosition(actualKey, positionData);
+        const info = bodiesRef[actualKey];
+        // v21.8.21: Use universal propagator for absolute position chain
+        const relPos = this.solveOrbitalPosition(Object.assign({ name: actualKey }, info || {}), positionData.currentUniversalTime);
         pos = { x: pos.x + relPos.x, y: pos.y + relPos.y, z: pos.z + relPos.z };
 
-        const info = bodiesRef[actualKey];
         const bInfo = this.datalink.getOrbitalBodyInfo(current);
         current = (bInfo && bInfo.referenceBodyName) || (info && info.parent);
         depth++;
@@ -168,13 +173,13 @@ class SystemPositionDataFormatter {
       const parentName = (bInfo && bInfo.referenceBodyName) || (positionData.referenceBodies[name] ? positionData.referenceBodies[name].parent : "Sun");
       const parentAbsolutePos = this.getAbsolutePos(parentName);
 
-      // v21.8.32: Resolve hierarchical position relative to Sun
-      const orbitRelPos = this.getSynchronizedRelativePosition(name, positionData);
-      
-      // v21.8.32: Autoritative reference for SMA if batch is missing it
-      const orbitInfo = (info.sma !== undefined) ? info : (this.datalink.getOrbitalBodyInfo(name) || {});
+      // v21.8.46: Unified hierarchal solver (Body/Vessel agnostic)
+      const orbitRelPos = this.solveOrbitalPosition(Object.assign({ name: name }, info), positionData.currentUniversalTime);
 
       truePosition = this.formatTruePositionVector({ x: parentAbsolutePos.x + orbitRelPos.x, y: parentAbsolutePos.y + orbitRelPos.y, z: parentAbsolutePos.z + orbitRelPos.z });
+
+      // v21.8.32: Autoritative reference for SMA if batch is missing it
+      const orbitInfo = (info.sma !== undefined) ? info : (this.datalink.getOrbitalBodyInfo(name) || {});
 
       // Generate orbit path for rendering
       if (orbitInfo.sma !== undefined) {
@@ -233,35 +238,41 @@ class SystemPositionDataFormatter {
     });
   }
 
-  generateOrbitFromKeplerian(sma, ecc, inc, argPe, lan) {
+  generateOrbitFromKeplerian(sma, ecc, inc, argPe, lan, skipFix = false) {
     if (!sma) return [];
     const points = [];
     const segments = 128;
 
-    // v21.8.21: Apply mirrored corrections from coordinate_system_bible.md
-    // LAN: -(lan) + 90 | ArgPe: -(argPe) | Inc: -(inc)
     const radInc = (inc * Math.PI / 180.0);
     const radArgPe = (argPe * Math.PI / 180.0);
-    const radLan = (lan * Math.PI / 180.0);
+
+    // v21.8.65: Dynamic Meridian Alignment
+    // Instead of a hardcoded 75, we use the raw KSP Meridian Offset.
+    // If the server data is not yet available, we use 61.64 (standard for UT=0).
+    let offset = 0;
+    if (!skipFix) {
+      const lastData = this.datalink.lastDatalinkData || {};
+      if (lastData["pl.meridianOffset"] !== undefined) {
+        // The correction to align Inertial LAN to World View is (360 - offset)
+        offset = (360 - lastData["pl.meridianOffset"]) % 360;
+      }
+    }
+
+    const radLan = ((lan + offset) * Math.PI / 180.0);
 
     for (let i = 0; i <= segments; i++) {
       const trueAnomaly = (i / segments) * 2 * Math.PI;
       const r = (sma * (1 - ecc * ecc)) / (1 + ecc * Math.cos(trueAnomaly));
       const theta = radArgPe + trueAnomaly;
 
-      // Standard orbital mechanics (Z-up reference frame):
+      // Standard orbital mechanics (Z-up reference frame)
       const xStd = r * (Math.cos(radLan) * Math.cos(theta) - Math.sin(radLan) * Math.sin(theta) * Math.cos(radInc));
       const yStd = r * (Math.sin(radLan) * Math.cos(theta) + Math.cos(radLan) * Math.sin(theta) * Math.cos(radInc));
       const zStd = r * (Math.sin(radInc) * Math.sin(theta));
 
-      // Mapping Standard [xStd, yStd, zStd] to Unity [X, Y, Z]
-      // In the formula: X,Y is the Equator plane, Z is Elevation.
-      // Unity: X,Z is the Equator plane, Y is Elevation.
-      const xUni = xStd; 
-      const yUni = zStd; // Elevation
-      const zUni = yStd; 
-
-      points.push({ x: xUni, y: yUni, z: zUni });
+      // v21.8.41: Return raw orbital frame coordinates (Z-up)
+      // The projection to 3D space is handled unified in formatTruePositionVector
+      points.push({ x: xStd, y: yStd, z: zStd });
     }
     return points;
   }
@@ -291,17 +302,29 @@ class SystemPositionDataFormatter {
   }
 
   formatCurrentVessel(positionData, formattedData) {
-    if (!positionData["vesselCurrentPosition"] || !positionData["vesselCurrentPosition"]["relativePosition"]) return;
+    const orbits = positionData["o.orbitPatches"];
+    if (!orbits || !Array.isArray(orbits) || orbits.length === 0) {
+      // v21.8.45: Absolute safety fallback if no patches exist
+      if (!positionData["vesselCurrentPosition"] || !positionData["vesselCurrentPosition"]["relativePosition"]) return;
+      const vesselBodyName = positionData["vesselBody"] || "Kerbin";
+      const bodyAbsolutePos = this.getAbsolutePos(vesselBodyName);
+      const vesselRelPos = positionData["vesselCurrentPosition"]["relativePosition"];
+      const vesselAbsolutePos = { x: bodyAbsolutePos.x + vesselRelPos.x, y: bodyAbsolutePos.y + vesselRelPos.y, z: bodyAbsolutePos.z + vesselRelPos.z };
+      formattedData["vessels"].push({ type: "currentVessel", truePosition: this.formatTruePositionVector(vesselAbsolutePos) });
+      return;
+    }
 
-    const vesselBodyName = positionData["vesselBody"] || "Kerbin";
-    const bodyAbsolutePos = this.getAbsolutePos(vesselBodyName);
-    const vesselRelPos = positionData["vesselCurrentPosition"]["relativePosition"];
+    // v21.8.46: Find current active patch for real-time snap
+    const ut = positionData.currentUniversalTime;
+    let activePatch = orbits.find(o => ut >= o.startUT && ut <= o.endUT) || orbits[0];
+
+    const bodyAbsolutePos = this.getAbsolutePos(activePatch.referenceBody || "Kerbin");
+    const vesselRelPos = this.solveOrbitalPosition(activePatch, ut);
     const vesselAbsolutePos = { x: bodyAbsolutePos.x + vesselRelPos.x, y: bodyAbsolutePos.y + vesselRelPos.y, z: bodyAbsolutePos.z + vesselRelPos.z };
-    const truePosition = this.formatTruePositionVector(vesselAbsolutePos);
 
     formattedData["vessels"].push({
       type: "currentVessel",
-      truePosition: truePosition
+      truePosition: this.formatTruePositionVector(vesselAbsolutePos)
     });
   }
 
@@ -338,9 +361,9 @@ class SystemPositionDataFormatter {
       // v21.8.30: Direct Array Ingestion (No Dictionary Mapping)
       if (!orbitPatch.points || orbitPatch.points.length < 2) return;
 
-      const patch = { 
-        truePositions: [], 
-        parentType: parentType, 
+      const patch = {
+        truePositions: [],
+        parentType: parentType,
         referenceBody: orbitPatch.referenceBody,
         startUT: orbitPatch.startUT,
         endUT: orbitPatch.endUT,
@@ -375,10 +398,10 @@ class SystemPositionDataFormatter {
         const vesselBodyName = positionData["vesselBody"] || "Kerbin";
         const bodyAbsolutePos = this.getAbsolutePos(vesselBodyName);
         const pt = node.points[0];
-        const nodeAbsolutePos = { 
-          x: bodyAbsolutePos.x + pt.x, 
-          y: bodyAbsolutePos.y + pt.y, 
-          z: bodyAbsolutePos.z + pt.z 
+        const nodeAbsolutePos = {
+          x: bodyAbsolutePos.x + pt.x,
+          y: bodyAbsolutePos.y + pt.y,
+          z: bodyAbsolutePos.z + pt.z
         };
         truePosition = this.formatTruePositionVector(nodeAbsolutePos);
       }
@@ -395,13 +418,13 @@ class SystemPositionDataFormatter {
 
   formatNodeOrbitPatches(positionData, node) {
     if (!node || !node.patches || !Array.isArray(node.patches)) return [];
-    
+
     const formattedOrbitPatches = [];
     node.patches.forEach(orbitPatch => {
       if (!orbitPatch.points || orbitPatch.points.length < 2) return;
 
-      const patch = { 
-        truePositions: [], 
+      const patch = {
+        truePositions: [],
         referenceBody: orbitPatch.referenceBody,
         startUT: orbitPatch.startUT,
         endUT: orbitPatch.endUT,
@@ -427,16 +450,19 @@ class SystemPositionDataFormatter {
   formatTruePositionVector(vector) {
     if (!vector) return { x: 0, y: 0, z: 0 };
 
-    // v21.8.22: Unity (LH) [X, Y, Z] -> Three.js (RH) [X, Y, -Z]
-    // 1. KSP X -> Map X (Right)
-    // 2. KSP Y -> Map Y (Up)
-    // 3. KSP Z -> Map -Z (North/Forward)
-    // This resolves the "Retrograde/Mirror" issue by correctly flipping handedness.
+    // v21.8.41: Unified Transformation Matrix
+    // Maps Standard Righthanded Orbital Frame (X, Y, Z_elevation) 
+    // to Three.js Righthanded Space (X, Y_elevation, -Z_north)
+
+    // 1. KSP X (East) -> Map X
+    // 2. KSP Z (Elevation) -> Map Y (Up)
+    // 3. KSP Y (North) -> Map -Z (Flipping depth for handedness consistency)
+
     const x = (vector.x || 0);
     const y = (vector.y || 0);
     const z = (vector.z || 0);
 
-    return { x: x, y: y, z: -z };
+    return { x: x, y: z, z: -y };
   }
 
 

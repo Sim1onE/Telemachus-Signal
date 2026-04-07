@@ -664,8 +664,7 @@ class SystemOrbitalMap {
       line.geometry.computeLineDistances();
       line.geometry.computeBoundingBox();
       if (line.geometry.boundingBox) {
-        var size = new THREE.Vector3();
-        line.geometry.boundingBox.getSize(size);
+        var size = line.geometry.boundingBox.size();
         var dashSize = size.x / 40;
         line.material.dashSize = dashSize;
         line.material.gapSize = dashSize / 2;

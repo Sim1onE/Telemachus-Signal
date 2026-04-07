@@ -404,7 +404,8 @@ namespace Telemachus
                     { "lan", body.orbit != null ? (double)body.orbit.LAN : 0 },
                     { "period", body.orbit != null ? (double)body.orbit.period : 0 },
                     { "m0", body.orbit != null ? (double)body.orbit.meanAnomalyAtEpoch : 0 },
-                    { "epoch", body.orbit != null ? (double)body.orbit.epoch : 0 }
+                    { "epoch", body.orbit != null ? (double)body.orbit.epoch : 0 },
+                    { "initialRotation", (double)body.initialRotation }
                 };
                 manifest[body.name] = bodyData;
             }
@@ -467,6 +468,14 @@ namespace Telemachus
                     { "referenceBody", patch.referenceBody.name },
                     { "startUT", pStart },
                     { "endUT", pEnd },
+                    { "sma", patch.semiMajorAxis },
+                    { "ecc", patch.eccentricity },
+                    { "inc", patch.inclination },
+                    { "argPe", patch.argumentOfPeriapsis },
+                    { "lan", patch.LAN },
+                    { "period", patch.period },
+                    { "m0", patch.meanAnomalyAtEpoch },
+                    { "epoch", patch.epoch },
                     { "points", points },
                     { "refBodyPoints", refBodyPoints }
                 });

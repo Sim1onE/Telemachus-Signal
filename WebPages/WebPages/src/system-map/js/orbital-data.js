@@ -103,6 +103,7 @@ class SystemOrbitalPositionData {
             store.period = body.period;
             store.m0 = body.m0;
             store.epoch = body.epoch;
+            store.initialRotation = body.initialRotation || 0;
             store.parent = body.parent || null;
 
             console.debug(`[SystemMap] Synced metadata for ${body.name} (parent: ${body.parent || 'root'})`);
@@ -281,7 +282,8 @@ class SystemOrbitalPositionData {
             'v.altitude', 'o.ApA', 'o.PeA',
             'n.pitch', 'n.roll', 'n.heading',
             'o.encounterBody', 'o.encounterTime',
-            'astg.nextDestination', 'astg.nextBurnCountdown', 'astg.nextDeltaV'
+            'astg.nextDestination', 'astg.nextBurnCountdown', 'astg.nextDeltaV',
+            'pl.rotationX', 'pl.rotationY', 'pl.rotationZ', 'pl.meridianOffset', 'b.rotationAngle'
         ]);
 
         if (this.datalink.signalLink) {
