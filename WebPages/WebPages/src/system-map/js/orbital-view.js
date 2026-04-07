@@ -247,15 +247,24 @@ class SystemOrbitalMap {
   render(formattedData) {
     if (!formattedData) return;
     var ut = formattedData.currentUniversalTime;
-    if (ut === this.lastRenderUT && !this.isSliderInteracting) return;
+    
+    // v21.8.25: General stream filtering. 
+    // Only 'orbit' packets trigger a full geometry recalculation (planets, orbits, vessel meshes).
+    // Standard telemetry or ticks only update the HUD and Camera.
+    const isFullBatch = (formattedData.type === 'orbit');
+
+    if (ut === this.lastRenderUT && !this.isSliderInteracting && !isFullBatch) return;
     this.lastRenderUT = ut;
     this.lastFormattedData = formattedData;
 
-    this.updateReferenceBodyGeometry(formattedData);
-    this.updateVesselGeometry(formattedData);
-    this.updateOrbitPathGeometry(formattedData);
-    this.updateManeuverNodeGeometry(formattedData);
-    this.updateReferenceBodyOrbitPaths(formattedData);
+    if (isFullBatch) {
+        this.updateReferenceBodyGeometry(formattedData);
+        this.updateVesselGeometry(formattedData);
+        this.updateOrbitPathGeometry(formattedData);
+        this.updateManeuverNodeGeometry(formattedData);
+        this.updateReferenceBodyOrbitPaths(formattedData);
+    }
+
     this.updateCamera(formattedData);
     this.updateHUD(formattedData);
   }

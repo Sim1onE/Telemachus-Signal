@@ -19,8 +19,8 @@ const SignalConstants = {
 
 class DownlinkSynchronizer {
     constructor() { this.queue = []; }
-    pushPacket(ut, warp, delay, fov, quality, payload) {
-        this.queue.push({ ut, warp, delay, fov, quality, payload });
+    pushPacket(msg) {
+        this.queue.push(msg);
         this.queue.sort((a, b) => a.ut - b.ut);
     }
     popReady(masterTimecode) {
@@ -137,7 +137,7 @@ class TelemachusSignalLink {
         this.datalinkSync = new DownlinkSynchronizer();
         this.lastDatalinkData = {
             "referenceBodies": {} // v21.8.4: Pre-initialize for formatter stability
-        }; 
+        };
 
         // v16.35: Smoothing & Interpolation props
         this._lastStatusMET = 0;
@@ -241,7 +241,7 @@ class TelemachusSignalLink {
                     this._lastStatusUT = d.ut;
                     this._lastStatusMET = d.met;
                     this._isClockSync = true;
-                } 
+                }
                 else if (msg.ut !== undefined) {
                     // Standard header for all other types: { type, ut, data }
                     this.lastPacketUT = msg.ut;
@@ -252,15 +252,23 @@ class TelemachusSignalLink {
 
                 // Generic dispatch for all JSON types (v16.21)
                 if (type && this.listeners.has(type)) {
-                    this.listeners.get(type).forEach(cb => cb({ 
-                        ut: msg.ut || this.lastPacketUT, 
-                        data: dataPayload 
+                    this.listeners.get(type).forEach(cb => cb({
+                        ut: msg.ut || this.lastPacketUT,
+                        data: dataPayload
                     }, msg));
                 }
 
                 // v16.30: Datalink specific sync insertion (v18.18: telemetry unificata a datalink)
                 if (type === 'datalink' || type === 'telemetry' || type === 'orbit') {
-                    this.datalinkSync.pushPacket(msg.ut, this.lastPacketWarp, this.latestNetworkDelay, 0, this.latestQuality, dataPayload);
+                    this.datalinkSync.pushPacket({
+                        type: type,
+                        ut: msg.ut,
+                        warp: this.lastPacketWarp,
+                        delay: this.latestNetworkDelay,
+                        fov: 0,
+                        quality: this.latestQuality,
+                        payload: dataPayload
+                    });
                 }
                 return;
             }
@@ -361,9 +369,9 @@ class TelemachusSignalLink {
     }
 
     subscribeTelemetry(keys, options = {}) {
-        this.send("stream/subscribe", "telemetry", { 
+        this.send("stream/subscribe", "telemetry", {
             keys: Array.isArray(keys) ? keys : [keys],
-            ...options 
+            ...options
         });
     }
 
@@ -436,6 +444,7 @@ class TelemachusSignalLink {
                 // 3. Dispatch delayed and degraded event
                 if (this.listeners.has('datalink_update')) {
                     this.listeners.get('datalink_update').forEach(cb => cb({
+                        type: packet.type,
                         ut: packet.ut,
                         quality: packet.quality,
                         data: data // v18.14: Standardized to .data
@@ -454,7 +463,7 @@ class TelemachusSignalLink {
                     quality: this.latestQuality
                 };
 
-                this.listeners.get('smooth_tick').forEach(cb => cb({ 
+                this.listeners.get('smooth_tick').forEach(cb => cb({
                     ut: data.ut,
                     data: data // v18.17: Nested for uniformity with real JSON messages
                 }));

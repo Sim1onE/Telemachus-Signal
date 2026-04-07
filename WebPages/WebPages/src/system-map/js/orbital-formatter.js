@@ -24,7 +24,11 @@ class SystemPositionDataFormatter {
     this.rootOrigin = { x: 0, y: 0, z: 0 };
   }
 
-  format(positionData) {
+  format(msg) {
+    const positionData = msg.data;
+    const type = msg.type;
+    const ut = msg.ut;
+
     if (!positionData || !positionData.referenceBodies || !positionData.referenceBodies["Kerbin"]) {
       if (positionData && !this._metadataWarningSent) {
         console.warn("[SystemMap] Waiting for critical celestial metadata (Kerbin)...");
@@ -41,7 +45,8 @@ class SystemPositionDataFormatter {
       "maneuverNodes": [],
       "referenceBodyPaths": [],
       "distancesFromRootReferenceBody": [],
-      "currentUniversalTime": positionData.currentUniversalTime
+      "currentUniversalTime": ut,
+      "type": type
     };
 
     const bodies = positionData.referenceBodies || {};
@@ -171,7 +176,7 @@ class SystemPositionDataFormatter {
         radius: info.radius || 1000,
         truePosition: truePosition,
         orbitPath: worldOrbitPoints,
-        rotationAngle: (positionData.bodyRotations && positionData.bodyRotations[name]) || 0,
+        rotationAngle: orbitInfo.rotationAngle || (positionData.bodyRotations && positionData.bodyRotations[name]) || 0,
         atmosphericRadius: (this.datalink.getOrbitalBodyInfo(name) || {}).atmosphericRadius || 0,
         color: (this.datalink.getOrbitalBodyInfo(name) || {}).color || '#ffffff'
       });

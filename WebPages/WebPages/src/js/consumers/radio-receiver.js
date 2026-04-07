@@ -143,11 +143,14 @@ class RadioReceiver {
         }
 
         // Queue in synchronizer
-        this.sync.pushPacket(
-            metadata.ut, metadata.warp, metadata.delay, 
-            0, metadata.quality, 
-            { samples: floatSamples }
-        );
+        this.sync.pushPacket({
+            ut: metadata.ut,
+            warp: metadata.warp,
+            delay: metadata.delay,
+            fov: 0,
+            quality: metadata.quality,
+            payload: { samples: floatSamples }
+        });
     }
 
     playbackLoop() {

@@ -23,7 +23,7 @@ class Telemachus {
     });
 
     this.signalLink.on('datalink_update', (msg) => {
-        this.dispatchMessages(msg.data);
+        this.dispatchMessages(msg);
     });
 
     this.signalLink.connect();
@@ -99,14 +99,9 @@ class Telemachus {
     return data;
   }
 
-  dispatchMessages(data) {
-    // v21.8.10: Enrich data with last known UT to satisfy legacy modules
-    if (data && !data['t.universalTime'] && this.signalLink && this.signalLink.lastPacketUT) {
-        data['t.universalTime'] = this.signalLink.lastPacketUT;
-    }
-
+  dispatchMessages(msg) {
     this.receiverFunctions.forEach(func => {
-      try { func(data); } catch (e) { console.error("Telemachus Dispatch Error:", e); }
+      try { func(msg); } catch (e) { console.error("Telemachus Dispatch Error:", e); }
     });
   }
 

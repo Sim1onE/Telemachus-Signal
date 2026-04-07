@@ -56,11 +56,14 @@ class CameraReceiver {
              const bitmap = await createImageBitmap(blob);
              
              // Queue the frame in the synchronizer for delayed playback
-             this.sync.pushPacket(
-                 metadata.ut, metadata.warp, metadata.delay, 
-                 metadata.fov, metadata.quality, 
-                 { bitmap }
-             );
+             this.sync.pushPacket({
+                 ut: metadata.ut,
+                 warp: metadata.warp,
+                 delay: metadata.delay,
+                 fov: metadata.fov,
+                 quality: metadata.quality,
+                 payload: { bitmap }
+             });
         } catch (err) {
              console.error("[CameraReceiver] Frame decoding fault:", err);
         }
