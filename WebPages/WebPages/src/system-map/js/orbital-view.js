@@ -36,6 +36,11 @@ class SystemOrbitalMap {
       patches: {},
       paths: {}
     };
+
+    // v21.8.31: Inject registry into the formatter for stable analytical solving
+    if (this.positionDataFormatter) {
+      this.positionDataFormatter.registry = this.registry;
+    }
     this.bodyRadii = {};
     this.bodyToggles = {};
     this.isSliderInteracting = false;
@@ -247,7 +252,7 @@ class SystemOrbitalMap {
   render(formattedData) {
     if (!formattedData) return;
     var ut = formattedData.currentUniversalTime;
-    
+
     // v21.8.25: General stream filtering. 
     // Only 'orbit' packets trigger a full geometry recalculation (planets, orbits, vessel meshes).
     // Standard telemetry or ticks only update the HUD and Camera.
@@ -258,11 +263,11 @@ class SystemOrbitalMap {
     this.lastFormattedData = formattedData;
 
     if (isFullBatch) {
-        this.updateReferenceBodyGeometry(formattedData);
-        this.updateVesselGeometry(formattedData);
-        this.updateOrbitPathGeometry(formattedData);
-        this.updateManeuverNodeGeometry(formattedData);
-        this.updateReferenceBodyOrbitPaths(formattedData);
+      this.updateReferenceBodyGeometry(formattedData);
+      this.updateVesselGeometry(formattedData);
+      this.updateOrbitPathGeometry(formattedData);
+      this.updateManeuverNodeGeometry(formattedData);
+      this.updateReferenceBodyOrbitPaths(formattedData);
     }
 
     this.updateCamera(formattedData);
@@ -377,8 +382,8 @@ class SystemOrbitalMap {
         continue;
       }
 
-      var radius = (info.radius || 600000); 
-      if (name === "Sun") radius = 261600000; 
+      var radius = (info.radius || 600000);
+      if (name === "Sun") radius = 261600000;
       this.bodyRadii[name] = radius;
 
       let mesh = this.registry.bodies[name];
@@ -430,7 +435,8 @@ class SystemOrbitalMap {
     var seenVessels = {};
     for (var i = 0; i < vessels.length; i++) {
       var info = vessels[i];
-      var id = info.name || "vessel-" + i;
+      // v21.8.38: Stable Vessel ID (Active ship vs Named Target)
+      var id = (info.type === "currentVessel") ? "vessel-active" : "vessel-target-" + (info.name || i);
       seenVessels[id] = true;
       let mesh = this.registry.vessels[id];
       if (!mesh) {
@@ -452,14 +458,37 @@ class SystemOrbitalMap {
 
   updateOrbitPathGeometry(formattedData) {
     var patches = formattedData.orbitPatches || [];
+    // v21.8.38: Post-Warp Telemetry Gap Protection
+    // If the server sends a valid 'orbit' packet but the trajectory solver is still 
+    // re-calculating (empty patches), we skip the update and KEEP the old geometry.
+    if (patches.length === 0) return;
+
     var seenPatches = {};
+    var typeCounts = {}; // v21.8.38: Track active segments per entity type
     for (var i = 0; i < patches.length; i++) {
       var patch = patches[i];
-      var id = "patch-" + i;
+      var pType = patch.parentType || "vessel";
+
+      // v21.8.38: Identify the sliding patch for EACH entity type individually
+      if (!typeCounts[pType]) typeCounts[pType] = 0;
+      var isFirstForType = (typeCounts[pType] === 0);
+      typeCounts[pType]++;
+
+      var id = isFirstForType ? "patch-" + pType + "-active" : "patch-" + pType + "-" + Math.floor(patch.startUT || 0);
       seenPatches[id] = true;
+
       var points = patch.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
       let line = this.registry.orbits[id];
-      const colorVal = patch.parentType === "targetVessel" ? this.targetColor : this.orbitPathColors[i % 10];
+
+      // v21.8.38: Standardized Color Palette
+      // First patch of each type: Authoritative. Future patches: Palette-based.
+      let colorVal;
+      if (pType === "targetVessel") {
+        colorVal = this.targetColor;
+      } else {
+        colorVal = isFirstForType ? "#00f2ff" : this.orbitPathColors[i % 10];
+      }
+
       if (!line) {
         var geometry = this.createGeometryFromPoints(points, 256);
         line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: colorVal }));
@@ -483,37 +512,43 @@ class SystemOrbitalMap {
     var nodes = formattedData.maneuverNodes || [];
     var seenNodes = {};
     for (var i = 0; i < nodes.length; i++) {
-      var node = nodes[i];
-      var id = "node-" + i;
-      seenNodes[id] = true;
-      let marker = this.registry.nodes[id];
-      if (!marker) {
-        marker = new THREE.Mesh(new THREE.SphereGeometry(this.vehicleLength * 0.5, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
-        this.group.add(marker);
-        this.registry.nodes[id] = marker;
-      }
-      if (node.truePosition) marker.position.set(node.truePosition.x, node.truePosition.y, node.truePosition.z);
-
-      // Maneuver Orbits
-      var nodePatches = node.orbitPatches || [];
-      for (var j = 0; j < nodePatches.length; j++) {
-        var patch = nodePatches[j];
-        var patchId = "node-" + i + "-patch-" + j;
-        seenNodes[patchId] = true;
-        var points = patch.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
-        let line = this.registry.patches[patchId];
-        if (!line) {
-          var geometry = this.createGeometryFromPoints(points, 256);
-          geometry.computeBoundingBox();
-          var dashSize = geometry.boundingBox.size().x / 40;
-          line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: '#00ffff', dashSize: dashSize, gapSize: dashSize / 2, linewidth: 3 }));
-          this.group.add(line);
-          this.registry.patches[patchId] = line;
-        } else {
-          this.updateLineGeometry(line, points);
+        var node = nodes[i];
+        // v21.8.39: Revert to stable index-based IDs for nodes
+        // This is the most reliable anchor when UT is sliding during a countdown.
+        var id = "node-" + i;
+        seenNodes[id] = true;
+        let marker = this.registry.nodes[id];
+        if (!marker) {
+          marker = new THREE.Mesh(new THREE.SphereGeometry(this.vehicleLength * 0.5, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
+          this.group.add(marker);
+          this.registry.nodes[id] = marker;
+        }
+        if (node.truePosition) marker.position.set(node.truePosition.x, node.truePosition.y, node.truePosition.z);
+  
+        // Maneuver Orbits
+        var nodePatches = node.orbitPatches || [];
+        for (var j = 0; j < nodePatches.length; j++) {
+          var patch = nodePatches[j];
+          var isFirstForNode = (j === 0);
+          
+          // v21.8.39: Stable Maneuver Patch ID based on Node Index
+          // This prevents object recycling during UT slides.
+          var patchId = id + "-patch-" + j;
+          seenNodes[patchId] = true;
+          var points = patch.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
+          let line = this.registry.patches[patchId];
+          if (!line) {
+            var geometry = this.createGeometryFromPoints(points, 256);
+            geometry.computeBoundingBox();
+            var dashSize = geometry.boundingBox.size().x / 40;
+            line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: '#00ffff', dashSize: dashSize, gapSize: dashSize / 2, linewidth: 3 }));
+            this.group.add(line);
+            this.registry.patches[patchId] = line;
+          } else {
+            this.updateLineGeometry(line, points);
+          }
         }
       }
-    }
 
     // Ghost Preview Sphere with Multi-Patch Support
     const utInput = document.getElementById('node-ut-offset');
@@ -567,9 +602,13 @@ class SystemOrbitalMap {
       }
     }
 
-    // Cleanup
-    for (var key in this.registry.nodes) { if (!seenNodes[key]) { this.group.remove(this.registry.nodes[key]); delete this.registry.nodes[key]; } }
-    for (var key in this.registry.patches) { if (!seenNodes[key]) { this.group.remove(this.registry.patches[key]); delete this.registry.patches[key]; } }
+    // v21.8.41: Cleanup Barrier (Maneuver Persistence Shield)
+    // We only perform scene cleanup if the incoming packet contains at least one node.
+    // This ignores empty 'partial' batches that would otherwise clear the screen.
+    if (nodes.length > 0) {
+      for (var key in this.registry.nodes) { if (!seenNodes[key]) { this.group.remove(this.registry.nodes[key]); delete this.registry.nodes[key]; } }
+      for (var key in this.registry.patches) { if (!seenNodes[key]) { this.group.remove(this.registry.patches[key]); delete this.registry.patches[key]; } }
+    }
   }
 
   updateReferenceBodyOrbitPaths(formattedData) {
@@ -588,21 +627,21 @@ class SystemOrbitalMap {
       if (!line) {
         var geometry = this.createGeometryFromPoints(points, 256);
         if (!geometry) continue;
-        
+
         // v21.8.21: Dynamic Color Sync (fixes THREE.Color Alpha warning)
         const bodyColor = path.color || '#ffffff';
-        line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ 
-            color: new THREE.Color(bodyColor), 
-            transparent: true, 
-            opacity: 0.2 
+        line = new THREE.Line(geometry, new THREE.LineBasicMaterial({
+          color: new THREE.Color(bodyColor),
+          transparent: true,
+          opacity: 0.2
         }));
-        
+
         this.group.add(line);
         this.registry.paths[name] = line;
       } else {
         this.updateLineGeometry(line, points);
         if (path.color) {
-            line.material.color.set(path.color);
+          line.material.color.set(path.color);
         }
       }
     }
@@ -611,10 +650,16 @@ class SystemOrbitalMap {
   }
 
   updateLineGeometry(line, points) {
+    // v21.8.37: Enforce 256 segment resolution for all updates
+    // This ensures vertex count consistency (257 points) and prevents "diameter" artifacts 
+    // caused by mismatched buffer lengths in legacy THREE.Geometry.
     var curve = new THREE.CatmullRomCurve3(points);
     var newPoints = curve.getPoints(256);
+
     line.geometry.vertices = newPoints;
     line.geometry.verticesNeedUpdate = true;
+    line.geometry.computeBoundingSphere(); // v21.8.33: Recalculate culling sphere
+    line.geometry.computeBoundingBox();    // v21.8.33: Recalculate culling box
     if (line.material.type === "LineDashedMaterial") {
       line.geometry.computeLineDistances();
       line.geometry.computeBoundingBox();
@@ -634,6 +679,8 @@ class SystemOrbitalMap {
     var geometry = new THREE.Geometry();
     geometry.vertices = curve.getPoints(resolution || 256);
     geometry.computeLineDistances();
+    geometry.computeBoundingSphere(); // v21.8.33: Stabilize culling
+    geometry.computeBoundingBox();    // v21.8.33: Stabilize culling
     return geometry;
   }
 
@@ -651,7 +698,7 @@ class SystemOrbitalMap {
       }
 
       // v21.8.20: Pure Meter Scale (1:1). Precision is handled by rootOrigin subtraction.
-      this.mapScaleFactor = 1.0; 
+      this.mapScaleFactor = 1.0;
       this.group.scale.set(1, 1, 1);
 
       this.lastFocusBody = this.GUIParameters.focusBody;

@@ -208,44 +208,41 @@ class SystemOrbitalPositionData {
 
         positionData["currentUniversalTime"] = msg.ut;
 
-        // 1. Map Vessel
-        if (batch.vessel && batch.vessel.length > 0) {
-            this.mapBatchToLegacy(batch.vessel, positionData, "vesselCurrentOrbit");
+        // 1. Map Vessel (Direct Array Storage)
+        if (batch.vessel) {
+            positionData["o.orbitPatches"] = batch.vessel;
 
-            const firstPatch = batch.vessel[0];
-            // v21.8.19: Map vesselBody from patch referenceBody so formatter can compute rootOrigin
-            if (firstPatch.referenceBody) {
-                positionData["vesselBody"] = firstPatch.referenceBody;
-                positionData["v.body"] = firstPatch.referenceBody;
-            }
-            if (firstPatch.points && firstPatch.points.length > 0) {
-                const pt = firstPatch.points[0];
-                positionData["vesselCurrentPosition"] = { relativePosition: { x: pt.x, y: pt.y, z: pt.z } };
-            }
-        }
-
-        // 2. Map Target
-        if (batch.target && batch.target.patches) {
-            positionData["tar.name"] = batch.target.name;
-            this.mapBatchToLegacy(batch.target.patches, positionData, "targetCurrentOrbit");
-
-            const firstPatch = batch.target.patches[0];
-            if (firstPatch.points && firstPatch.points.length > 0) {
-                const pt = firstPatch.points[0];
-                positionData["targetCurrentPosition"] = { relativePosition: { x: pt.x, y: pt.y, z: pt.z } };
-            }
-        }
-
-        // 3. Map Maneuvers
-        if (batch.maneuvers) {
-            batch.maneuvers.forEach((m, idx) => {
-                if (m.patches) {
-                    this.mapBatchToLegacy(m.patches, positionData, `vesselManeuverNodes[${idx}]`, true);
+            if (batch.vessel.length > 0) {
+                const firstPatch = batch.vessel[0];
+                if (firstPatch.referenceBody) {
+                    positionData["vesselBody"] = firstPatch.referenceBody;
+                    positionData["v.body"] = firstPatch.referenceBody;
                 }
-            });
+                if (firstPatch.points && firstPatch.points.length > 0) {
+                    const pt = firstPatch.points[0];
+                    positionData["vesselCurrentPosition"] = { relativePosition: { x: pt.x, y: pt.y, z: pt.z } };
+                }
+            }
         }
 
-        // bodyPositions already mapped case-insensitively above (v21.8.19 block)
+        // 2. Map Target (Direct Array Storage)
+        if (batch.target) {
+            positionData["tar.name"] = batch.target.name;
+            positionData["tar.o.orbitPatches"] = batch.target.patches || [];
+
+            if (batch.target.patches && batch.target.patches.length > 0) {
+                const firstPatch = batch.target.patches[0];
+                if (firstPatch.points && firstPatch.points.length > 0) {
+                    const pt = firstPatch.points[0];
+                    positionData["targetCurrentPosition"] = { relativePosition: { x: pt.x, y: pt.y, z: pt.z } };
+                }
+            }
+        }
+
+        // 3. Map Maneuvers (Direct Array Storage)
+        if (batch.maneuvers) {
+            positionData["o.maneuverNodes"] = batch.maneuvers;
+        }
 
         // Persist to global store
         if (this.datalink.lastDatalinkData) {
@@ -261,41 +258,7 @@ class SystemOrbitalPositionData {
         }
     }
 
-    mapBatchToLegacy(patches, positionData, prefix, isManeuver = false) {
-        patches.forEach((p, pIdx) => {
-            const targetStore = isManeuver ?
-                this.ensurePath(positionData, prefix, 'orbitPatches', pIdx, 'positionData') :
-                this.ensurePath(positionData, prefix, pIdx, 'positionData');
 
-            const referenceBody = p.referenceBody;
-            const refStore = this.ensurePath(positionData, "referenceBodies", referenceBody, "positionData");
-
-            const step = (p.endUT - p.startUT) / (p.points.length - 1);
-
-            p.points.forEach((pt, i) => {
-                const ut = p.startUT + (step * i);
-                const utKey = ut.toFixed(7);
-                targetStore[utKey] = { relativePosition: { x: pt.x, y: pt.y, z: pt.z } };
-
-                if (p.refBodyPoints && p.refBodyPoints[i]) {
-                    const rpt = p.refBodyPoints[i];
-                    // Allow [0,0,0] if it's the anchor point (i == 0)
-                    if (i === 0 || rpt.x !== 0 || rpt.y !== 0 || rpt.z !== 0) {
-                        refStore[utKey] = { truePosition: { x: rpt.x, y: rpt.y, z: rpt.z } };
-
-                        // v21.8.19: DONT overwrite currentTruePosition here.
-                        // Authoritative absolute positions now come from batch.bodyPositions.
-                        // Overwriting here with rpt (relative to vessel root) breaks origin-shifting for children.
-                    }
-                }
-            });
-        });
-
-        // Ensure root body (Sun) is anchored
-        if (positionData.referenceBodies && positionData.referenceBodies["Sun"]) {
-            positionData.referenceBodies["Sun"].currentTruePosition = positionData.referenceBodies["Sun"].currentTruePosition || { x: 0, y: 0, z: 0 };
-        }
-    }
 
     /**
      * Safe object path navigation utility.
@@ -314,10 +277,8 @@ class SystemOrbitalPositionData {
     initializeDatalink() {
         this.datalink.subscribeToData([
             't.universalTime', 'v.body',
-            'tar.name', 'tar.type', 'tar.o.orbitingBody',
-            'o.maneuverNodes',
-            'v.altitude', 'o.ApA', 'o.PeA', 'o.inclination',
-            'o.eccentricity', 'o.period',
+            'tar.name', 'tar.type',
+            'v.altitude', 'o.ApA', 'o.PeA',
             'n.pitch', 'n.roll', 'n.heading',
             'o.encounterBody', 'o.encounterTime',
             'astg.nextDestination', 'astg.nextBurnCountdown', 'astg.nextDeltaV'

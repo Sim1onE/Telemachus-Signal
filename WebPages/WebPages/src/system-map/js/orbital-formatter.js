@@ -9,6 +9,7 @@ class SystemPositionDataFormatter {
     this.datalink = datalink;
     this.orbitalPositionData = orbitalPositionData;
     this.orbitalPositionData.options.onRecalculate = this.format.bind(this);
+    this.registry = null; // v21.8.31: Injected by View at runtime
 
     this.rootReferenceBodyName = null;
     this.rootOrigin = { x: 0, y: 0, z: 0 };
@@ -56,10 +57,20 @@ class SystemPositionDataFormatter {
     this.getSynchronizedRelativePosition = (name, pData) => {
       const bodiesRef = pData.referenceBodies || {};
       const actualKey = Object.keys(bodiesRef).find(k => k.toLowerCase() === name.toLowerCase()) || name;
-      const info = bodiesRef[actualKey];
-      if (!info) return { x: 0, y: 0, z: 0 };
+      const info = bodiesRef[actualKey] || {};
 
-      const orbitInfo = (info.sma !== undefined) ? info : (this.registry.bodies[actualKey] ? this.registry.bodies[actualKey].metadata : info);
+      // v21.8.32: Hierarchical Meta Lookup (Batch -> Global Cache -> Datalink Static)
+      let orbitInfo = (info.sma !== undefined) ? info : null;
+
+      if (!orbitInfo && this.registry && this.registry.bodies && this.registry.bodies[actualKey]) {
+        orbitInfo = this.registry.bodies[actualKey].metadata;
+      }
+
+      // v21.8.32: Last-resort fallback to datalink body info
+      if (!orbitInfo) {
+        orbitInfo = this.datalink.getOrbitalBodyInfo(actualKey) || {};
+      }
+
       if (orbitInfo.sma !== undefined && orbitInfo.period) {
         const rawOrbitPoints = this.generateOrbitFromKeplerian(orbitInfo.sma, orbitInfo.eccentricity, orbitInfo.inclination, orbitInfo.argPe, orbitInfo.lan);
         return this.getPointAtUT(rawOrbitPoints, orbitInfo, pData.currentUniversalTime);
@@ -157,14 +168,17 @@ class SystemPositionDataFormatter {
       const parentName = (bInfo && bInfo.referenceBodyName) || (positionData.referenceBodies[name] ? positionData.referenceBodies[name].parent : "Sun");
       const parentAbsolutePos = this.getAbsolutePos(parentName);
 
-      // v21.8.21: Use the centralized orbital solver
+      // v21.8.32: Resolve hierarchical position relative to Sun
       const orbitRelPos = this.getSynchronizedRelativePosition(name, positionData);
+      
+      // v21.8.32: Autoritative reference for SMA if batch is missing it
+      const orbitInfo = (info.sma !== undefined) ? info : (this.datalink.getOrbitalBodyInfo(name) || {});
+
       truePosition = this.formatTruePositionVector({ x: parentAbsolutePos.x + orbitRelPos.x, y: parentAbsolutePos.y + orbitRelPos.y, z: parentAbsolutePos.z + orbitRelPos.z });
 
       // Generate orbit path for rendering
-      const orbitInfo = (positionData.referenceBodies[name].sma !== undefined) ? positionData.referenceBodies[name] : (this.registry.bodies[name] ? this.registry.bodies[name].metadata : {});
       if (orbitInfo.sma !== undefined) {
-        const rawOrbitPoints = this.generateOrbitFromKeplerian(orbitInfo.sma, orbitInfo.eccentricity, orbitInfo.inclination, orbitInfo.argPe, orbitInfo.lan);
+        const rawOrbitPoints = this.generateOrbitFromKeplerian(orbitInfo.sma, orbitInfo.eccentricity || orbitInfo.ecc, orbitInfo.inclination || orbitInfo.inc, orbitInfo.argPe, orbitInfo.lan);
         worldOrbitPoints = rawOrbitPoints.map(p =>
           this.formatTruePositionVector({ x: parentAbsolutePos.x + p.x, y: parentAbsolutePos.y + p.y, z: parentAbsolutePos.z + p.z })
         );
@@ -262,9 +276,10 @@ class SystemPositionDataFormatter {
     const epoch = orbit.epoch || 0;
 
     // Mean Anomaly (M) = M0 + n * (UT - Epoch)
-    // n = 2 * PI / Period
+    // v21.8.33: High-Speed Precision Normalization
+    // Normalizing (UT - Epoch) against the Period keeps the number small for 64-bit precision safety.
+    const utOffset = (ut - epoch) % period;
     const n = (2 * Math.PI) / period;
-    const utOffset = ut - epoch;
     const meanAnomaly = m0 + n * utOffset;
 
     // Progress (0 to 1) for point indexing
@@ -315,87 +330,97 @@ class SystemPositionDataFormatter {
   }
 
   formatPatchData(positionData, formattedData, key, parentType) {
-    if (!positionData[key]) return;
-    var orbits = positionData[key];
+    const orbits = positionData[key];
+    if (!orbits || !Array.isArray(orbits)) return;
+
     const formattedOrbitPatches = [];
-    for (var key2 in orbits) {
-      var orbitPatch = orbits[key2];
-      // v21.8.4: Skip patches with no valid position data
-      if (!orbitPatch || !orbitPatch.truePositions || Object.keys(orbitPatch.truePositions).length < 2) continue;
-      var patch = { truePositions: [], parentType: parentType, referenceBody: orbitPatch.referenceBody };
-      var sortedTimes = this.getSortedKeys(orbitPatch.truePositions);
+    orbits.forEach(orbitPatch => {
+      // v21.8.30: Direct Array Ingestion (No Dictionary Mapping)
+      if (!orbitPatch.points || orbitPatch.points.length < 2) return;
 
-      for (var k = 0; k < sortedTimes.length; k++) {
-        const rawPos = orbitPatch.truePositions[sortedTimes[k]];
-        if (!rawPos) continue;
+      const patch = { 
+        truePositions: [], 
+        parentType: parentType, 
+        referenceBody: orbitPatch.referenceBody,
+        startUT: orbitPatch.startUT,
+        endUT: orbitPatch.endUT,
+        ApA: orbitPatch.ApA,
+        PeA: orbitPatch.PeA
+      };
 
-        // v21.8.19: Resolve OrbitPatch positions to absolute (sun-centric) coordinates
-        const patchBodyAbsolutePos = this.getAbsolutePos(orbitPatch.referenceBody || "Kerbin");
-        var absolutePatchPos = {
+      const patchBodyAbsolutePos = this.getAbsolutePos(orbitPatch.referenceBody || "Kerbin");
+
+      orbitPatch.points.forEach(rawPos => {
+        const absolutePatchPos = {
           x: patchBodyAbsolutePos.x + rawPos.x,
           y: patchBodyAbsolutePos.y + rawPos.y,
           z: patchBodyAbsolutePos.z + rawPos.z
         };
         patch.truePositions.push(this.formatTruePositionVector(absolutePatchPos));
-      }
-      patch.startUT = sortedTimes[0];
-      patch.endUT = sortedTimes[sortedTimes.length - 1];
-      patch.ApA = orbitPatch.ApA;
-      patch.PeA = orbitPatch.PeA;
+      });
+
       formattedOrbitPatches.push(patch);
-    }
+    });
+
     formattedData.orbitPatches = formattedData.orbitPatches.concat(formattedOrbitPatches);
   }
 
   formatManeuverNodes(positionData, formattedData) {
-    if (!positionData['o.maneuverNodes']) return;
-    var nodes = positionData['o.maneuverNodes'];
-    for (var i = 0; i < nodes.length; i++) {
-      var node = nodes[i];
-      if (!node) continue;
+    const nodes = positionData['o.maneuverNodes'];
+    if (!nodes || !Array.isArray(nodes)) return;
+
+    nodes.forEach(node => {
       let truePosition = null;
-      if (node.truePosition) {
+      if (node.points && node.points.length > 0) {
         const vesselBodyName = positionData["vesselBody"] || "Kerbin";
         const bodyAbsolutePos = this.getAbsolutePos(vesselBodyName);
-        const nodeAbsolutePos = { x: bodyAbsolutePos.x + node.truePosition.x, y: bodyAbsolutePos.y + node.truePosition.y, z: bodyAbsolutePos.z + node.truePosition.z };
+        const pt = node.points[0];
+        const nodeAbsolutePos = { 
+          x: bodyAbsolutePos.x + pt.x, 
+          y: bodyAbsolutePos.y + pt.y, 
+          z: bodyAbsolutePos.z + pt.z 
+        };
         truePosition = this.formatTruePositionVector(nodeAbsolutePos);
       }
-      var manNode = {
+
+      const manNode = {
         deltaV: node.deltaV || { x: 0, y: 0, z: 0 },
-        ut: node.UT || 0,
+        ut: node.startUT || 0,
         truePosition: truePosition,
         orbitPatches: this.formatNodeOrbitPatches(positionData, node)
       };
       formattedData["maneuverNodes"].push(manNode);
-    }
+    });
   }
 
   formatNodeOrbitPatches(positionData, node) {
-    if (!node || !node.orbitPatches) return [];
+    if (!node || !node.patches || !Array.isArray(node.patches)) return [];
+    
     const formattedOrbitPatches = [];
-    for (var key in node.orbitPatches) {
-      var orbitPatch = node.orbitPatches[key];
-      if (!orbitPatch || !orbitPatch.truePositions || Object.keys(orbitPatch.truePositions).length < 2) continue;
-      var patch = { truePositions: [], referenceBody: orbitPatch.referenceBody };
-      var sortedTimes = this.getSortedKeys(orbitPatch.truePositions);
-      for (var k = 0; k < sortedTimes.length; k++) {
-        const rawPos = orbitPatch.truePositions[sortedTimes[k]];
-        if (!rawPos) continue;
+    node.patches.forEach(orbitPatch => {
+      if (!orbitPatch.points || orbitPatch.points.length < 2) return;
 
-        const patchBodyAbsolutePos = this.getAbsolutePos(orbitPatch.referenceBody || "Kerbin");
-        var absolutePatchPos = {
+      const patch = { 
+        truePositions: [], 
+        referenceBody: orbitPatch.referenceBody,
+        startUT: orbitPatch.startUT,
+        endUT: orbitPatch.endUT,
+        ApA: orbitPatch.ApA,
+        PeA: orbitPatch.PeA
+      };
+
+      const patchBodyAbsolutePos = this.getAbsolutePos(orbitPatch.referenceBody || "Kerbin");
+
+      orbitPatch.points.forEach(rawPos => {
+        const absolutePatchPos = {
           x: patchBodyAbsolutePos.x + rawPos.x,
           y: patchBodyAbsolutePos.y + rawPos.y,
           z: patchBodyAbsolutePos.z + rawPos.z
         };
         patch.truePositions.push(this.formatTruePositionVector(absolutePatchPos));
-      }
-      patch.startUT = sortedTimes[0];
-      patch.endUT = sortedTimes[sortedTimes.length - 1];
-      patch.ApA = orbitPatch.ApA;
-      patch.PeA = orbitPatch.PeA;
+      });
       formattedOrbitPatches.push(patch);
-    }
+    });
     return formattedOrbitPatches;
   }
 
@@ -414,10 +439,5 @@ class SystemPositionDataFormatter {
     return { x: x, y: y, z: -z };
   }
 
-  getSortedKeys(positionData) {
-    if (!positionData) return [];
-    if (positionData._sortedKeys) return positionData._sortedKeys;
-    positionData._sortedKeys = Object.keys(positionData).map(parseFloat).sort(function (a, b) { return a - b; });
-    return positionData._sortedKeys;
-  }
+
 }
