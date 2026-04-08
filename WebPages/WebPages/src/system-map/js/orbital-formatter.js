@@ -19,6 +19,9 @@ class SystemPositionDataFormatter {
       numberOfSegments: 512 // Resolution for vessel patches
     }, options);
 
+    // v22.4: Uniform Physical Density (50km per segment)
+    this.TARGET_SEGMENT_METERS = 500000;
+
     // v21.8.20: Inertial Sun-Centered Scale (1 unit = 1m)
     // Absolute stability for planetary orbits. Precision is handled in the View.
     this.mapScaleFactor = 1.0;
@@ -246,9 +249,9 @@ class SystemPositionDataFormatter {
       // v22.3: Performance Optimization - Skip hidden bodies unless they are the focus target
       const isVisible = (window.SystemMap && window.SystemMap.bodyToggles[name] !== false);
       const isFocus = (this.rootReferenceBodyName && this.rootReferenceBodyName.toLowerCase() === name.toLowerCase());
-      
+
       if (!isVisible && !isFocus && name !== "Sun") {
-          return;
+        return;
       }
 
       let type = "currentPosition";
@@ -277,10 +280,16 @@ class SystemPositionDataFormatter {
 
       // Generate orbit path for rendering
       if (orbitInfo.sma !== undefined) {
-        const rawOrbitPoints = this.generateOrbitFromKeplerian(orbitInfo.sma, orbitInfo.eccentricity || orbitInfo.ecc, orbitInfo.inclination || orbitInfo.inc, orbitInfo.argPe, orbitInfo.lan);
+        // v22.4: Dynamic physical calculation
+        const circumference = 2 * Math.PI * orbitInfo.sma;
+        const resolution = Math.max(24, Math.min(1000, Math.floor(circumference / this.TARGET_SEGMENT_METERS)));
+
+        const rawOrbitPoints = this.generateOrbitFromKeplerian(orbitInfo.sma, orbitInfo.eccentricity || orbitInfo.ecc, orbitInfo.inclination || orbitInfo.inc, orbitInfo.argPe, orbitInfo.lan, false, resolution);
         worldOrbitPoints = rawOrbitPoints.map(p =>
           this.formatTruePositionVector({ x: parentAbsolutePos.x + p.x, y: parentAbsolutePos.y + p.y, z: parentAbsolutePos.z + p.z })
         );
+
+        info.calculatedResolution = resolution; // Cache for formattedData
       }
 
       formattedData["referenceBodies"].push({
@@ -290,6 +299,7 @@ class SystemPositionDataFormatter {
         truePosition: truePosition,
         gravParameter: info.gravParameter,
         orbitPath: worldOrbitPoints,
+        orbitResolution: info.calculatedResolution || 128,
         rotationAngle: this.solveOrbitalRotation(Object.assign({ name: name }, orbitInfo), positionData.currentUniversalTime),
         initialRotation: orbitInfo.initialRotation || 0,
         atmosphericRadius: (this.datalink.getOrbitalBodyInfo(name) || {}).atmosphericRadius || 0,
@@ -334,7 +344,7 @@ class SystemPositionDataFormatter {
     });
   }
 
-  generateOrbitFromKeplerian(sma, ecc, inc, argPe, lan, skipFix = false) {
+  generateOrbitFromKeplerian(sma, ecc, inc, argPe, lan, skipFix = false, segments = 128) {
     if (!sma) return [];
     // v21.8.150: Defensive defaults — undefined params produce NaN coordinates
     ecc = ecc || 0;
@@ -342,7 +352,7 @@ class SystemPositionDataFormatter {
     argPe = argPe || 0;
     lan = lan || 0;
     const points = [];
-    const segments = 128;
+    // v22.4: Segments now passed as param
 
     const radInc = (inc * Math.PI / 180.0);
     const radArgPe = (argPe * Math.PI / 180.0);
@@ -406,7 +416,7 @@ class SystemPositionDataFormatter {
     // Ensure we don't hit NaN if planetary data is missing during a smooth frame.
     let offsetDeg = 0;
     const store = this.datalink.lastDatalinkData || {};
-    
+
     // Check for explicit orbital meridian offset or fallback to reference body metadata
     // In our store, it's saved as "meridianOffset" or inside referenceBodies[name].meridianOffset
     if (store["meridianOffset"] !== undefined) {

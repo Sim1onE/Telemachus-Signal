@@ -492,7 +492,7 @@ class SystemOrbitalMap {
     const colorVal = info.color || '#555555';
 
     if (!line) {
-      const geometry = this.createGeometryFromPoints(points, 256);
+      const geometry = this.createGeometryFromPoints(points, info.orbitResolution || 256);
       line = new THREE.Line(geometry, new THREE.LineBasicMaterial({
         color: colorVal,
         transparent: true,
@@ -501,7 +501,7 @@ class SystemOrbitalMap {
       this.group.add(line);
       this.registry.celestialOrbits[id] = line;
     } else {
-      this.updateLineGeometry(line, points);
+      this.updateLineGeometry(line, points, info.orbitResolution || 256);
     }
   }
 
@@ -722,7 +722,7 @@ class SystemOrbitalMap {
       var points = path.orbitPath.map(p => new THREE.Vector3(p.x, p.y, p.z));
       let line = this.registry.paths[name];
       if (!line) {
-        var geometry = this.createGeometryFromPoints(points, 256);
+        var geometry = this.createGeometryFromPoints(points, path.orbitResolution || 256);
         if (!geometry) continue;
 
         // v21.8.21: Dynamic Color Sync (fixes THREE.Color Alpha warning)
@@ -736,7 +736,7 @@ class SystemOrbitalMap {
         this.group.add(line);
         this.registry.paths[name] = line;
       } else {
-        this.updateLineGeometry(line, points);
+        this.updateLineGeometry(line, points, path.orbitResolution || 256);
         if (path.color) {
           line.material.color.set(path.color);
         }
@@ -746,12 +746,10 @@ class SystemOrbitalMap {
     for (var key in this.registry.paths) { if (!seenPaths[key]) { this.group.remove(this.registry.paths[key]); delete this.registry.paths[key]; } }
   }
 
-  updateLineGeometry(line, points) {
-    // v21.8.37: Enforce 256 segment resolution for all updates
-    // This ensures vertex count consistency (257 points) and prevents "diameter" artifacts 
-    // caused by mismatched buffer lengths in legacy THREE.Geometry.
+  updateLineGeometry(line, points, resolution = 256) {
+    // v22.4: Resolution now dynamic
     var curve = new THREE.CatmullRomCurve3(points);
-    var newPoints = curve.getPoints(256);
+    var newPoints = curve.getPoints(resolution);
 
     line.geometry.vertices = newPoints;
     line.geometry.verticesNeedUpdate = true;
