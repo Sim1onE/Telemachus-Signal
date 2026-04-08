@@ -144,7 +144,7 @@ class SystemOrbitalMap {
   }
 
   initiateRendezvous() {
-    const d = this.datalink.lastData;
+    const d = this.datalink.lastDatalinkData;
     if (!d || !d['tar.type']) return;
 
     // 1. Gather Vessel Elements
@@ -202,7 +202,7 @@ class SystemOrbitalMap {
   addNodeAt(type) {
     if (!this.lastFormattedData) return;
     const currentUT = this.lastFormattedData.currentUniversalTime;
-    const d = this.datalink.lastData;
+    const d = this.datalink.lastDatalinkData;
     const offset = parseFloat(document.getElementById('node-ut-offset').value) || 60;
 
     // Logic for Stacking: we want the node to be at (currentBurnUT + offset)
@@ -344,8 +344,8 @@ class SystemOrbitalMap {
     if (timeElem) timeElem.innerText = 'UT: ' + (ut || 0).toFixed(0);
 
     const statsGrid = document.getElementById('vessel-stats-grid');
-    if (statsGrid && this.datalink.lastData) {
-      const d = this.datalink.lastData;
+    if (statsGrid && this.datalink.lastDatalinkData) {
+      const d = this.datalink.lastDatalinkData;
       const ap = (d['o.ApA'] / 1000).toFixed(1);
       const pe = (d['o.PeA'] / 1000).toFixed(1);
       const inc = (d['o.inclination'] || 0).toFixed(2);
@@ -396,8 +396,8 @@ class SystemOrbitalMap {
       if (this.navball && d['n.pitch'] !== undefined) this.navball.updateOrientation(d['n.pitch'], d['n.roll'], d['n.heading']);
     }
 
-    if (this.datalink.lastData && this.datalink.lastData['o.maneuverNodes']) {
-      const nodes = this.datalink.lastData['o.maneuverNodes'];
+    if (this.datalink.lastDatalinkData && this.datalink.lastDatalinkData['o.maneuverNodes']) {
+      const nodes = this.datalink.lastDatalinkData['o.maneuverNodes'];
 
       // Predicted Stats for Node
       const predElem = document.getElementById('pred-stats');
