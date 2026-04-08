@@ -47,7 +47,8 @@ class SystemPositionDataFormatter {
       "referenceBodyPaths": [],
       "distancesFromRootReferenceBody": [],
       "currentUniversalTime": ut,
-      "type": type
+      "type": type,
+      "isBodyChanged": false // v21.8.175: Signal SOI transition to View
     };
 
     const bodies = positionData.referenceBodies || {};
@@ -92,7 +93,11 @@ class SystemPositionDataFormatter {
         const info = bodiesRef[actualKey];
         // v21.8.21: Use universal propagator for absolute position chain
         const relPos = this.solveOrbitalPosition(Object.assign({ name: actualKey }, info || {}), positionData.currentUniversalTime);
-        pos = { x: pos.x + relPos.x, y: pos.y + relPos.y, z: pos.z + relPos.z };
+
+        // v21.8.158: Fail-safe coordinate summation
+        if (relPos && isFinite(relPos.x) && isFinite(relPos.y) && isFinite(relPos.z)) {
+          pos = { x: pos.x + relPos.x, y: pos.y + relPos.y, z: pos.z + relPos.z };
+        }
 
         const bInfo = this.datalink.getOrbitalBodyInfo(current);
         current = (bInfo && bInfo.referenceBodyName) || (info && info.parent);
@@ -113,14 +118,80 @@ class SystemPositionDataFormatter {
     this._logDebounce++;
     const shouldLog = (this._logDebounce % 60 === 0);
 
-    // v21.8.20: rootOrigin stays at [0,0,0] (Sun-centered inertial frame)
-    // Scene-group anchoring in the View handles precision.
-    // We still compute the focus position for the View to use.
+    // v21.8.155: Unified Analytical Focus Calculation
+    // We determine the "active" vessel position (analytical or server) right at the start
+    // so that the Floating Origin (this.focusAbsolutePos) is perfectly smooth for the camera.
+    // v21.8.165: G-Force Hysteresis & Analytical Blending
+    // We prevent "state struggle" by requiring 10 consecutive frames of low G-force
+    const geeForce = Math.abs(positionData['v.geeForce'] || 0);
+    this._passiveStabilityCounter = this._passiveStabilityCounter || 0;
+
+    if (geeForce < 0.02) {
+      this._passiveStabilityCounter = Math.min(10, this._passiveStabilityCounter + 1);
+    } else {
+      this._passiveStabilityCounter = Math.max(0, this._passiveStabilityCounter - 2); // Drop out faster than entering
+    }
+
+    const isPassive = (this._passiveStabilityCounter >= 10);
+    const frameUT = positionData.currentUniversalTime || positionData['t.universalTime'] || msg.ut;
+
+    // v21.8.170: Early Reference Body Determination
+    // We need this BEFORE smoothing to detect coordinate system jumps
+    const vesselBodyName = (isPassive && positionData['o.referenceBody']) ? positionData['o.referenceBody'] : (positionData["vesselBody"] || "Kerbin");
+    const isBodyChanged = (this._lastVesselBody && this._lastVesselBody !== vesselBodyName);
+    this._lastVesselBody = vesselBodyName;
+
+    // Default to server position
+    let serverRelPos = (positionData["vesselCurrentPosition"] && positionData["vesselCurrentPosition"]["relativePosition"]) || { x: 0, y: 0, z: 0 };
+    let targetRelPos = serverRelPos;
+
+    // Try analytical extrapolation if stable 
+    if (isPassive && positionData['o.sma'] !== undefined && frameUT !== undefined && !isNaN(frameUT)) {
+      const vesselOrbit = {
+        sma: positionData['o.sma'], ecc: positionData['o.eccentricity'], inc: positionData['o.inclination'],
+        argPe: positionData['o.argumentOfPeriapsis'], lan: positionData['o.lan'], period: positionData['o.period'],
+        m0: positionData['o.m0'], epoch: positionData['o.epoch'],
+        referenceBody: vesselBodyName // v21.8.188: Align rotation reference
+      };
+
+      const solved = this.solveKeplerAnalytical(vesselOrbit, frameUT);
+
+      // v21.8.190: Mathematical Validity Shield
+      // We trust the analytical solver as long as it produces valid numbers.
+      // We no longer use 'distSq' against serverRelPos because serverRelPos is often stale (latent).
+      if (solved && isFinite(solved.x) && isFinite(solved.y) && isFinite(solved.z)) {
+        const isZero = (solved.x === 0 && solved.y === 0 && solved.z === 0);
+        if (!isZero || !this._vesselRelPosSmooth) {
+          targetRelPos = solved;
+        }
+      }
+    }
+
+    // v21.8.170: Position Blending with SOI Jump Protection
+    // We blend towards the targetRelPos ONLY if we are in the same coordinate system (same body)
+    if (!this._vesselRelPosSmooth || isBodyChanged) {
+      // v21.8.176: Robust SOI Snap - Reject (0,0,0) during transition peaks
+      const isZero = (targetRelPos.x === 0 && targetRelPos.y === 0 && targetRelPos.z === 0);
+      if (!isZero || !this._vesselRelPosSmooth) {
+        this._vesselRelPosSmooth = targetRelPos;
+        formattedData.isBodyChanged = isBodyChanged; // Finalize signal
+      }
+    } else {
+      const lerpFactor = 0.15; // Balanced 60Hz convergence
+      this._vesselRelPosSmooth = {
+        x: this._vesselRelPosSmooth.x + (targetRelPos.x - this._vesselRelPosSmooth.x) * lerpFactor,
+        y: this._vesselRelPosSmooth.y + (targetRelPos.y - this._vesselRelPosSmooth.y) * lerpFactor,
+        z: this._vesselRelPosSmooth.z + (targetRelPos.z - this._vesselRelPosSmooth.z) * lerpFactor
+      };
+    }
+
+    const vesselRelPos = this._vesselRelPosSmooth;
+    this._currentVesselRelPos = vesselRelPos;
+
     if (focusName === "current vessel") {
-      const vesselBodyName = positionData["vesselBody"] || "Kerbin";
       const actualVesselBodyKey = refKeys.find(k => k.toLowerCase() === vesselBodyName.toLowerCase()) || vesselBodyName;
-      const vesselRelPos = (positionData["vesselCurrentPosition"] && positionData["vesselCurrentPosition"]["relativePosition"]) || { x: 0, y: 0, z: 0 };
       const bodyAbs = getAbsolutePos(actualVesselBodyKey);
+
       this.focusAbsolutePos = {
         x: bodyAbs.x + vesselRelPos.x,
         y: bodyAbs.y + vesselRelPos.y,
@@ -136,6 +207,7 @@ class SystemPositionDataFormatter {
 
     this.getAbsolutePos = getAbsolutePos; // Expose for sub-formatters
 
+    const isFullBatch = (type === 'orbit');
     this.formatReferenceBodies(positionData, formattedData);
     this.formatCurrentVessel(positionData, formattedData);
     this.formatTargetVessel(positionData, formattedData);
@@ -144,7 +216,7 @@ class SystemPositionDataFormatter {
     // Kerbin analytically (the body pos used in getAbsolutePos is smooth).
     // formatReferenceBodyPaths is dead code (View doesn't read it) — removed.
     this.formatOrbitalPatches(positionData, formattedData);
-    this.formatManeuverNodes(positionData, formattedData);
+    this.formatManeuverNodes(positionData, formattedData, isFullBatch);
     this.formatTargetOrbitPatches(positionData, formattedData);
 
     if (this.options.onFormat) this.options.onFormat(formattedData);
@@ -290,20 +362,37 @@ class SystemPositionDataFormatter {
    * to 129 discrete positions, causing planets to freeze for minutes/hours at a time.
    */
   solveKeplerAnalytical(orbit, ut) {
-    const sma   = orbit.sma;
-    const ecc   = orbit.eccentricity || orbit.ecc || 0;
-    const inc   = (orbit.inclination || orbit.inc || 0) * Math.PI / 180;
+    const sma = orbit.sma;
+    const ecc = orbit.eccentricity || orbit.ecc || 0;
+    const inc = (orbit.inclination || orbit.inc || 0) * Math.PI / 180;
     const argPe = (orbit.argPe || 0) * Math.PI / 180;
-    const period = orbit.period || 1;
-    const m0    = orbit.m0 || 0;
+    const period = orbit.period;
+    const m0 = orbit.m0 || 0;
     const epoch = orbit.epoch || 0;
 
-    // Meridian offset (same logic as generateOrbitFromKeplerian)
-    let offsetDeg = 0;
-    const lastData = this.datalink.lastDatalinkData || {};
-    if (lastData["pl.meridianOffset"] !== undefined) {
-      offsetDeg = (360 - lastData["pl.meridianOffset"]) % 360;
+    // v21.8.160: Orbital Period & Stability Guard
+    // A period < 10s is physically impossible in KSP and indicates corrupted data or SOI jump artifacts.
+    if (!sma || !period || period < 10 || ecc >= 1.0) {
+      if (period > 0 && period < 10) {
+        console.warn(`[SystemMap] Abnormal Orbit Period Detected: ${period}s. Analytical solver suspended.`);
+      }
+      return { x: 0, y: 0, z: 0 };
     }
+
+    // v21.8.205: Robust Coordinate Alignment
+    // Ensure we don't hit NaN if planetary data is missing during a smooth frame.
+    let offsetDeg = 0;
+    const store = this.datalink.lastDatalinkData || {};
+    
+    // Check for explicit orbital meridian offset or fallback to reference body metadata
+    // In our store, it's saved as "meridianOffset" or inside referenceBodies[name].meridianOffset
+    if (store["meridianOffset"] !== undefined) {
+      offsetDeg = (360 - store["meridianOffset"]) % 360;
+    } else if (orbit.referenceBody && store.referenceBodies && store.referenceBodies[orbit.referenceBody]) {
+      const body = store.referenceBodies[orbit.referenceBody];
+      offsetDeg = (360 - (body.meridianOffset || 0)) % 360;
+    }
+
     const lan = ((orbit.lan || 0) + offsetDeg) * Math.PI / 180;
 
     // 1. Mean Anomaly at UT
@@ -316,7 +405,7 @@ class SystemPositionDataFormatter {
 
     // 2. Solve Kepler's Equation: M = E - e*sin(E) via Newton-Raphson
     let E = M; // Initial guess
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 15; i++) {
       const dE = (M - E + ecc * Math.sin(E)) / (1 - ecc * Math.cos(E));
       E += dE;
       if (Math.abs(dE) < 1e-10) break;
@@ -361,22 +450,30 @@ class SystemPositionDataFormatter {
   }
 
   formatCurrentVessel(positionData, formattedData) {
-    const vesselBodyName = positionData["vesselBody"] || "Kerbin";
-
-    // v21.8.125: Back to basics. Use ONLY the RAW position to avoid jumping and rotation errors.
     if (!positionData["vesselCurrentPosition"] || !positionData["vesselCurrentPosition"]["relativePosition"]) return;
 
+    // v21.8.156: Use o.referenceBody for SOI consistency during analytical flight
+    const geeForce = Math.abs(positionData['v.geeForce'] || 0);
+    const isPassive = (geeForce < 0.02);
+    const vesselBodyName = (isPassive && positionData['o.referenceBody']) ? positionData['o.referenceBody'] : (positionData["vesselBody"] || "Kerbin");
+
     const bodyAbsolutePos = this.getAbsolutePos(vesselBodyName);
-    const vesselRelPos = positionData["vesselCurrentPosition"]["relativePosition"];
+
+    // v21.8.155: Use the cached relative position (analytical or server) calculated in format()
+    // This ensures that the vessel mesh and the camera origin are perfectly synced.
+    let vesselRelPos = this._currentVesselRelPos || positionData["vesselCurrentPosition"]["relativePosition"];
+
     const vesselAbsolutePos = {
       x: bodyAbsolutePos.x + vesselRelPos.x,
       y: bodyAbsolutePos.y + vesselRelPos.y,
       z: bodyAbsolutePos.z + vesselRelPos.z
     };
 
+    const truePosition = this.formatTruePositionVector(vesselAbsolutePos);
+
     formattedData["vessels"].push({
       type: "currentVessel",
-      truePosition: this.formatTruePositionVector(vesselAbsolutePos)
+      truePosition: truePosition
     });
   }
 
@@ -420,7 +517,13 @@ class SystemPositionDataFormatter {
         startUT: orbitPatch.startUT,
         endUT: orbitPatch.endUT,
         ApA: orbitPatch.ApA,
-        PeA: orbitPatch.PeA
+        PeA: orbitPatch.PeA,
+        // v21.8.208: Sub-segment Analytical Metadata
+        elements: {
+          sma: orbitPatch.sma, ecc: orbitPatch.ecc, inc: orbitPatch.inc,
+          argPe: orbitPatch.argPe, lan: orbitPatch.lan, period: orbitPatch.period,
+          m0: orbitPatch.m0, epoch: orbitPatch.epoch
+        }
       };
 
       const patchBodyAbsolutePos = this.getAbsolutePos(orbitPatch.referenceBody || "Kerbin");
@@ -440,7 +543,7 @@ class SystemPositionDataFormatter {
     formattedData.orbitPatches = formattedData.orbitPatches.concat(formattedOrbitPatches);
   }
 
-  formatManeuverNodes(positionData, formattedData) {
+  formatManeuverNodes(positionData, formattedData, isFullBatch = true) {
     const nodes = positionData['o.maneuverNodes'];
     if (!nodes || !Array.isArray(nodes)) return;
 
@@ -453,14 +556,16 @@ class SystemPositionDataFormatter {
       lan: positionData['o.lan'],
       period: positionData['o.period'],
       m0: positionData['o.m0'],
-      epoch: positionData['o.epoch']
+      epoch: positionData['o.epoch'],
+      referenceBody: positionData['o.referenceBody'] || positionData["vesselBody"] || "Kerbin" // v21.8.192: Align maneuver node rotation
     };
 
     nodes.forEach(node => {
       let truePosition = null;
       // If we have valid orbital elements, solve the node position analytically
       if (vesselOrbit.sma !== undefined) {
-        const vesselBodyName = positionData["vesselBody"] || "Kerbin";
+        // v21.8.156: Use o.referenceBody for SOI consistency
+        const vesselBodyName = positionData['o.referenceBody'] || positionData["vesselBody"] || "Kerbin";
         const bodyAbsolutePos = this.getAbsolutePos(vesselBodyName);
 
         // Solve relative position on current orbit at node's UT
@@ -478,7 +583,7 @@ class SystemPositionDataFormatter {
         deltaV: node.deltaV || { x: 0, y: 0, z: 0 },
         ut: node.startUT || node.UT || 0,
         truePosition: truePosition,
-        orbitPath: this.formatNodeOrbitPatches(positionData, node)
+        orbitPatches: isFullBatch ? this.formatNodeOrbitPatches(positionData, node) : []
       };
       formattedData["maneuverNodes"].push(manNode);
     });
@@ -497,7 +602,13 @@ class SystemPositionDataFormatter {
         startUT: orbitPatch.startUT,
         endUT: orbitPatch.endUT,
         ApA: orbitPatch.ApA,
-        PeA: orbitPatch.PeA
+        PeA: orbitPatch.PeA,
+        // v21.8.218: Sub-segment Analytical Metadata for Maneuver Preview
+        elements: {
+          sma: orbitPatch.sma, ecc: orbitPatch.ecc, inc: orbitPatch.inc,
+          argPe: orbitPatch.argPe, lan: orbitPatch.lan, period: orbitPatch.period,
+          m0: orbitPatch.m0, epoch: orbitPatch.epoch
+        }
       };
 
       const patchBodyAbsolutePos = this.getAbsolutePos(orbitPatch.referenceBody || "Kerbin");

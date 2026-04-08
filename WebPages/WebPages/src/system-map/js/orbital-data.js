@@ -29,8 +29,14 @@ class SystemOrbitalPositionData {
         // v21.8.135: Composite State Persistence (Rigor + Legacy compatibility)
         const store = this.datalink.lastDatalinkData || {};
 
-        if (ut) store["currentUniversalTime"] = ut;
-        
+        // v21.8.185: Monotonic Master Clock Sync
+        // We ensure the rendering time ONLY moves forward. 
+        // If a server packet arrives with a latent (older) timestamp, Math.max() 
+        // will preserve the newer extrapolated time from our local smooth_tick.
+        if (ut) {
+            store["currentUniversalTime"] = Math.max(store["currentUniversalTime"] || 0, ut);
+        }
+
         // Ensure reference bodies and legacy structures are always present
         if (data.referenceBodies) {
             store.referenceBodies = Object.assign(store.referenceBodies || {}, data.referenceBodies);
@@ -43,9 +49,9 @@ class SystemOrbitalPositionData {
 
         if (this.options.onRecalculate) {
             try {
-                this.options.onRecalculate({ 
-                    type: type, 
-                    ut: ut, 
+                this.options.onRecalculate({
+                    type: type,
+                    ut: ut,
                     data: store // Pass authorized composite state
                 });
             } catch (e) {
@@ -204,6 +210,7 @@ class SystemOrbitalPositionData {
                 positionData['o.trueAnomaly'] = firstPatch.trueAnomaly || 0;
                 positionData['o.m0'] = firstPatch.m0 || 0;
                 positionData['o.epoch'] = firstPatch.epoch || 0;
+                positionData['o.referenceBody'] = firstPatch.referenceBody;
             }
         }
 
@@ -264,7 +271,7 @@ class SystemOrbitalPositionData {
 
     initializeDatalink() {
         this.datalink.subscribeToData([
-            't.universalTime', 'v.body', 'v.altitude',
+            't.universalTime', 'v.body', 'v.altitude', 'v.geeForce',
             'tar.name', 'tar.type',
             'n.pitch', 'n.roll', 'n.heading',
             'o.ApA', 'o.PeA', 'o.encounterBody', 'o.encounterTime',
@@ -275,10 +282,10 @@ class SystemOrbitalPositionData {
         if (this.datalink.signalLink) {
             this.datalink.signalLink.on('orbit', (msg) => this.handleOrbitBatch(msg));
             this.datalink.signalLink.on('orbit_metadata', (msg) => this.handleOrbitMetadata(msg));
-            
+
             // v21.8.140: Hook into smooth local extrapolation tick (60Hz)
             this.datalink.signalLink.on('smooth_tick', (msg) => {
-                this.recalculate({ type: 'smooth_tick', ut: msg.ut, data: {} });
+                this.recalculate({ ut: msg.ut, data: {} });
             });
 
             const subscribe = () => {

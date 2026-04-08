@@ -234,7 +234,7 @@ class TelemachusSignalLink {
                 if (type === 'tick' && msg.data) {
                     const d = msg.data;
                     this.lastPacketUT = d.ut;
-                    this.lastPacketWarp = d.warp;
+                    this.lastPacketWarp = (d.warp !== undefined) ? d.warp : 1; // v21.8.160: Strict Warp Reset
                     this.lastPacketReceivedAt = performance.now();
                     this.latestNetworkDelay = d.delay;
                     this.latestQuality = d.quality;

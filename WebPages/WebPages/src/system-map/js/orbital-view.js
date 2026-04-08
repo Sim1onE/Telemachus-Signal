@@ -4,6 +4,7 @@
  */
 class SystemOrbitalMap {
   constructor(positionDataFormatter, datalink, containerID) {
+    this.positionDataFormatter = positionDataFormatter;
     this.container = document.getElementById(containerID);
     this.datalink = datalink;
     this.targetReadout = null;
@@ -325,9 +326,14 @@ class SystemOrbitalMap {
     // v21.8.135: Geographic vs Topological Pipeline Split
     const isFullBatch = (type === 'orbit');
 
-    if (ut === this.lastRenderUT && !this.isSliderInteracting && !isFullBatch) return;
     this.lastRenderUT = ut;
     this.lastFormattedData = formattedData;
+
+    // v21.8.175: Global Geometry Flush on SOI transition
+    // Prevents "ghost" orbits from flickering in the wrong coordinate system.
+    if (formattedData.isBodyChanged) {
+      this.clearAllOrbitPaths();
+    }
 
     // v21.8.150: Bridge new formatter schema to legacy View API.
     // The formatter now emits referenceBodies[] and vessels[] (flat arrays).
@@ -355,9 +361,11 @@ class SystemOrbitalMap {
     this.updateCamera(Object.assign({}, formattedData, { bodies: bodies }));
     this.updateHUD(Object.assign({}, formattedData, { vessels: vesselData }));
 
-    // Pipeline B: Topological State (Only on 'orbit' batches - Visual Stability)
-    if (isFullBatch) {
-      this.updateManeuverNodeGeometry(vesselData.active, ut);
+    // v21.8.198: 60Hz Node Animation
+    // Maneuver nodes must be recalculated every frame to stay on track during smooth extrapolation.
+    this.updateManeuverNodeGeometry(vesselData.active, ut, isFullBatch);
+    if (vesselData.target) {
+      this.updateManeuverNodeGeometry(vesselData.target, ut, isFullBatch);
     }
   }
 
@@ -592,7 +600,7 @@ class SystemOrbitalMap {
     }
   }
 
-  updateManeuverNodeGeometry(activeVessel, currentUT) {
+  updateManeuverNodeGeometry(activeVessel, currentUT, isFullBatch = true) {
     var nodes = activeVessel.maneuverNodes || [];
     var seenNodes = {};
     for (var i = 0; i < nodes.length; i++) {
@@ -619,17 +627,22 @@ class SystemOrbitalMap {
         // This prevents object recycling during UT slides.
         var patchId = id + "-patch-" + j;
         seenNodes[patchId] = true;
-        var points = patch.orbitPath.map(p => new THREE.Vector3(p.x, p.y, p.z));
-        let line = this.registry.patches[patchId];
-        if (!line) {
-          var geometry = this.createGeometryFromPoints(points, 256);
-          geometry.computeBoundingBox();
-          var dashSize = geometry.boundingBox.size().x / 40;
-          line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: '#00ffff', dashSize: dashSize, gapSize: dashSize / 2, linewidth: 3 }));
-          this.group.add(line);
-          this.registry.patches[patchId] = line;
-        } else {
-          this.updateLineGeometry(line, points);
+        // v21.8.220: Conditional Geometry Rebuild
+        // We only rebuild the polyline meshes during a full server batch.
+        // During smooth frames, we keep the existing lines to save performance.
+        if (isFullBatch) {
+          var points = patch.orbitPath.map(p => new THREE.Vector3(p.x, p.y, p.z));
+          let line = this.registry.patches[patchId];
+          if (!line) {
+            var geometry = this.createGeometryFromPoints(points, 256);
+            geometry.computeBoundingBox();
+            var dashSize = geometry.boundingBox.size().x / 40;
+            line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: '#00ffff', dashSize: dashSize, gapSize: dashSize / 2, linewidth: 3 }));
+            this.group.add(line);
+            this.registry.patches[patchId] = line;
+          } else {
+            this.updateLineGeometry(line, points);
+          }
         }
       }
     }
@@ -673,11 +686,30 @@ class SystemOrbitalMap {
       if (!selectedPatch && targetPatches.length > 0) selectedPatch = targetPatches[0];
 
       if (selectedPatch && selectedPatch.orbitPath) {
-        const points = selectedPatch.orbitPath;
-        const duration = selectedPatch.endUT - selectedPatch.startUT;
-        const progress = (targetUT - selectedPatch.startUT) / (duration || 1);
-        const index = Math.min(points.length - 1, Math.max(0, Math.floor(progress * points.length)));
-        foundPoint = points[index];
+        // v21.8.215: High-Precision Utility Bridge
+        // We use the official Formatter logic to ensure rotation and axis alignment
+        if (selectedPatch.elements && selectedPatch.elements.sma && this.positionDataFormatter) {
+           const solvedRel = this.positionDataFormatter.solveKeplerAnalytical(selectedPatch.elements, targetUT);
+           if (solvedRel) {
+              const bodyName = selectedPatch.referenceBody || "Kerbin";
+              const parentAbs = this.positionDataFormatter.getAbsolutePos(bodyName);
+              const absPos = {
+                 x: parentAbs.x + solvedRel.x,
+                 y: parentAbs.y + solvedRel.y,
+                 z: parentAbs.z + solvedRel.z
+              };
+              // This applies axial transformation {x, z, -y} and focal shift automatically
+              foundPoint = this.positionDataFormatter.formatTruePositionVector(absPos);
+           }
+        }
+
+        if (!foundPoint) {
+           const points = selectedPatch.orbitPath;
+           const duration = selectedPatch.endUT - selectedPatch.startUT;
+           const progress = (targetUT - selectedPatch.startUT) / (duration || 1);
+           const index = Math.min(points.length - 1, Math.max(0, Math.floor(progress * points.length)));
+           foundPoint = points[index];
+        }
       }
 
       if (foundPoint) {
@@ -686,10 +718,10 @@ class SystemOrbitalMap {
       }
     }
 
-    // v21.8.41: Cleanup Barrier (Maneuver Persistence Shield)
-    // We only perform scene cleanup if the incoming packet contains at least one node.
-    // This ignores empty 'partial' batches that would otherwise clear the screen.
-    if (nodes.length > 0) {
+    // v21.8.230: Cleanup Barrier (Maneuver Persistence Shield)
+    // We only perform scene cleanup if we are in a full server update (isFullBatch).
+    // This prevents smooth extrapolation frames from clearing existing paths.
+    if (isFullBatch) {
       for (var key in this.registry.nodes) { if (!seenNodes[key]) { this.group.remove(this.registry.nodes[key]); delete this.registry.nodes[key]; } }
       for (var key in this.registry.patches) { if (!seenNodes[key]) { this.group.remove(this.registry.patches[key]); delete this.registry.patches[key]; } }
     }
@@ -699,8 +731,8 @@ class SystemOrbitalMap {
     var paths = bodies || [];
     var seenPaths = {};
     for (var i = 0; i < paths.length; i++) {
-        var path = paths[i];
-        var name = path.name;
+      var path = paths[i];
+      var name = path.name;
       seenPaths[name] = true;
       if (this.bodyToggles[name] === false) {
         if (this.registry.paths[name]) { this.group.remove(this.registry.paths[name]); delete this.registry.paths[name]; }
@@ -852,6 +884,19 @@ class SystemOrbitalMap {
   resetPosition() {
     this.cameraSet = false;
     this.lastFocusBody = null; // Force rescale
+  }
+
+  clearAllOrbitPaths() {
+    // v21.8.175: Deep scene cleanup for coordinate system resets
+    const groups = ['paths', 'celestialOrbits', 'orbits', 'nodes', 'patches'];
+    groups.forEach(groupKey => {
+      const reg = this.registry[groupKey];
+      if (!reg) return;
+      for (let key in reg) {
+        this.group.remove(reg[key]);
+        delete reg[key];
+      }
+    });
   }
 }
 
