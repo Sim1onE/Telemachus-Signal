@@ -13,7 +13,7 @@ namespace Telemachus
         bool ShouldUpdate(double currentUT);
         void Execute(KSPUnifiedStreamService session);
         void UpdateConfig(Dictionary<string, object> json);
-        
+
         void OnStart(StreamSessionController controller);
         void OnStop(StreamSessionController controller);
     }
@@ -23,10 +23,13 @@ namespace Telemachus
         public abstract string StreamType { get; }
         public virtual string SubscriptionKey => StreamType;
         public int RateMs { get; set; } = 200;
+        public int MinRateMs { get; set; } = 30000; // v22.1: Default 30s heartbeat for stable states
         public bool ChangingOnly { get; set; } = false;
 
         protected double LastSentUT = -1;
         protected object LastSentData = null;
+
+        public virtual bool IsDirty() => true; // Default to always active if not overridden
 
         public virtual void OnStart(StreamSessionController controller) { }
         public virtual void OnStop(StreamSessionController controller) { }
@@ -36,7 +39,12 @@ namespace Telemachus
             if (LastSentUT > 0)
             {
                 double elapsedMs = (currentUT - LastSentUT) * 1000.0;
-                if (elapsedMs < RateMs) return false;
+
+                // v22.1: Dual-Rate Decision Logic
+                bool dirty = IsDirty();
+                int targetRate = dirty ? RateMs : MinRateMs;
+
+                if (elapsedMs < targetRate) return false;
             }
             return true;
         }
@@ -75,7 +83,7 @@ namespace Telemachus
     public class TickSubscription : BaseSubscription
     {
         public override string StreamType => "tick";
-        
+
         public override void UpdateConfig(Dictionary<string, object> json)
         {
             base.UpdateConfig(json);
@@ -88,21 +96,22 @@ namespace Telemachus
             Vessel v = FlightGlobals.ActiveVessel;
             if (v == null) return;
             double currentUT = Planetarium.GetUniversalTime();
-            
+
             // v18.15: Unified "tick" payload. ut is inside data because tick IS the time source.
             var data = new Dictionary<string, object> {
                 { "ut", currentUT },
-                { "met", (double)v.missionTime }, 
+                { "met", (double)v.missionTime },
                 { "warp", TimeWarp.fetch != null ? TimeWarp.CurrentRate : 1.0 },
-                { "delay", TelemachusSignalManager.GetSignalDelay(v) }, 
+                { "delay", TelemachusSignalManager.GetSignalDelay(v) },
                 { "quality", (byte)(TelemachusSignalManager.GetSignalQuality(v) * 100) }
             };
 
-            if (HasChanged(data)) {
+            if (HasChanged(data))
+            {
                 // Special case for tick: no external ut header, it's all in data
-                session.SendUnifiedPacket(new Dictionary<string, object> { 
-                    { "type", StreamType }, 
-                    { "data", data } 
+                session.SendUnifiedPacket(new Dictionary<string, object> {
+                    { "type", StreamType },
+                    { "data", data }
                 });
                 LastSentUT = currentUT; LastSentData = data;
             }
@@ -116,12 +125,14 @@ namespace Telemachus
         public override void UpdateConfig(Dictionary<string, object> json)
         {
             base.UpdateConfig(json);
-            if (json.ContainsKey("keys")) {
+            if (json.ContainsKey("keys"))
+            {
                 var newKeys = (json["keys"] as System.Collections.IEnumerable).Cast<object>().Select(x => x.ToString().Trim());
                 keys.UnionWith(newKeys);
             }
             // v18.11: Restore 'rm' support
-            if (json.ContainsKey("rm")) {
+            if (json.ContainsKey("rm"))
+            {
                 var delKeys = (json["rm"] as System.Collections.IEnumerable).Cast<object>().Select(x => x.ToString().Trim());
                 keys.ExceptWith(delKeys);
             }
@@ -132,10 +143,12 @@ namespace Telemachus
             if (keys.Count == 0) return;
             double currentUT = Planetarium.GetUniversalTime();
             var results = new Dictionary<string, object>();
-            foreach (var key in keys.ToList()) {
+            foreach (var key in keys.ToList())
+            {
                 try { results[key] = session.ProcessAPI(key); } catch { results[key] = null; }
             }
-            if (HasChanged(results)) {
+            if (HasChanged(results))
+            {
                 session.SendUnifiedPacket(CreateUnifiedPacket(currentUT, results));
                 LastSentUT = currentUT; LastSentData = results;
             }
@@ -146,10 +159,11 @@ namespace Telemachus
     {
         public override string StreamType => "soundtrack";
         public SoundtrackSubscription() { ChangingOnly = true; }
-        
+
         // v18.11: Send current state as soon as started
-        public override void OnStart(StreamSessionController controller) {
-            Execute(controller.Socket); 
+        public override void OnStart(StreamSessionController controller)
+        {
+            Execute(controller.Socket);
         }
 
         public override void Execute(KSPUnifiedStreamService session)
@@ -161,7 +175,8 @@ namespace Telemachus
                 { "name", status.name }, { "isPlaying", status.isPlaying }, { "time", status.time }, { "duration", status.duration }
             };
             var compareData = new { status.name, status.isPlaying };
-            if (HasChanged(compareData)) {
+            if (HasChanged(compareData))
+            {
                 session.SendUnifiedPacket(CreateUnifiedPacket(currentUT, data));
                 LastSentUT = currentUT; LastSentData = compareData;
             }
@@ -198,7 +213,7 @@ namespace Telemachus
             _fmodAudioBlockCount++;
             double currentUt = Planetarium.GetUniversalTime();
             if (_lastAudioCaptureUt < 0) _lastAudioCaptureUt = currentUt;
-            
+
             double blockDuration = (double)samples.Length / 22050.0;
             _lastAudioCaptureUt += blockDuration;
             if (currentUt > _lastAudioCaptureUt) _lastAudioCaptureUt = currentUt;
@@ -207,7 +222,8 @@ namespace Telemachus
             double uniqueUt = _lastAudioCaptureUt + (_fmodAudioBlockCount % 100 * 0.00000001);
 
             byte[] pcm = new byte[samples.Length * 2];
-            for (int i = 0; i < samples.Length; i++) {
+            for (int i = 0; i < samples.Length; i++)
+            {
                 short s = (short)Mathf.Clamp(samples[i] * 32767f, -32768, 32767);
                 pcm[i * 2] = (byte)(s & 0xFF); pcm[i * 2 + 1] = (byte)((s >> 8) & 0xFF);
             }
@@ -219,7 +235,8 @@ namespace Telemachus
 
             // v18.11 Restore: Audio Diagnostic Log
             _downlinkPacketCount++;
-            if (Time.unscaledTime - _lastDiagTime > 2.0f) {
+            if (Time.unscaledTime - _lastDiagTime > 2.0f)
+            {
                 PluginLogger.print($"[Radio-Diag] DOWNLINK ({session.ID}): {_downlinkPacketCount} pkts/2s");
                 _downlinkPacketCount = 0; _lastDiagTime = Time.unscaledTime;
             }
@@ -285,7 +302,49 @@ namespace Telemachus
 
         public OrbitSubscription()
         {
-            RateMs = 1000; // v21.8.6: Default to 1Hz for high-volume orbit batches
+            RateMs = 1000;
+            MinRateMs = 20000; // v22.1: 20s heartbeat for stable orbits
+        }
+
+        private double _lastSma = -1;
+        private double _lastEcc = -1;
+        private double _lastInc = -1;
+        private int _lastNodeCount = -1;
+        private double _lastNodesChecksum = -1;
+        private string _lastMainBody = "";
+        private string _lastTargetName = "";
+        private bool _forceFullUpdate = false;
+
+        public override bool IsDirty()
+        {
+            Vessel v = FlightGlobals.ActiveVessel;
+            if (v == null) return false;
+
+            // 1. Structural Change (SOI Jump)
+            if (v.mainBody.name != _lastMainBody) return true;
+
+            // 2. Maneuver Node Integrity
+            int nodeCount = v.patchedConicSolver?.maneuverNodes.Count ?? 0;
+            if (nodeCount != _lastNodeCount) return true;
+            if (nodeCount > 0)
+            {
+                double checksum = v.patchedConicSolver.maneuverNodes.Sum(n => n.DeltaV.magnitude + n.UT);
+                // v22.5: Relaxed threshold to 0.0001 to ignore KSP solver noise
+                if (Math.Abs(checksum - _lastNodesChecksum) > 0.0001) return true;
+            }
+
+            // 3. Target Change
+            var target = FlightGlobals.fetch.VesselTarget;
+            string targetName = target?.GetName() ?? "";
+            if (targetName != _lastTargetName) return true;
+
+            // 4. Physical Drift (SMA/ECC change)
+            double smaDiff = Math.Abs(v.orbit.semiMajorAxis - _lastSma);
+            bool dDrift = smaDiff > 100.0 && smaDiff > (Math.Abs(_lastSma) * 0.0005);
+            if (!dDrift) dDrift = Math.Abs(v.orbit.eccentricity - _lastEcc) > 0.0001;
+            if (dDrift) return true;
+
+            return _forceFullUpdate;
         }
 
         public override void UpdateConfig(Dictionary<string, object> json)
@@ -311,93 +370,128 @@ namespace Telemachus
             }
 
             double currentUT = Planetarium.GetUniversalTime();
+
+            // v22.4: Simplified Dirty State (Fewer sensors, more reliability)
+            // We focus on the EFFECT (Orbit change) rather than the CAUSE (Acceleration)
+
+            // 1. Structural Change (SOI Jump)
+            bool dSOI = v.mainBody.name != _lastMainBody;
+
+            // 2. Maneuver Node Edits (Capture planning activity)
+            int nodeCount = v.patchedConicSolver?.maneuverNodes.Count ?? 0;
+            bool dNodes = nodeCount != _lastNodeCount;
+            double checksum = 0;
+            if (nodeCount > 0)
+            {
+                checksum = v.patchedConicSolver.maneuverNodes.Sum(n => n.DeltaV.magnitude + n.UT);
+                if (!dNodes && Math.Abs(checksum - _lastNodesChecksum) > 0.0001) dNodes = true;
+            }
+
+            // 3. Target Updates
+            var target = FlightGlobals.fetch.VesselTarget;
+            string targetName = target?.GetName() ?? "";
+            bool dTarget = targetName != _lastTargetName;
+
+            // 4. Physical Drift (SMA/ECC change)
+            double smaDiff = Math.Abs(v.orbit.semiMajorAxis - _lastSma);
+            bool dDrift = smaDiff > (Math.Abs(_lastSma) * 0.0005);
+            if (!dDrift) dDrift = Math.Abs(v.orbit.eccentricity - _lastEcc) > 0.0001;
+
+            bool isFullUpdate = dSOI || dNodes || dTarget || dDrift || _forceFullUpdate;
+
             var orbitData = new Dictionary<string, object>();
+            orbitData["isFullUpdate"] = isFullUpdate;
+            orbitData["meridianOffset"] = GetMeridianAngle();
 
-            // v21.8.131: Inject Meridian Offset directly into the batch
-            Vector3d inertialX = Planetarium.right;
-            Vector3d worldX = Vector3d.right;
-            Vector3d projInertialX = new Vector3d(inertialX.x, 0, inertialX.z).normalized;
-            double angle = Vector3d.Angle(worldX, projInertialX);
-            if (Vector3d.Cross(worldX, projInertialX).y < 0) angle = 360.0 - angle;
-            orbitData["meridianOffset"] = angle;
-
-            // 1. Vessel Data (Unification v21.8.130)
+            // 1. Vessel Data
             Vector3d vesselPos = v.orbit.getRelativePositionAtUT(currentUT);
-            orbitData["vessel"] = new Dictionary<string, object> {
+            var vesselData = new Dictionary<string, object> {
                 { "position", new Dictionary<string, double> { { "x", vesselPos.x }, { "y", vesselPos.y }, { "z", vesselPos.z } } },
-                { "body", v.mainBody.name },
-                { "patches", GetOrbitGroups(v.orbit, currentUT, v) }
+                { "body", v.mainBody.name }
             };
 
-            // 2. Target Data (Unification v21.8.130)
-            var target = FlightGlobals.fetch.VesselTarget;
+            if (isFullUpdate)
+            {
+                vesselData["patches"] = GetOrbitGroups(v.orbit, currentUT, v);
+
+                // Track state for next dirty check
+                _lastSma = v.orbit.semiMajorAxis;
+                _lastEcc = v.orbit.eccentricity;
+                _lastInc = v.orbit.inclination;
+                _lastMainBody = v.mainBody.name;
+            }
+            orbitData["vessel"] = vesselData;
+
+            // 2. Target Data
             if (target != null)
             {
                 Vector3d targetPos = target.GetOrbit().getRelativePositionAtUT(currentUT);
-                orbitData["target"] = new Dictionary<string, object> {
+                var targetData = new Dictionary<string, object> {
                     { "name", target.GetName() },
                     { "position", new Dictionary<string, double> { { "x", targetPos.x }, { "y", targetPos.y }, { "z", targetPos.z } } },
-                    { "body", target.GetOrbit().referenceBody.name },
-                    { "patches", GetOrbitGroups(target.GetOrbit(), currentUT, v) }
+                    { "body", target.GetOrbit().referenceBody.name }
                 };
+                if (isFullUpdate)
+                {
+                    targetData["patches"] = GetOrbitGroups(target.GetOrbit(), currentUT, v);
+                }
+                orbitData["target"] = targetData;
+                _lastTargetName = target.GetName();
             }
             else
             {
                 orbitData["target"] = null;
+                _lastTargetName = "";
             }
 
             // 3. Maneuver Nodes
             if (v.patchedConicSolver != null && v.patchedConicSolver.maneuverNodes.Count > 0)
             {
-                var maneuverGroups = new List<object>();
+                var maneuvers = new List<object>();
+                // checksum already initialized at top
                 foreach (var node in v.patchedConicSolver.maneuverNodes)
                 {
-                    maneuverGroups.Add(new Dictionary<string, object> {
+                    // checksum already calculated at top of Execute()
+                    var nodeData = new Dictionary<string, object> {
                         { "ut", node.UT },
                         { "deltaV", new Dictionary<string, double> { { "x", node.DeltaV.x }, { "y", node.DeltaV.y }, { "z", node.DeltaV.z } } },
-                        { "truePosition", new Dictionary<string, double> { { "x", node.nextPatch.getRelativePositionAtUT(node.UT).x }, { "y", node.nextPatch.getRelativePositionAtUT(node.UT).y }, { "z", node.nextPatch.getRelativePositionAtUT(node.UT).z } } },
-                        { "patches", GetOrbitGroups(node.nextPatch, node.UT, v) }
-                    });
+                        { "truePosition", new Dictionary<string, double> { { "x", node.nextPatch.getRelativePositionAtUT(node.UT).x }, { "y", node.nextPatch.getRelativePositionAtUT(node.UT).y }, { "z", node.nextPatch.getRelativePositionAtUT(node.UT).z } } }
+                    };
+                    if (isFullUpdate)
+                    {
+                        nodeData["patches"] = GetOrbitGroups(node.nextPatch, node.UT, v);
+                    }
+                    maneuvers.Add(nodeData);
                 }
-                orbitData["maneuvers"] = maneuverGroups;
+                orbitData["maneuvers"] = maneuvers;
+                _lastNodeCount = v.patchedConicSolver.maneuverNodes.Count;
+                _lastNodesChecksum = checksum;
             }
             else
             {
                 orbitData["maneuvers"] = new List<object>();
+                _lastNodeCount = 0; _lastNodesChecksum = 0;
             }
 
-            // 4. Current Body Positions & Rotations (v21.8.15: Inertial Hardening)
-            var bodyPositions = new Dictionary<string, object>();
-            var bodyRotations = new Dictionary<string, double>();
-            CelestialBody sun = FlightGlobals.Bodies[0];
-
-            foreach (var body in FlightGlobals.Bodies)
-            {
-                // v21.8.20: Fixed "Focused Body Collapse" 
-                // Force the use of analytical orbital positions relative to SOI parents.
-                // This ensures that Kerbin is reported at ~13.5B meters from the Sun, 
-                // even if the active vessel is currently orbiting Kerbin.
-                Vector3d relPos = Vector3d.zero;
-                if (body != sun && body.orbit != null)
-                {
-                    relPos = body.orbit.getRelativePositionAtUT(currentUT);
-                }
-                
-                bodyPositions[body.name] = new Dictionary<string, double> { { "x", relPos.x }, { "y", relPos.y }, { "z", relPos.z } };
-
-                // v21.8.15: Inject Direct Rotation Angle for visual decoupling
-                bodyRotations[body.name] = body.rotationAngle;
-            }
-            orbitData["bodyPositions"] = bodyPositions;
-            orbitData["bodyRotations"] = bodyRotations;
+            // v22.1 Zero-Legacy Policy: No planet lists, no rotations here.
+            // Client uses metadata to calculate all celestial orbits/rotations.
 
             var packet = CreateUnifiedPacket(currentUT, orbitData);
-            if (HasChanged(orbitData))
-            {
-                session.SendUnifiedPacket(packet);
-                LastSentUT = currentUT;
-                LastSentData = orbitData;
-            }
+            session.SendUnifiedPacket(packet);
+
+            LastSentUT = currentUT;
+            LastSentData = orbitData;
+            _forceFullUpdate = false;
+        }
+
+        private double GetMeridianAngle()
+        {
+            Vector3d inertialX = Planetarium.right;
+            Vector3d worldX = Vector3d.right;
+            Vector3d projInertialX = new Vector3d(inertialX.x, 0, inertialX.z).normalized;
+            double angle = Vector3d.Angle(worldX, projInertialX);
+            if (Vector3d.Cross(worldX, projInertialX).y < 0) angle = 360.0 - angle;
+            return angle;
         }
 
         private void SendMetadataManifest(KSPUnifiedStreamService session)
@@ -421,16 +515,27 @@ namespace Telemachus
                     { "period", body.orbit != null ? (double)body.orbit.period : 0 },
                     { "m0", body.orbit != null ? (double)body.orbit.meanAnomalyAtEpoch : 0 },
                     { "epoch", body.orbit != null ? (double)body.orbit.epoch : 0 },
-                    { "initialRotation", (double)body.initialRotation }
+                    { "initialRotation", (double)body.initialRotation },
+                    { "rotates", (bool)body.rotates },
+                    { "rotationPeriod", (double)body.rotationPeriod },
+                    { "rotationalSpeed", body.rotationPeriod > 0 ? (360.0 / body.rotationPeriod) : 0 }
                 };
                 manifest[body.name] = bodyData;
             }
+
+            // v22.1: Global Planetarium Metadata
+            double meridianSpeed = 360.0 / 21600.0; // Kerbin Default
+            if (FlightGlobals.GetHomeBody() != null) meridianSpeed = 360.0 / FlightGlobals.GetHomeBody().rotationPeriod;
 
             session.SendUnifiedPacket(new Dictionary<string, object>
             {
                 { "type", "orbit_metadata" },
                 { "ut", Planetarium.GetUniversalTime() },
-                { "data", manifest }
+                { "data", new Dictionary<string, object> {
+                    { "bodies", manifest },
+                    { "initialMeridianOffset", GetMeridianAngle() },
+                    { "meridianRotationSpeed", meridianSpeed }
+                }}
             });
         }
 
@@ -447,7 +552,7 @@ namespace Telemachus
 
                 if (double.IsInfinity(pEnd) || pEnd < pStart)
                 {
-                    pEnd = pStart + patch.period; 
+                    pEnd = pStart + patch.period;
                 }
 
                 var points = new List<object>();
@@ -457,7 +562,7 @@ namespace Telemachus
                 for (int i = 0; i <= Resolution; i++)
                 {
                     double ut = pStart + (step * i);
-                    
+
                     // 1. Relative position in patch frame (Mandatory for all points)
                     Vector3d pos = patch.getRelativePositionAtUT(ut);
                     points.Add(new Dictionary<string, double> { { "x", pos.x }, { "y", pos.y }, { "z", pos.z } });
@@ -467,7 +572,8 @@ namespace Telemachus
                     {
                         Vector3d refPos = Vector3d.zero;
                         CelestialBody current = patch.referenceBody;
-                        while (current != null && current != rootBody && current.orbit != null) {
+                        while (current != null && current != rootBody && current.orbit != null)
+                        {
                             refPos += current.orbit.getPositionAtUT(ut);
                             current = current.orbit.referenceBody;
                         }
