@@ -545,7 +545,6 @@ namespace Telemachus
                 }
 
                 var points = new List<object>();
-                var refBodyPoints = new List<object>();
                 double step = (pEnd - pStart) / Resolution;
 
                 for (int i = 0; i <= Resolution; i++)
@@ -555,23 +554,6 @@ namespace Telemachus
                     // 1. Relative position in patch frame (Mandatory for all points)
                     Vector3d pos = patch.getRelativePositionAtUT(ut);
                     points.Add(new Dictionary<string, double> { { "x", pos.x }, { "y", pos.y }, { "z", pos.z } });
-
-                    // 2. Reference Body Position (Only needed for anchor at i == 0)
-                    if (i == 0 && patch.referenceBody != rootBody)
-                    {
-                        Vector3d refPos = Vector3d.zero;
-                        CelestialBody current = patch.referenceBody;
-                        while (current != null && current != rootBody && current.orbit != null)
-                        {
-                            refPos += current.orbit.getPositionAtUT(ut);
-                            current = current.orbit.referenceBody;
-                        }
-                        refBodyPoints.Add(new Dictionary<string, double> { { "x", refPos.x }, { "y", refPos.y }, { "z", refPos.z } });
-                    }
-                    else
-                    {
-                        refBodyPoints.Add(new Dictionary<string, double> { { "x", 0 }, { "y", 0 }, { "z", 0 } });
-                    }
                 }
 
                 groups.Add(new Dictionary<string, object> {
@@ -587,8 +569,7 @@ namespace Telemachus
                     { "period", patch.period },
                     { "m0", patch.meanAnomalyAtEpoch },
                     { "epoch", patch.epoch },
-                    { "points", points },
-                    { "refBodyPoints", refBodyPoints }
+                    { "points", points }
                 });
             }
 
