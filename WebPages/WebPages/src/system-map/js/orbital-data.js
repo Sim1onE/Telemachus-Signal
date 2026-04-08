@@ -67,7 +67,7 @@ class SystemOrbitalPositionData {
         const manifest = msg.data;
         if (!manifest) return;
 
-        console.log("[SystemMap] Processing Orbit Metadata Manifest...");
+        console.log("[SystemMap] Processing Orbit Metadata Manifest...", msg);
 
         if (this.datalink.updateOrbitalBodies) {
             this.datalink.updateOrbitalBodies(manifest);
@@ -162,6 +162,8 @@ class SystemOrbitalPositionData {
         if (!this.planetStaticOrbitsFetched) return;
         const batch = msg.data;
         if (!batch) return;
+
+        console.log(`[SystemMap] Rx "${msg.type}". FullUpdate: ${batch.isFullUpdate} | UT: ${msg.ut.toFixed(1)}`);
 
         // v21.8.20: Direct In-Place Update of the canonical store.
         const positionData = this.datalink.lastDatalinkData || {};
@@ -289,7 +291,11 @@ class SystemOrbitalPositionData {
             });
 
             const subscribe = () => {
-                this.datalink.signalLink.subscribeOrbit({ resolution: this.options.numberOfSegments });
+                this.datalink.signalLink.subscribeOrbit({
+                    resolution: this.options.numberOfSegments,
+                    maxRate: 100,     // v22.1: Active rate (1Hz)
+                    minRate: 10000  // v22.1: Heartbeat rate (10s) for testing
+                });
             };
 
             if (this.datalink.signalLink.ws && this.datalink.signalLink.ws.readyState === WebSocket.OPEN) {

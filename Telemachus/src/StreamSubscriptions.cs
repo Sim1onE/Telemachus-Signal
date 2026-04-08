@@ -54,6 +54,8 @@ namespace Telemachus
         public virtual void UpdateConfig(Dictionary<string, object> json)
         {
             if (json.ContainsKey("rate")) RateMs = Convert.ToInt32(json["rate"]);
+            if (json.ContainsKey("maxRate")) RateMs = Convert.ToInt32(json["maxRate"]);
+            if (json.ContainsKey("minRate")) MinRateMs = Convert.ToInt32(json["minRate"]);
             if (json.ContainsKey("changing")) ChangingOnly = (bool)json["changing"];
         }
 
