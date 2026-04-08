@@ -304,25 +304,18 @@ class SystemPositionDataFormatter {
   }
 
   formatCurrentVessel(positionData, formattedData) {
-    const orbits = positionData["o.orbitPatches"];
-    if (!orbits || !Array.isArray(orbits) || orbits.length === 0) {
-      // v21.8.45: Absolute safety fallback if no patches exist
-      if (!positionData["vesselCurrentPosition"] || !positionData["vesselCurrentPosition"]["relativePosition"]) return;
-      const vesselBodyName = positionData["vesselBody"] || "Kerbin";
-      const bodyAbsolutePos = this.getAbsolutePos(vesselBodyName);
-      const vesselRelPos = positionData["vesselCurrentPosition"]["relativePosition"];
-      const vesselAbsolutePos = { x: bodyAbsolutePos.x + vesselRelPos.x, y: bodyAbsolutePos.y + vesselRelPos.y, z: bodyAbsolutePos.z + vesselRelPos.z };
-      formattedData["vessels"].push({ type: "currentVessel", truePosition: this.formatTruePositionVector(vesselAbsolutePos) });
-      return;
-    }
+    const vesselBodyName = positionData["vesselBody"] || "Kerbin";
+    
+    // v21.8.125: Back to basics. Use ONLY the RAW position to avoid jumping and rotation errors.
+    if (!positionData["vesselCurrentPosition"] || !positionData["vesselCurrentPosition"]["relativePosition"]) return;
 
-    // v21.8.46: Find current active patch for real-time snap
-    const ut = positionData.currentUniversalTime;
-    let activePatch = orbits.find(o => ut >= o.startUT && ut <= o.endUT) || orbits[0];
-
-    const bodyAbsolutePos = this.getAbsolutePos(activePatch.referenceBody || "Kerbin");
-    const vesselRelPos = this.solveOrbitalPosition(activePatch, ut);
-    const vesselAbsolutePos = { x: bodyAbsolutePos.x + vesselRelPos.x, y: bodyAbsolutePos.y + vesselRelPos.y, z: bodyAbsolutePos.z + vesselRelPos.z };
+    const bodyAbsolutePos = this.getAbsolutePos(vesselBodyName);
+    const vesselRelPos = positionData["vesselCurrentPosition"]["relativePosition"];
+    const vesselAbsolutePos = { 
+        x: bodyAbsolutePos.x + vesselRelPos.x, 
+        y: bodyAbsolutePos.y + vesselRelPos.y, 
+        z: bodyAbsolutePos.z + vesselRelPos.z 
+    };
 
     formattedData["vessels"].push({
       type: "currentVessel",

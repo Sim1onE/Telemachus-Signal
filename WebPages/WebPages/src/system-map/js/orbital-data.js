@@ -215,7 +215,7 @@ class SystemOrbitalPositionData {
 
             if (batch.vessel.length > 0) {
                 const firstPatch = batch.vessel[0];
-                
+
                 // v21.8.72: Mapping elements to legacy keys for Rendezvous logic
                 positionData['o.sma'] = firstPatch.sma;
                 positionData['o.period'] = firstPatch.period;
@@ -242,7 +242,7 @@ class SystemOrbitalPositionData {
 
             if (batch.target.length > 0) {
                 const firstPatch = batch.target[0];
-                
+
                 // v21.8.72: Mapping target elements for Rendezvous logic
                 positionData['tar.o.sma'] = firstPatch.sma;
                 positionData['tar.o.period'] = firstPatch.period;
