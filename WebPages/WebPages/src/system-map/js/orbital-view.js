@@ -630,19 +630,19 @@ class SystemOrbitalMap {
         // v21.8.220: Conditional Geometry Rebuild
         // We only rebuild the polyline meshes during a full server batch.
         // During smooth frames, we keep the existing lines to save performance.
-        if (isFullBatch) {
-          var points = patch.orbitPath.map(p => new THREE.Vector3(p.x, p.y, p.z));
-          let line = this.registry.patches[patchId];
-          if (!line) {
-            var geometry = this.createGeometryFromPoints(points, 256);
+        var points = patch.orbitPath.map(p => new THREE.Vector3(p.x, p.y, p.z));
+        let line = this.registry.patches[patchId];
+        if (!line) {
+          var geometry = this.createGeometryFromPoints(points, 256);
+          if (geometry) {
             geometry.computeBoundingBox();
             var dashSize = geometry.boundingBox.size().x / 40;
             line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: '#00ffff', dashSize: dashSize, gapSize: dashSize / 2, linewidth: 3 }));
             this.group.add(line);
             this.registry.patches[patchId] = line;
-          } else {
-            this.updateLineGeometry(line, points);
           }
+        } else {
+          this.updateLineGeometry(line, points);
         }
       }
     }

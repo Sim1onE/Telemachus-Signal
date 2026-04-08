@@ -80,6 +80,25 @@ class SystemPositionDataFormatter {
       return info.currentTruePosition || (info.points ? info.points[0] : { x: 0, y: 0, z: 0 });
     };
 
+    // v22.1: Analytical Rotation Solver
+    // Calculates the rotation angle (degrees) for any celestial body at a given UT.
+    this.solveOrbitalRotation = (info, ut) => {
+      if (!info || !info.rotates) return 0;
+
+      // Handle Home Body / Focus Body specifically with Server-Side Meridian Sync
+      // v22.6: Use vessel body for master sync to ensure landing accuracy anywhere.
+      const vesselBodyName = positionData["vesselBody"] || "Kerbin";
+      if (info.name === vesselBodyName && positionData["meridianOffset"] !== undefined) {
+        return positionData["meridianOffset"];
+      }
+
+      const initial = info.initialRotation || 0;
+      const speed = info.rotationalSpeed || 0; // degrees per second
+      if (speed === 0) return initial;
+
+      return (initial + (speed * ut)) % 360;
+    };
+
     // Helper: Recursively sum relative positions to find absolute sun-centric pos (64-bit)
     const getAbsolutePos = (name) => {
       if (!name || name === "Sun" || name === "root") return { x: 0, y: 0, z: 0 };
@@ -267,7 +286,7 @@ class SystemPositionDataFormatter {
         truePosition: truePosition,
         gravParameter: info.gravParameter,
         orbitPath: worldOrbitPoints,
-        rotationAngle: orbitInfo.rotationAngle || (positionData.bodyRotations && positionData.bodyRotations[name]) || 0,
+        rotationAngle: this.solveOrbitalRotation(Object.assign({ name: name }, orbitInfo), positionData.currentUniversalTime),
         initialRotation: orbitInfo.initialRotation || 0,
         atmosphericRadius: (this.datalink.getOrbitalBodyInfo(name) || {}).atmosphericRadius || 0,
         color: (this.datalink.getOrbitalBodyInfo(name) || {}).color || '#ffffff'
@@ -583,7 +602,7 @@ class SystemPositionDataFormatter {
         deltaV: node.deltaV || { x: 0, y: 0, z: 0 },
         ut: node.startUT || node.UT || 0,
         truePosition: truePosition,
-        orbitPatches: isFullBatch ? this.formatNodeOrbitPatches(positionData, node) : []
+        orbitPatches: this.formatNodeOrbitPatches(positionData, node)
       };
       formattedData["maneuverNodes"].push(manNode);
     });

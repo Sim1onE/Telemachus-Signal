@@ -64,10 +64,11 @@ class SystemOrbitalPositionData {
      * v21.8: Handles the automatic push of all celestial body metadata and UI population.
      */
     handleOrbitMetadata(msg) {
-        const manifest = msg.data;
-        if (!manifest) return;
+        const data = msg.data;
+        if (!data || !data.bodies) return;
 
-        console.log("[SystemMap] Processing Orbit Metadata Manifest...", msg);
+        const manifest = data.bodies;
+        console.log("[SystemMap] Processing Orbit Metadata Manifest...", data);
 
         if (this.datalink.updateOrbitalBodies) {
             this.datalink.updateOrbitalBodies(manifest);
@@ -91,6 +92,9 @@ class SystemOrbitalPositionData {
             store.m0 = body.m0;
             store.epoch = body.epoch;
             store.initialRotation = body.initialRotation || 0;
+            store.rotationPeriod = body.rotationPeriod || 0;
+            store.rotationalSpeed = body.rotationalSpeed || 0;
+            store.rotates = body.rotates || false;
             store.parent = body.parent || null;
             store.color = body.color || null;
         });
@@ -163,30 +167,16 @@ class SystemOrbitalPositionData {
         const batch = msg.data;
         if (!batch) return;
 
-        console.log(`[SystemMap] Rx "${msg.type}". FullUpdate: ${batch.isFullUpdate} | UT: ${msg.ut.toFixed(1)}`);
+        const type = msg.type;
+        if (!type) {
+            console.error("[SystemMap] CRITICAL: Received malformed packet without 'type'!", msg);
+            return;
+        }
+        console.log(`[SystemMap] Rx "${type}". UT: ${msg.ut.toFixed(1)}`);
 
         // v21.8.20: Direct In-Place Update of the canonical store.
         const positionData = this.datalink.lastDatalinkData || {};
         positionData.referenceBodies = positionData.referenceBodies || {};
-
-        if (batch.bodyPositions) {
-            const refKeys = Object.keys(positionData.referenceBodies);
-            Object.keys(batch.bodyPositions).forEach(rawName => {
-                const key = refKeys.find(k => k.toLowerCase() === rawName.toLowerCase()) || rawName;
-                if (!positionData.referenceBodies[key]) positionData.referenceBodies[key] = {};
-                positionData.referenceBodies[key].currentTruePosition = batch.bodyPositions[rawName];
-            });
-        }
-
-        if (batch.bodyRotations) {
-            Object.keys(batch.bodyRotations).forEach(rawName => {
-                const refKeys = Object.keys(positionData.referenceBodies);
-                const key = refKeys.find(k => k.toLowerCase() === rawName.toLowerCase()) || rawName;
-                if (positionData.referenceBodies[key]) {
-                    positionData.referenceBodies[key].rotationAngle = batch.bodyRotations[rawName];
-                }
-            });
-        }
 
         positionData["currentUniversalTime"] = msg.ut;
         positionData["meridianOffset"] = batch.meridianOffset;

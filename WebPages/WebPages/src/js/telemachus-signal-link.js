@@ -253,6 +253,7 @@ class TelemachusSignalLink {
                 // Generic dispatch for all JSON types (v16.21)
                 if (type && this.listeners.has(type)) {
                     this.listeners.get(type).forEach(cb => cb({
+                        type: type,
                         ut: msg.ut || this.lastPacketUT,
                         data: dataPayload
                     }, msg));
@@ -286,6 +287,7 @@ class TelemachusSignalLink {
 
             if (this.listeners.has(type)) {
                 this.listeners.get(type).forEach(cb => cb({
+                    type: type,
                     ut: kspUT,
                     warp: kspWarp,
                     delay: kspDelay,
@@ -464,6 +466,7 @@ class TelemachusSignalLink {
                 };
 
                 this.listeners.get('smooth_tick').forEach(cb => cb({
+                    type: 'tick',
                     ut: data.ut,
                     data: data // v18.17: Nested for uniformity with real JSON messages
                 }));
