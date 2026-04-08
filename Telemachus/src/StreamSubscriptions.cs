@@ -447,7 +447,6 @@ namespace Telemachus
                     var nodeData = new Dictionary<string, object> {
                         { "ut", node.UT },
                         { "deltaV", new Dictionary<string, double> { { "x", node.DeltaV.x }, { "y", node.DeltaV.y }, { "z", node.DeltaV.z } } },
-                        { "truePosition", new Dictionary<string, double> { { "x", node.nextPatch.getRelativePositionAtUT(node.UT).x }, { "y", node.nextPatch.getRelativePositionAtUT(node.UT).y }, { "z", node.nextPatch.getRelativePositionAtUT(node.UT).z } } },
                         { "patches", GetOrbitGroups(node.nextPatch, node.UT, v) }
                     };
                     maneuvers.Add(nodeData);
