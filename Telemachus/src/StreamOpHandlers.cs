@@ -118,8 +118,7 @@ namespace Telemachus
                         try 
                         {
                             // Fix: Evaluate Value, not Key. 
-                            // Syntax Fix: Convert [0] to {0} for legacy compatibility.
-                            string apiString = kvp.Value.ToString().Replace("[", "{").Replace("]", "}");
+                            string apiString = kvp.Value.ToString();
                             results[kvp.Key] = controller.Socket.ProcessAPI(apiString); 
                         }
                         catch { results[kvp.Key] = null; }

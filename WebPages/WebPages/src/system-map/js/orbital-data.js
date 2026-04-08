@@ -138,7 +138,7 @@ class SystemOrbitalPositionData {
                 row.style.paddingLeft = (depth * 12) + 'px';
                 const prefix = depth > 1 ? '↳ ' : (depth === 1 ? '– ' : '');
                 row.innerHTML = `<label><input type="checkbox" checked data-body="${name}"> ${prefix}${name.toUpperCase()}</label>`;
-                
+
                 const chk = row.querySelector('input');
                 chk.addEventListener('change', (e) => {
                     if (window.SystemMap) {
@@ -270,7 +270,8 @@ class SystemOrbitalPositionData {
 
             const subscribe = () => {
                 this.datalink.signalLink.subscribeOrbit({
-                    resolution: this.options.numberOfSegments
+                    resolution: this.options.numberOfSegments,
+                    maxRate: 10,
                 });
             };
 

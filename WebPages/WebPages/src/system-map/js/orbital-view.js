@@ -64,6 +64,7 @@ class SystemOrbitalMap {
 
     this.positionDataFormatter = positionDataFormatter;
     this.positionDataFormatter.options.onFormat = (data) => this.render(data);
+    this.setupCustomUI();
   }
 
   setupCustomUI() {
@@ -396,8 +397,9 @@ class SystemOrbitalMap {
       if (this.navball && d['n.pitch'] !== undefined) this.navball.updateOrientation(d['n.pitch'], d['n.roll'], d['n.heading']);
     }
 
-    if (this.datalink.lastDatalinkData && this.datalink.lastDatalinkData['o.maneuverNodes']) {
-      const nodes = this.datalink.lastDatalinkData['o.maneuverNodes'];
+    const activeVessel = (formattedData.vessels && formattedData.vessels.active) ? formattedData.vessels.active : null;
+    if (activeVessel && activeVessel.maneuverNodes) {
+      const nodes = activeVessel.maneuverNodes;
 
       // Predicted Stats for Node
       const predElem = document.getElementById('pred-stats');
@@ -409,9 +411,9 @@ class SystemOrbitalMap {
         const proLabel = document.getElementById('dv-pro');
         const normLabel = document.getElementById('dv-norm');
         const radLabel = document.getElementById('dv-rad');
-        if (proLabel) proLabel.innerText = this.lastNodeData.deltaV.z.toFixed(1);
-        if (normLabel) normLabel.innerText = this.lastNodeData.deltaV.y.toFixed(1);
-        if (radLabel) radLabel.innerText = this.lastNodeData.deltaV.x.toFixed(1);
+        if (proLabel) proLabel.innerText = this.lastNodeData.deltaV[2].toFixed(1);
+        if (normLabel) normLabel.innerText = this.lastNodeData.deltaV[1].toFixed(1);
+        if (radLabel) radLabel.innerText = this.lastNodeData.deltaV[0].toFixed(1);
 
         if (predElem && formattedData.vessels.active.maneuverNodes[this.activeNodeIndex]) {
           const node = formattedData.vessels.active.maneuverNodes[this.activeNodeIndex];

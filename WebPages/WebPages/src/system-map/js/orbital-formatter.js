@@ -613,8 +613,10 @@ class SystemPositionDataFormatter {
       }
 
       const manNode = {
-        deltaV: node.deltaV || { x: 0, y: 0, z: 0 },
-        ut: node.startUT || node.UT || 0,
+        // v22.9.1: Map backend deltaV (object {x,y,z} OR array [x,y,z]) to internal array
+        deltaV: Array.isArray(node.deltaV) ? node.deltaV : (node.deltaV ? [node.deltaV.x, node.deltaV.y, node.deltaV.z] : [0, 0, 0]),
+        // v22.9.1: Map backend UT (uppercase OR lowercase)
+        UT: node.UT || node.ut || node.startUT || 0,
         truePosition: truePosition,
         orbitPatches: this.formatNodeOrbitPatches(positionData, node)
       };
