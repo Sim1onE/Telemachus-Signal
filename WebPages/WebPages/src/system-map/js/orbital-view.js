@@ -77,21 +77,6 @@ class SystemOrbitalMap {
       });
     }
 
-    // Dynamic Visibility Toggles (v21.8.8)
-    const bindToggles = () => {
-      const toggles = document.querySelectorAll('#body-toggles input[type="checkbox"]');
-      toggles.forEach(chk => {
-        const bodyName = chk.getAttribute('data-body');
-        this.bodyToggles[bodyName] = chk.checked;
-        chk.onclick = (e) => {
-          this.bodyToggles[bodyName] = e.target.checked;
-          this.triggerRender();
-        };
-      });
-    };
-
-    window.addEventListener('system-map-ui-ready', bindToggles);
-    bindToggles(); // Initial bind
 
     // Node Selector
     const nodeSelector = document.getElementById('node-selector');
@@ -151,22 +136,6 @@ class SystemOrbitalMap {
       }
     });
 
-    // Body Toggles
-    const toggleContainer = document.getElementById('body-toggles');
-    if (toggleContainer) {
-      this.bodyNames.forEach(body => {
-        if (body === 'current vessel') return;
-        this.bodyToggles[body] = true;
-        const item = document.createElement('label');
-        item.className = 'toggle-item';
-        item.innerHTML = '<input type="checkbox" checked data-body="' + body + '"><span>' + body.toUpperCase() + '</span>';
-        item.querySelector('input').addEventListener('change', (e) => {
-          this.bodyToggles[body] = e.target.checked;
-          this.triggerRender();
-        });
-        toggleContainer.appendChild(item);
-      });
-    }
 
     this.btnRendezvous = document.getElementById('btn-rendezvous');
     if (this.btnRendezvous) {
@@ -472,16 +441,22 @@ class SystemOrbitalMap {
     for (var i = 0; i < bodies.length; i++) {
       var info = bodies[i];
       var name = info.name;
-      if (this.bodyToggles[name] === false && name !== "Sun") {
+      // v22.3.2: Allow hiding any body including root stars (Sun)
+      if (this.bodyToggles[name] === false) {
         if (this.registry.bodies[name]) {
           this.group.remove(this.registry.bodies[name]);
           delete this.registry.bodies[name];
+        }
+        // v22.3.1: Also cleanup analytical celestial orbits correctly
+        const orbitId = "celestial-orbit-" + name;
+        if (this.registry.celestialOrbits[orbitId]) {
+          this.group.remove(this.registry.celestialOrbits[orbitId]);
+          delete this.registry.celestialOrbits[orbitId];
         }
         continue;
       }
 
       var radius = info.radius;
-      if (name === "Sun") radius = 261600000;
       this.bodyRadii[name] = radius;
 
       let mesh = this.registry.bodies[name];
@@ -497,7 +472,12 @@ class SystemOrbitalMap {
       }
 
       if (info.truePosition) mesh.position.set(info.truePosition.x, info.truePosition.y, info.truePosition.z);
-      if (name === "Sun") this.sunLight.position.set(info.truePosition.x, info.truePosition.y, info.truePosition.z);
+      
+      // v22.3.2: Dynamic Stellar Lighting
+      // If the body is a root (star) or named Sun, update light position
+      if (name === "Sun" || !info.parent) {
+          if (info.truePosition) this.sunLight.position.set(info.truePosition.x, info.truePosition.y, info.truePosition.z);
+      }
 
       mesh.rotation.y = ((info.rotationAngle || 0) + (info.initialRotation || 0)) * (Math.PI / 180);
       this.updateCelestialOrbitGeometry(name, info);

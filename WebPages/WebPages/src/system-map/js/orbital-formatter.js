@@ -243,6 +243,14 @@ class SystemPositionDataFormatter {
       const info = positionData.referenceBodies[name];
       if (!info) return;
 
+      // v22.3: Performance Optimization - Skip hidden bodies unless they are the focus target
+      const isVisible = (window.SystemMap && window.SystemMap.bodyToggles[name] !== false);
+      const isFocus = (this.rootReferenceBodyName && this.rootReferenceBodyName.toLowerCase() === name.toLowerCase());
+      
+      if (!isVisible && !isFocus && name !== "Sun") {
+          return;
+      }
+
       let type = "currentPosition";
       if (positionData["tar.type"] === "CelestialBody" && positionData["tar.name"] === name) {
         type = "targetBodyCurrentPosition";

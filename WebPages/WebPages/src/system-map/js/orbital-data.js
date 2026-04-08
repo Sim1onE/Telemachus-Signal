@@ -30,9 +30,6 @@ class SystemOrbitalPositionData {
         const store = this.datalink.lastDatalinkData || {};
 
         // v21.8.185: Monotonic Master Clock Sync
-        // We ensure the rendering time ONLY moves forward. 
-        // If a server packet arrives with a latent (older) timestamp, Math.max() 
-        // will preserve the newer extrapolated time from our local smooth_tick.
         if (ut) {
             store["currentUniversalTime"] = Math.max(store["currentUniversalTime"] || 0, ut);
         }
@@ -42,7 +39,6 @@ class SystemOrbitalPositionData {
             store.referenceBodies = Object.assign(store.referenceBodies || {}, data.referenceBodies);
         }
 
-        // v21.8.135: Mapping dynamic keys that might be in standard telemetry
         ["vesselBody", "vesselCurrentPosition", "targetCurrentPosition", "targetName", "targetBody"].forEach(key => {
             if (data[key] !== undefined) store[key] = data[key];
         });
@@ -60,9 +56,6 @@ class SystemOrbitalPositionData {
         }
     }
 
-    /**
-     * v21.8: Handles the automatic push of all celestial body metadata and UI population.
-     */
     handleOrbitMetadata(msg) {
         const data = msg.data;
         if (!data || !data.bodies) return;
@@ -99,7 +92,6 @@ class SystemOrbitalPositionData {
             store.color = body.color || null;
         });
 
-        // v21.8.19: Dynamic Hierarchical UI Population 
         const focusSelector = document.getElementById('focus-selector');
         const toggleContainer = document.getElementById('body-toggles');
 
@@ -140,12 +132,21 @@ class SystemOrbitalPositionData {
         if (toggleContainer) {
             toggleContainer.innerHTML = '';
             flatOrder.forEach(({ name, depth }) => {
-                if (name === 'Sun') return;
+                // v22.3.2: Sun now included hierarchically
                 const row = document.createElement('div');
                 row.className = 'toggle-row';
                 row.style.paddingLeft = (depth * 12) + 'px';
                 const prefix = depth > 1 ? '↳ ' : (depth === 1 ? '– ' : '');
                 row.innerHTML = `<label><input type="checkbox" checked data-body="${name}"> ${prefix}${name.toUpperCase()}</label>`;
+                
+                const chk = row.querySelector('input');
+                chk.addEventListener('change', (e) => {
+                    if (window.SystemMap) {
+                        window.SystemMap.bodyToggles[name] = e.target.checked;
+                        window.SystemMap.triggerRender();
+                    }
+                });
+
                 toggleContainer.appendChild(row);
             });
             window.dispatchEvent(new CustomEvent('system-map-ui-ready'));
@@ -156,32 +157,20 @@ class SystemOrbitalPositionData {
         }
 
         this.planetStaticOrbitsFetched = true;
-        console.log("[SystemMap] All celestial metadata and UI live.");
     }
 
-    /**
-     * v21.8: WebSocket handler for the new Batch Orbit API.
-     */
     handleOrbitBatch(msg) {
         if (!this.planetStaticOrbitsFetched) return;
         const batch = msg.data;
         if (!batch) return;
 
         const type = msg.type;
-        if (!type) {
-            console.error("[SystemMap] CRITICAL: Received malformed packet without 'type'!", msg);
-            return;
-        }
-        console.log(`[SystemMap] Rx "${type}". UT: ${msg.ut.toFixed(1)}`);
-
-        // v21.8.20: Direct In-Place Update of the canonical store.
         const positionData = this.datalink.lastDatalinkData || {};
         positionData.referenceBodies = positionData.referenceBodies || {};
 
         positionData["currentUniversalTime"] = msg.ut;
         positionData["meridianOffset"] = batch.meridianOffset;
 
-        // 1. Map Vessel (Direct Array Storage - Restored legacy keys for Rendezvous compat)
         if (batch.vessel) {
             positionData["o.orbitPatches"] = batch.vessel.patches;
             positionData["vesselBody"] = batch.vessel.body;
@@ -191,8 +180,6 @@ class SystemOrbitalPositionData {
             const patches = batch.vessel.patches || [];
             if (patches.length > 0) {
                 const firstPatch = patches[0];
-
-                // v21.8.72: Mapping elements to legacy keys for Rendezvous logic
                 positionData['o.sma'] = firstPatch.sma;
                 positionData['o.period'] = firstPatch.period;
                 positionData['o.eccentricity'] = firstPatch.ecc;
@@ -206,7 +193,6 @@ class SystemOrbitalPositionData {
             }
         }
 
-        // 2. Map Target (Restored legacy compatibility)
         if (batch.target) {
             positionData["targetCurrentPosition"] = { relativePosition: batch.target.position };
             positionData["tar.o.orbitPatches"] = batch.target.patches;
@@ -216,8 +202,6 @@ class SystemOrbitalPositionData {
             const patches = batch.target.patches || [];
             if (patches.length > 0) {
                 const firstPatch = patches[0];
-
-                // v21.8.72: Mapping target elements for Rendezvous logic
                 positionData['tar.o.sma'] = firstPatch.sma;
                 positionData['tar.o.period'] = firstPatch.period;
                 positionData['tar.o.eccentricity'] = firstPatch.ecc;
@@ -231,12 +215,10 @@ class SystemOrbitalPositionData {
             }
         }
 
-        // 3. Map Maneuvers
         if (batch.maneuvers) {
             positionData["o.maneuverNodes"] = batch.maneuvers;
         }
 
-        // Persist to global store
         if (this.datalink.lastDatalinkData) {
             Object.assign(this.datalink.lastDatalinkData, positionData);
         }
@@ -272,7 +254,6 @@ class SystemOrbitalPositionData {
         ]);
 
         if (this.datalink.signalLink) {
-            // v22.1: Consolidate all delayed/synced stream handling into the release loop
             this.datalink.signalLink.on('datalink_update', (msg) => {
                 if (msg.type === 'orbit') {
                     this.handleOrbitBatch(msg);
@@ -283,16 +264,13 @@ class SystemOrbitalPositionData {
 
             this.datalink.signalLink.on('orbit_metadata', (msg) => this.handleOrbitMetadata(msg));
 
-            // v21.8.140: Hook into smooth local extrapolation tick (60Hz)
             this.datalink.signalLink.on('smooth_tick', (msg) => {
                 this.recalculate({ ut: msg.ut, data: {} });
             });
 
             const subscribe = () => {
                 this.datalink.signalLink.subscribeOrbit({
-                    resolution: this.options.numberOfSegments,
-                    maxRate: 100,     // v22.1: Active rate (1Hz)
-                    minRate: 10000  // v22.1: Heartbeat rate (10s) for testing
+                    resolution: this.options.numberOfSegments
                 });
             };
 
@@ -302,7 +280,6 @@ class SystemOrbitalPositionData {
                 this.datalink.signalLink.on('open', subscribe);
             }
         }
-
     }
 }
 
