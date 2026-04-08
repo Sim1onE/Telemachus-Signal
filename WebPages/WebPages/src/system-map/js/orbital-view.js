@@ -332,7 +332,7 @@ class SystemOrbitalMap {
     // v21.8.150: Bridge new formatter schema to legacy View API.
     // The formatter now emits referenceBodies[] and vessels[] (flat arrays).
     // Normalize them into the shapes that downstream methods expect.
-    const bodies = formattedData.referenceBodies || formattedData.bodies || [];
+    const bodies = formattedData.referenceBodies || [];
 
     const vesselsList = Array.isArray(formattedData.vessels) ? formattedData.vessels : [];
     const activeVessel = vesselsList.find(v => v.type === 'currentVessel') || null;
@@ -566,7 +566,7 @@ class SystemOrbitalMap {
         var id = isFirstForType ? "patch-" + pType + "-active" : "patch-" + pType + "-" + Math.floor(patch.startUT || 0);
         seenPatches[id] = true;
 
-        var points = patch.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
+        var points = patch.orbitPath.map(p => new THREE.Vector3(p.x, p.y, p.z));
         let line = this.registry.orbits[id];
 
         let colorVal = (pType === "targetVessel") ? this.targetColor : (isFirstForType ? "#00f2ff" : this.orbitPathColors[(typeCounts[pType] - 1) % 10]);
@@ -619,7 +619,7 @@ class SystemOrbitalMap {
         // This prevents object recycling during UT slides.
         var patchId = id + "-patch-" + j;
         seenNodes[patchId] = true;
-        var points = patch.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
+        var points = patch.orbitPath.map(p => new THREE.Vector3(p.x, p.y, p.z));
         let line = this.registry.patches[patchId];
         if (!line) {
           var geometry = this.createGeometryFromPoints(points, 256);
@@ -672,8 +672,8 @@ class SystemOrbitalMap {
       // Fallback to first patch if outside range (e.g. initial setup)
       if (!selectedPatch && targetPatches.length > 0) selectedPatch = targetPatches[0];
 
-      if (selectedPatch && selectedPatch.truePositions) {
-        const points = selectedPatch.truePositions;
+      if (selectedPatch && selectedPatch.orbitPath) {
+        const points = selectedPatch.orbitPath;
         const duration = selectedPatch.endUT - selectedPatch.startUT;
         const progress = (targetUT - selectedPatch.startUT) / (duration || 1);
         const index = Math.min(points.length - 1, Math.max(0, Math.floor(progress * points.length)));
@@ -706,9 +706,8 @@ class SystemOrbitalMap {
         if (this.registry.paths[name]) { this.group.remove(this.registry.paths[name]); delete this.registry.paths[name]; }
         continue;
       }
-      const pathPoints = path.truePositions || path.orbitPath;
-      if (!pathPoints || pathPoints.length < 2) continue;
-      var points = pathPoints.map(p => new THREE.Vector3(p.x, p.y, p.z));
+      if (!path.orbitPath || path.orbitPath.length < 2) continue;
+      var points = path.orbitPath.map(p => new THREE.Vector3(p.x, p.y, p.z));
       let line = this.registry.paths[name];
       if (!line) {
         var geometry = this.createGeometryFromPoints(points, 256);
@@ -803,27 +802,20 @@ class SystemOrbitalMap {
       focusRadius = this.bodyRadii[this.GUIParameters.focusBody] || 600000;
     }
 
-    // v21.8.20: Camera-Follow with Preserved Offset (KSP Map View Style)
-    // Every frame we shift camera+target by the same delta, preserving user's orbit rotation.
+    // v21.8.155: Floating Origin Camera Logic
+    // Since the focus target is now always at (0,0,0) via the Formatter,
+    // we don't need to chase it. The camera stays fixed relative to the origin.
     this.group.position.set(0, 0, 0);
 
     if (!this.cameraSet) {
-      // First frame: initialize camera position and target
       var offset = (focusRadius * 15 + this.vehicleLength * 2);
       this.camera.position.set(focusPos.x + offset, focusPos.y + offset / 2, focusPos.z + offset);
-      this.controls.target.copy(focusPos);
+      this.controls.target.set(0, 0, 0); // Always center on origin
       this.controls.update();
-      this._lastFocusPos = focusPos.clone();
       this.cameraSet = true;
     } else {
-      // Subsequent frames: shift camera by the delta of the focus body movement
-      // This keeps the same viewing angle while following the target
-      if (this._lastFocusPos) {
-        const delta = focusPos.clone().sub(this._lastFocusPos);
-        this.camera.position.add(delta);
-        this.controls.target.copy(focusPos);
-      }
-      this._lastFocusPos = focusPos.clone();
+      // Native OrbitControls update around (0,0,0)
+      this.controls.target.set(0, 0, 0);
     }
 
     // === DIAGNOSTIC LOGGING (every 120 frames) ===

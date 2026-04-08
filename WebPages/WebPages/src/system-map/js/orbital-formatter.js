@@ -195,7 +195,6 @@ class SystemPositionDataFormatter {
         truePosition: truePosition,
         gravParameter: info.gravParameter,
         orbitPath: worldOrbitPoints,
-        truePositions: worldOrbitPoints, // v21.8.150: backward compat with updateReferenceBodyOrbitPaths
         rotationAngle: orbitInfo.rotationAngle || (positionData.bodyRotations && positionData.bodyRotations[name]) || 0,
         initialRotation: orbitInfo.initialRotation || 0,
         atmosphericRadius: (this.datalink.getOrbitalBodyInfo(name) || {}).atmosphericRadius || 0,
@@ -234,7 +233,7 @@ class SystemPositionDataFormatter {
 
       formattedData.referenceBodyPaths.push({
         referenceBodyName: name,
-        truePositions: transformedPositions,
+        orbitPath: transformedPositions,
         color: (this.datalink.getOrbitalBodyInfo(name) || {}).color || '#ffffff'
       });
     });
@@ -415,7 +414,7 @@ class SystemPositionDataFormatter {
       if (!orbitPatch.points || orbitPatch.points.length < 2) return;
 
       const patch = {
-        truePositions: [],
+        orbitPath: [],
         parentType: parentType,
         referenceBody: orbitPatch.referenceBody,
         startUT: orbitPatch.startUT,
@@ -432,7 +431,7 @@ class SystemPositionDataFormatter {
           y: patchBodyAbsolutePos.y + rawPos.y,
           z: patchBodyAbsolutePos.z + rawPos.z
         };
-        patch.truePositions.push(this.formatTruePositionVector(absolutePatchPos));
+        patch.orbitPath.push(this.formatTruePositionVector(absolutePatchPos));
       });
 
       formattedOrbitPatches.push(patch);
@@ -477,7 +476,7 @@ class SystemPositionDataFormatter {
       if (!orbitPatch.points || orbitPatch.points.length < 2) return;
 
       const patch = {
-        truePositions: [],
+        orbitPath: [],
         referenceBody: orbitPatch.referenceBody,
         startUT: orbitPatch.startUT,
         endUT: orbitPatch.endUT,
@@ -493,7 +492,7 @@ class SystemPositionDataFormatter {
           y: patchBodyAbsolutePos.y + rawPos.y,
           z: patchBodyAbsolutePos.z + rawPos.z
         };
-        patch.truePositions.push(this.formatTruePositionVector(absolutePatchPos));
+        patch.orbitPath.push(this.formatTruePositionVector(absolutePatchPos));
       });
       formattedOrbitPatches.push(patch);
     });
@@ -503,18 +502,16 @@ class SystemPositionDataFormatter {
   formatTruePositionVector(vector) {
     if (!vector) return { x: 0, y: 0, z: 0 };
 
-    // v21.8.41: Unified Transformation Matrix
-    // Maps Standard Righthanded Orbital Frame (X, Y, Z_elevation) 
-    // to Three.js Righthanded Space (X, Y_elevation, -Z_north)
+    // v21.8.155: Floating Origin Translation
+    // Subtract the absolute position of the focus target before transformation.
+    // This keeps the center of interest at (0,0,0) and eliminates GPU jitter.
+    const focus = this.focusAbsolutePos || { x: 0, y: 0, z: 0 };
 
-    // 1. KSP X (East) -> Map X
-    // 2. KSP Z (Elevation) -> Map Y (Up)
-    // 3. KSP Y (North) -> Map -Z (Flipping depth for handedness consistency)
+    const x = (vector.x || 0) - focus.x;
+    const y = (vector.y || 0) - focus.y;
+    const z = (vector.z || 0) - focus.z;
 
-    const x = (vector.x || 0);
-    const y = (vector.y || 0);
-    const z = (vector.z || 0);
-
+    // Standard Righthanded Orbital (X,Y,Z_elev) -> Three.js (X, Z_elev, -Y_north)
     return { x: x, y: z, z: -y };
   }
 
