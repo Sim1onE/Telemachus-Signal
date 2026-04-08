@@ -272,7 +272,15 @@ class SystemOrbitalPositionData {
         ]);
 
         if (this.datalink.signalLink) {
-            this.datalink.signalLink.on('orbit', (msg) => this.handleOrbitBatch(msg));
+            // v22.1: Consolidate all delayed/synced stream handling into the release loop
+            this.datalink.signalLink.on('datalink_update', (msg) => {
+                if (msg.type === 'orbit') {
+                    this.handleOrbitBatch(msg);
+                } else if (msg.type === 'telemetry') {
+                    this.recalculate(msg);
+                }
+            });
+
             this.datalink.signalLink.on('orbit_metadata', (msg) => this.handleOrbitMetadata(msg));
 
             // v21.8.140: Hook into smooth local extrapolation tick (60Hz)
@@ -295,9 +303,6 @@ class SystemOrbitalPositionData {
             }
         }
 
-        this.datalink.addReceiverFunction((data) => {
-            this.recalculate({ type: 'telemetry', data: data });
-        });
     }
 }
 

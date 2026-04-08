@@ -689,26 +689,26 @@ class SystemOrbitalMap {
         // v21.8.215: High-Precision Utility Bridge
         // We use the official Formatter logic to ensure rotation and axis alignment
         if (selectedPatch.elements && selectedPatch.elements.sma && this.positionDataFormatter) {
-           const solvedRel = this.positionDataFormatter.solveKeplerAnalytical(selectedPatch.elements, targetUT);
-           if (solvedRel) {
-              const bodyName = selectedPatch.referenceBody || "Kerbin";
-              const parentAbs = this.positionDataFormatter.getAbsolutePos(bodyName);
-              const absPos = {
-                 x: parentAbs.x + solvedRel.x,
-                 y: parentAbs.y + solvedRel.y,
-                 z: parentAbs.z + solvedRel.z
-              };
-              // This applies axial transformation {x, z, -y} and focal shift automatically
-              foundPoint = this.positionDataFormatter.formatTruePositionVector(absPos);
-           }
+          const solvedRel = this.positionDataFormatter.solveKeplerAnalytical(selectedPatch.elements, targetUT);
+          if (solvedRel) {
+            const bodyName = selectedPatch.referenceBody || "Kerbin";
+            const parentAbs = this.positionDataFormatter.getAbsolutePos(bodyName);
+            const absPos = {
+              x: parentAbs.x + solvedRel.x,
+              y: parentAbs.y + solvedRel.y,
+              z: parentAbs.z + solvedRel.z
+            };
+            // This applies axial transformation {x, z, -y} and focal shift automatically
+            foundPoint = this.positionDataFormatter.formatTruePositionVector(absPos);
+          }
         }
 
         if (!foundPoint) {
-           const points = selectedPatch.orbitPath;
-           const duration = selectedPatch.endUT - selectedPatch.startUT;
-           const progress = (targetUT - selectedPatch.startUT) / (duration || 1);
-           const index = Math.min(points.length - 1, Math.max(0, Math.floor(progress * points.length)));
-           foundPoint = points[index];
+          const points = selectedPatch.orbitPath;
+          const duration = selectedPatch.endUT - selectedPatch.startUT;
+          const progress = (targetUT - selectedPatch.startUT) / (duration || 1);
+          const index = Math.min(points.length - 1, Math.max(0, Math.floor(progress * points.length)));
+          foundPoint = points[index];
         }
       }
 
@@ -848,35 +848,6 @@ class SystemOrbitalMap {
     } else {
       // Native OrbitControls update around (0,0,0)
       this.controls.target.set(0, 0, 0);
-    }
-
-    // === DIAGNOSTIC LOGGING (every 120 frames) ===
-    if (!this._diagFrame) this._diagFrame = 0;
-    this._diagFrame++;
-    if (this._diagFrame % 120 === 0 && formattedData) {
-      const ut = formattedData.currentUniversalTime;
-      const bodies = formattedData.referenceBodies || [];
-
-      ['Kerbin', 'Jool', 'Eve', 'Duna'].forEach(name => {
-        const mesh = this.registry.bodies[name];
-        const fmtBody = bodies.find(b => b.name === name);
-        if (mesh && fmtBody) {
-          console.log(
-            `[DIAG] UT=${ut?.toFixed(0)} | ${name} | ` +
-            `scene=[${mesh.position.x.toExponential(3)}, ${mesh.position.y.toExponential(3)}, ${mesh.position.z.toExponential(3)}] | ` +
-            `formatted=[${fmtBody.truePosition?.x.toExponential(3)}, ${fmtBody.truePosition?.y.toExponential(3)}, ${fmtBody.truePosition?.z.toExponential(3)}]`
-          );
-        }
-      });
-
-      const raw = this.datalink?.lastData;
-      if (raw && raw['referenceBodies']) {
-        const kerbinRaw = raw['referenceBodies']['Kerbin'];
-        if (kerbinRaw && kerbinRaw.currentTruePosition) {
-          const p = kerbinRaw.currentTruePosition;
-          console.log(`[DIAG] UT=${ut?.toFixed(0)} | Kerbin RAW currentTruePosition=[${p.x.toExponential(3)}, ${p.y.toExponential(3)}, ${p.z.toExponential(3)}]`);
-        }
-      }
     }
   }
 

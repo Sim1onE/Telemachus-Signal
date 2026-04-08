@@ -28,8 +28,10 @@ class DownlinkSynchronizer {
         while (this.queue.length > 0 && this.queue[0].ut <= masterTimecode) {
             const p = this.queue.shift(); // The packet is now GONE from the queue forever.
 
-            // ANTI-LOOP BARRIER: Never play the same (or older) UT twice in one session.
-            if (this.lastPoppedUT !== undefined && p.ut <= this.lastPoppedUT) {
+            // ANTI-LOOP BARRIER: Never play older UT twice in one session.
+            // v16.32 Fix: Changed from <= to < to allow multiple packet types (telemetry, orbit) 
+            // from the same game tick to be released together.
+            if (this.lastPoppedUT !== undefined && p.ut < this.lastPoppedUT) {
                 continue;
             }
 

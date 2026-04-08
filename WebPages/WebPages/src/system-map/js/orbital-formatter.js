@@ -220,10 +220,6 @@ class SystemPositionDataFormatter {
       this.focusAbsolutePos = getAbsolutePos(actualFocusKey);
     }
 
-    if (shouldLog) {
-      console.log(`[SystemMap] Frame Stats — Focus: ${actualFocusKey} | FocusPos: [${this.focusAbsolutePos.x.toExponential(2)}, ${this.focusAbsolutePos.y.toExponential(2)}, ${this.focusAbsolutePos.z.toExponential(2)}]`);
-    }
-
     this.getAbsolutePos = getAbsolutePos; // Expose for sub-formatters
 
     const isFullBatch = (type === 'orbit');
