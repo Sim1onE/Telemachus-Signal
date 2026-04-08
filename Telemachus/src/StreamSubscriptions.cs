@@ -315,6 +315,8 @@ namespace Telemachus
         private double _lastNodesChecksum = -1;
         private string _lastMainBody = "";
         private string _lastTargetName = "";
+        private double _lastDelay = -1;
+        private double _lastQuality = -1;
         private bool _forceFullUpdate = false;
 
         public override bool IsDirty()
@@ -345,6 +347,12 @@ namespace Telemachus
             bool dDrift = smaDiff > 100.0 && smaDiff > (Math.Abs(_lastSma) * 0.0005);
             if (!dDrift) dDrift = Math.Abs(v.orbit.eccentricity - _lastEcc) > 0.0001;
             if (dDrift) return true;
+
+            // 5. Signal State Change (v22.6: Immediate sync on delay/quality transition)
+            double currentDelay = TelemachusSignalManager.GetSignalDelay(v) ?? 0;
+            double currentQuality = TelemachusSignalManager.GetSignalQuality(v);
+            if (Math.Abs(currentDelay - _lastDelay) >= 0.1) return true;
+            if (Math.Abs(currentQuality - _lastQuality) >= 0.1) return true;
 
             return _forceFullUpdate;
         }
@@ -415,6 +423,8 @@ namespace Telemachus
             _lastEcc = v.orbit.eccentricity;
             _lastInc = v.orbit.inclination;
             _lastMainBody = v.mainBody.name;
+            _lastDelay = TelemachusSignalManager.GetSignalDelay(v) ?? 0;
+            _lastQuality = TelemachusSignalManager.GetSignalQuality(v);
 
             orbitData["vessel"] = vesselData;
 
