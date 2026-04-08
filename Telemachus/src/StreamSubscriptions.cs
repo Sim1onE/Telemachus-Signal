@@ -397,29 +397,23 @@ namespace Telemachus
             bool dDrift = smaDiff > (Math.Abs(_lastSma) * 0.0005);
             if (!dDrift) dDrift = Math.Abs(v.orbit.eccentricity - _lastEcc) > 0.0001;
 
-            bool isFullUpdate = dSOI || dNodes || dTarget || dDrift || _forceFullUpdate;
-
             var orbitData = new Dictionary<string, object>();
-            orbitData["isFullUpdate"] = isFullUpdate;
             orbitData["meridianOffset"] = GetMeridianAngle();
 
             // 1. Vessel Data
             Vector3d vesselPos = v.orbit.getRelativePositionAtUT(currentUT);
             var vesselData = new Dictionary<string, object> {
                 { "position", new Dictionary<string, double> { { "x", vesselPos.x }, { "y", vesselPos.y }, { "z", vesselPos.z } } },
-                { "body", v.mainBody.name }
+                { "body", v.mainBody.name },
+                { "patches", GetOrbitGroups(v.orbit, currentUT, v) }
             };
 
-            if (isFullUpdate)
-            {
-                vesselData["patches"] = GetOrbitGroups(v.orbit, currentUT, v);
+            // Track state for next dirty check (Always update when sending Full)
+            _lastSma = v.orbit.semiMajorAxis;
+            _lastEcc = v.orbit.eccentricity;
+            _lastInc = v.orbit.inclination;
+            _lastMainBody = v.mainBody.name;
 
-                // Track state for next dirty check
-                _lastSma = v.orbit.semiMajorAxis;
-                _lastEcc = v.orbit.eccentricity;
-                _lastInc = v.orbit.inclination;
-                _lastMainBody = v.mainBody.name;
-            }
             orbitData["vessel"] = vesselData;
 
             // 2. Target Data
@@ -429,12 +423,9 @@ namespace Telemachus
                 var targetData = new Dictionary<string, object> {
                     { "name", target.GetName() },
                     { "position", new Dictionary<string, double> { { "x", targetPos.x }, { "y", targetPos.y }, { "z", targetPos.z } } },
-                    { "body", target.GetOrbit().referenceBody.name }
+                    { "body", target.GetOrbit().referenceBody.name },
+                    { "patches", GetOrbitGroups(target.GetOrbit(), currentUT, v) }
                 };
-                if (isFullUpdate)
-                {
-                    targetData["patches"] = GetOrbitGroups(target.GetOrbit(), currentUT, v);
-                }
                 orbitData["target"] = targetData;
                 _lastTargetName = target.GetName();
             }
@@ -448,19 +439,15 @@ namespace Telemachus
             if (v.patchedConicSolver != null && v.patchedConicSolver.maneuverNodes.Count > 0)
             {
                 var maneuvers = new List<object>();
-                // checksum already initialized at top
+                // checksum already calculated at top
                 foreach (var node in v.patchedConicSolver.maneuverNodes)
                 {
-                    // checksum already calculated at top of Execute()
                     var nodeData = new Dictionary<string, object> {
                         { "ut", node.UT },
                         { "deltaV", new Dictionary<string, double> { { "x", node.DeltaV.x }, { "y", node.DeltaV.y }, { "z", node.DeltaV.z } } },
-                        { "truePosition", new Dictionary<string, double> { { "x", node.nextPatch.getRelativePositionAtUT(node.UT).x }, { "y", node.nextPatch.getRelativePositionAtUT(node.UT).y }, { "z", node.nextPatch.getRelativePositionAtUT(node.UT).z } } }
+                        { "truePosition", new Dictionary<string, double> { { "x", node.nextPatch.getRelativePositionAtUT(node.UT).x }, { "y", node.nextPatch.getRelativePositionAtUT(node.UT).y }, { "z", node.nextPatch.getRelativePositionAtUT(node.UT).z } } },
+                        { "patches", GetOrbitGroups(node.nextPatch, node.UT, v) }
                     };
-                    if (isFullUpdate)
-                    {
-                        nodeData["patches"] = GetOrbitGroups(node.nextPatch, node.UT, v);
-                    }
                     maneuvers.Add(nodeData);
                 }
                 orbitData["maneuvers"] = maneuvers;
