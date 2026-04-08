@@ -202,6 +202,8 @@ class SystemOrbitalPositionData {
                 positionData['o.lan'] = firstPatch.lan;
                 positionData['o.argumentOfPeriapsis'] = firstPatch.argPe;
                 positionData['o.trueAnomaly'] = firstPatch.trueAnomaly || 0;
+                positionData['o.m0'] = firstPatch.m0 || 0;
+                positionData['o.epoch'] = firstPatch.epoch || 0;
             }
         }
 
@@ -224,6 +226,8 @@ class SystemOrbitalPositionData {
                 positionData['tar.o.lan'] = firstPatch.lan;
                 positionData['tar.o.argumentOfPeriapsis'] = firstPatch.argPe;
                 positionData['tar.o.trueAnomaly'] = firstPatch.trueAnomaly || 0;
+                positionData['tar.o.m0'] = firstPatch.m0 || 0;
+                positionData['tar.o.epoch'] = firstPatch.epoch || 0;
                 positionData['tar.o.orbitingBody'] = firstPatch.referenceBody;
             }
         }

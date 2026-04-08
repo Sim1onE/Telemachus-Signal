@@ -444,25 +444,41 @@ class SystemPositionDataFormatter {
     const nodes = positionData['o.maneuverNodes'];
     if (!nodes || !Array.isArray(nodes)) return;
 
+    // v21.8.155: Compute Vessel Orbit once for analytical node positioning
+    const vesselOrbit = {
+      sma: positionData['o.sma'],
+      ecc: positionData['o.eccentricity'],
+      inc: positionData['o.inclination'],
+      argPe: positionData['o.argumentOfPeriapsis'],
+      lan: positionData['o.lan'],
+      period: positionData['o.period'],
+      m0: positionData['o.m0'],
+      epoch: positionData['o.epoch']
+    };
+
     nodes.forEach(node => {
       let truePosition = null;
-      if (node.points && node.points.length > 0) {
+      // If we have valid orbital elements, solve the node position analytically
+      if (vesselOrbit.sma !== undefined) {
         const vesselBodyName = positionData["vesselBody"] || "Kerbin";
         const bodyAbsolutePos = this.getAbsolutePos(vesselBodyName);
-        const pt = node.points[0];
+
+        // Solve relative position on current orbit at node's UT
+        const relNodePos = this.solveKeplerAnalytical(vesselOrbit, node.startUT || node.UT);
+
         const nodeAbsolutePos = {
-          x: bodyAbsolutePos.x + pt.x,
-          y: bodyAbsolutePos.y + pt.y,
-          z: bodyAbsolutePos.z + pt.z
+          x: bodyAbsolutePos.x + relNodePos.x,
+          y: bodyAbsolutePos.y + relNodePos.y,
+          z: bodyAbsolutePos.z + relNodePos.z
         };
         truePosition = this.formatTruePositionVector(nodeAbsolutePos);
       }
 
       const manNode = {
         deltaV: node.deltaV || { x: 0, y: 0, z: 0 },
-        ut: node.startUT || 0,
+        ut: node.startUT || node.UT || 0,
         truePosition: truePosition,
-        orbitPatches: this.formatNodeOrbitPatches(positionData, node)
+        orbitPath: this.formatNodeOrbitPatches(positionData, node)
       };
       formattedData["maneuverNodes"].push(manNode);
     });
