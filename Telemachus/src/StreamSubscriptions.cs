@@ -313,15 +313,31 @@ namespace Telemachus
             double currentUT = Planetarium.GetUniversalTime();
             var orbitData = new Dictionary<string, object>();
 
-            // 1. Vessel Orbit Patches
-            orbitData["vessel"] = GetOrbitGroups(v.orbit, currentUT, v);
+            // v21.8.131: Inject Meridian Offset directly into the batch
+            Vector3d inertialX = Planetarium.right;
+            Vector3d worldX = Vector3d.right;
+            Vector3d projInertialX = new Vector3d(inertialX.x, 0, inertialX.z).normalized;
+            double angle = Vector3d.Angle(worldX, projInertialX);
+            if (Vector3d.Cross(worldX, projInertialX).y < 0) angle = 360.0 - angle;
+            orbitData["meridianOffset"] = angle;
 
-            // 2. Target Orbit Patches
+            // 1. Vessel Data (Unification v21.8.130)
+            Vector3d vesselPos = v.orbit.getRelativePositionAtUT(currentUT);
+            orbitData["vessel"] = new Dictionary<string, object> {
+                { "position", new Dictionary<string, double> { { "x", vesselPos.x }, { "y", vesselPos.y }, { "z", vesselPos.z } } },
+                { "body", v.mainBody.name },
+                { "patches", GetOrbitGroups(v.orbit, currentUT, v) }
+            };
+
+            // 2. Target Data (Unification v21.8.130)
             var target = FlightGlobals.fetch.VesselTarget;
             if (target != null)
             {
+                Vector3d targetPos = target.GetOrbit().getRelativePositionAtUT(currentUT);
                 orbitData["target"] = new Dictionary<string, object> {
                     { "name", target.GetName() },
+                    { "position", new Dictionary<string, double> { { "x", targetPos.x }, { "y", targetPos.y }, { "z", targetPos.z } } },
+                    { "body", target.GetOrbit().referenceBody.name },
                     { "patches", GetOrbitGroups(target.GetOrbit(), currentUT, v) }
                 };
             }

@@ -69,14 +69,10 @@ class SystemPositionDataFormatter {
         orbit = this.datalink.getOrbitalBodyInfo(info.name) || {};
       }
 
-      // v21.8.46: High-Precision Keplerian Solver
+      // v21.8.150: Continuous Analytical Kepler Solver (replaces discrete array sampling)
+      // This eliminates the "tac" stutter caused by discrete 128-point quantization.
       if (orbit && orbit.sma !== undefined && orbit.period) {
-        const rawPoints = this.generateOrbitFromKeplerian(
-          orbit.sma, orbit.eccentricity || orbit.ecc || 0,
-          orbit.inclination || orbit.inc || 0,
-          orbit.argPe || 0, orbit.lan || 0
-        );
-        return this.getPointAtUT(rawPoints, orbit, ut);
+        return this.solveKeplerAnalytical(orbit, ut);
       }
 
       // Fallback to static point or sample
@@ -143,10 +139,13 @@ class SystemPositionDataFormatter {
     this.formatReferenceBodies(positionData, formattedData);
     this.formatCurrentVessel(positionData, formattedData);
     this.formatTargetVessel(positionData, formattedData);
+
+    // v21.8.150: Orbit patches recomputed every frame so the trail follows
+    // Kerbin analytically (the body pos used in getAbsolutePos is smooth).
+    // formatReferenceBodyPaths is dead code (View doesn't read it) — removed.
     this.formatOrbitalPatches(positionData, formattedData);
     this.formatManeuverNodes(positionData, formattedData);
     this.formatTargetOrbitPatches(positionData, formattedData);
-    this.formatReferenceBodyPaths(positionData, formattedData);
 
     if (this.options.onFormat) this.options.onFormat(formattedData);
   }
@@ -196,6 +195,7 @@ class SystemPositionDataFormatter {
         truePosition: truePosition,
         gravParameter: info.gravParameter,
         orbitPath: worldOrbitPoints,
+        truePositions: worldOrbitPoints, // v21.8.150: backward compat with updateReferenceBodyOrbitPaths
         rotationAngle: orbitInfo.rotationAngle || (positionData.bodyRotations && positionData.bodyRotations[name]) || 0,
         initialRotation: orbitInfo.initialRotation || 0,
         atmosphericRadius: (this.datalink.getOrbitalBodyInfo(name) || {}).atmosphericRadius || 0,
@@ -242,6 +242,11 @@ class SystemPositionDataFormatter {
 
   generateOrbitFromKeplerian(sma, ecc, inc, argPe, lan, skipFix = false) {
     if (!sma) return [];
+    // v21.8.150: Defensive defaults — undefined params produce NaN coordinates
+    ecc = ecc || 0;
+    inc = inc || 0;
+    argPe = argPe || 0;
+    lan = lan || 0;
     const points = [];
     const segments = 128;
 
@@ -279,42 +284,95 @@ class SystemPositionDataFormatter {
     return points;
   }
 
+  /**
+   * v21.8.150: Analytical Kepler Solver (Newton-Raphson)
+   * Computes the exact orbital position for a given UT without discrete array sampling.
+   * This eliminates the "tac" stutter that occurred because getPointAtUT was limited
+   * to 129 discrete positions, causing planets to freeze for minutes/hours at a time.
+   */
+  solveKeplerAnalytical(orbit, ut) {
+    const sma   = orbit.sma;
+    const ecc   = orbit.eccentricity || orbit.ecc || 0;
+    const inc   = (orbit.inclination || orbit.inc || 0) * Math.PI / 180;
+    const argPe = (orbit.argPe || 0) * Math.PI / 180;
+    const period = orbit.period || 1;
+    const m0    = orbit.m0 || 0;
+    const epoch = orbit.epoch || 0;
+
+    // Meridian offset (same logic as generateOrbitFromKeplerian)
+    let offsetDeg = 0;
+    const lastData = this.datalink.lastDatalinkData || {};
+    if (lastData["pl.meridianOffset"] !== undefined) {
+      offsetDeg = (360 - lastData["pl.meridianOffset"]) % 360;
+    }
+    const lan = ((orbit.lan || 0) + offsetDeg) * Math.PI / 180;
+
+    // 1. Mean Anomaly at UT
+    const utOffset = (ut - epoch) % period;
+    const n = (2 * Math.PI) / period;
+    let M = m0 + n * utOffset;
+    // Normalize M to [0, 2π]
+    M = M % (2 * Math.PI);
+    if (M < 0) M += 2 * Math.PI;
+
+    // 2. Solve Kepler's Equation: M = E - e*sin(E) via Newton-Raphson
+    let E = M; // Initial guess
+    for (let i = 0; i < 10; i++) {
+      const dE = (M - E + ecc * Math.sin(E)) / (1 - ecc * Math.cos(E));
+      E += dE;
+      if (Math.abs(dE) < 1e-10) break;
+    }
+
+    // 3. True Anomaly from Eccentric Anomaly
+    const sinV = (Math.sqrt(1 - ecc * ecc) * Math.sin(E)) / (1 - ecc * Math.cos(E));
+    const cosV = (Math.cos(E) - ecc) / (1 - ecc * Math.cos(E));
+    const v = Math.atan2(sinV, cosV); // True anomaly
+
+    // 4. Radial distance
+    const r = sma * (1 - ecc * Math.cos(E));
+
+    // 5. Position in orbital plane
+    const theta = argPe + v;
+    const cosLan = Math.cos(lan), sinLan = Math.sin(lan);
+    const cosInc = Math.cos(inc), sinInc = Math.sin(inc);
+
+    const x = r * (cosLan * Math.cos(theta) - sinLan * Math.sin(theta) * cosInc);
+    const y = r * (sinLan * Math.cos(theta) + cosLan * Math.sin(theta) * cosInc);
+    const z = r * (sinInc * Math.sin(theta));
+
+    return { x, y, z };
+  }
+
+  /**
+   * Legacy: kept only for sampling the visual orbit line geometry.
+   * NOT used for body position anymore.
+   */
   getPointAtUT(points, orbit, ut) {
     if (!points || points.length === 0) return { x: 0, y: 0, z: 0 };
-
-    // v21.8.21: High-Precision Physical Orbital Clock
-    // Uses Period, M0 (Mean Anomaly at Epoch) and Epoch from KSP for absolute sync.
     const period = orbit.period || 1;
     const m0 = orbit.m0 || 0;
     const epoch = orbit.epoch || 0;
-
-    // Mean Anomaly (M) = M0 + n * (UT - Epoch)
-    // v21.8.33: High-Speed Precision Normalization
-    // Normalizing (UT - Epoch) against the Period keeps the number small for 64-bit precision safety.
     const utOffset = (ut - epoch) % period;
     const n = (2 * Math.PI) / period;
     const meanAnomaly = m0 + n * utOffset;
-
-    // Progress (0 to 1) for point indexing
     let progress = (meanAnomaly / (2 * Math.PI)) % 1;
     if (progress < 0) progress += 1;
-
     const index = Math.floor(progress * (points.length - 1));
     return points[index];
   }
 
   formatCurrentVessel(positionData, formattedData) {
     const vesselBodyName = positionData["vesselBody"] || "Kerbin";
-    
+
     // v21.8.125: Back to basics. Use ONLY the RAW position to avoid jumping and rotation errors.
     if (!positionData["vesselCurrentPosition"] || !positionData["vesselCurrentPosition"]["relativePosition"]) return;
 
     const bodyAbsolutePos = this.getAbsolutePos(vesselBodyName);
     const vesselRelPos = positionData["vesselCurrentPosition"]["relativePosition"];
-    const vesselAbsolutePos = { 
-        x: bodyAbsolutePos.x + vesselRelPos.x, 
-        y: bodyAbsolutePos.y + vesselRelPos.y, 
-        z: bodyAbsolutePos.z + vesselRelPos.z 
+    const vesselAbsolutePos = {
+      x: bodyAbsolutePos.x + vesselRelPos.x,
+      y: bodyAbsolutePos.y + vesselRelPos.y,
+      z: bodyAbsolutePos.z + vesselRelPos.z
     };
 
     formattedData["vessels"].push({

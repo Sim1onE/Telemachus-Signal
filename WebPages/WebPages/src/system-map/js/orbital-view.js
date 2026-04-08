@@ -320,26 +320,45 @@ class SystemOrbitalMap {
   render(formattedData) {
     if (!formattedData) return;
     var ut = formattedData.currentUniversalTime;
+    const type = formattedData.type;
 
-    // v21.8.25: General stream filtering. 
-    // Only 'orbit' packets trigger a full geometry recalculation (planets, orbits, vessel meshes).
-    // Standard telemetry or ticks only update the HUD and Camera.
-    const isFullBatch = (formattedData.type === 'orbit');
+    // v21.8.135: Geographic vs Topological Pipeline Split
+    const isFullBatch = (type === 'orbit');
 
     if (ut === this.lastRenderUT && !this.isSliderInteracting && !isFullBatch) return;
     this.lastRenderUT = ut;
     this.lastFormattedData = formattedData;
 
-    if (isFullBatch) {
-      this.updateReferenceBodyGeometry(formattedData);
-      this.updateVesselGeometry(formattedData);
-      this.updateOrbitPathGeometry(formattedData);
-      this.updateManeuverNodeGeometry(formattedData);
-      this.updateReferenceBodyOrbitPaths(formattedData);
-    }
+    // v21.8.150: Bridge new formatter schema to legacy View API.
+    // The formatter now emits referenceBodies[] and vessels[] (flat arrays).
+    // Normalize them into the shapes that downstream methods expect.
+    const bodies = formattedData.referenceBodies || formattedData.bodies || [];
 
-    this.updateCamera(formattedData);
-    this.updateHUD(formattedData);
+    const vesselsList = Array.isArray(formattedData.vessels) ? formattedData.vessels : [];
+    const activeVessel = vesselsList.find(v => v.type === 'currentVessel') || null;
+    const targetVessel = vesselsList.find(v => v.type === 'targetVessel') || null;
+
+    // Reconstruct legacy vesselData shape expected by updateVesselGeometry etc.
+    const vesselData = {
+      active: activeVessel ? Object.assign({ id: 'vessel-active', orbitPatches: formattedData.orbitPatches ? formattedData.orbitPatches.filter(p => p.parentType === 'currentVessel') : [], maneuverNodes: formattedData.maneuverNodes || [] }, activeVessel) : { id: 'vessel-active', truePosition: null, orbitPatches: [], maneuverNodes: [] },
+      target: targetVessel ? Object.assign({ id: 'vessel-target', orbitPatches: formattedData.orbitPatches ? formattedData.orbitPatches.filter(p => p.parentType === 'targetVessel') : [] }, targetVessel) : null
+    };
+
+    // Pipeline A: Geographic State (Every Frame - Analytical Smoothness)
+    this.updateReferenceBodyGeometry(bodies);
+    this.updateReferenceBodyOrbitPaths(bodies);
+    this.updateVesselGeometry(vesselData);
+    // v21.8.150: Orbit patches also in Pipeline A \u2014 the formatter recomputes
+    // absolute patch positions every frame using the analytical body pos.
+    // This makes the vessel trail follow Kerbin smoothly instead of jumping.
+    this.updateOrbitPathGeometry(vesselData);
+    this.updateCamera(Object.assign({}, formattedData, { bodies: bodies }));
+    this.updateHUD(Object.assign({}, formattedData, { vessels: vesselData }));
+
+    // Pipeline B: Topological State (Only on 'orbit' batches - Visual Stability)
+    if (isFullBatch) {
+      this.updateManeuverNodeGeometry(vesselData.active, ut);
+    }
   }
 
   updateHUD(formattedData) {
@@ -417,8 +436,8 @@ class SystemOrbitalMap {
         if (normLabel) normLabel.innerText = this.lastNodeData.deltaV.y.toFixed(1);
         if (radLabel) radLabel.innerText = this.lastNodeData.deltaV.x.toFixed(1);
 
-        if (predElem && formattedData.maneuverNodes[this.activeNodeIndex]) {
-          const node = formattedData.maneuverNodes[this.activeNodeIndex];
+        if (predElem && formattedData.vessels.active.maneuverNodes[this.activeNodeIndex]) {
+          const node = formattedData.vessels.active.maneuverNodes[this.activeNodeIndex];
           const lastPatch = node.orbitPatches[node.orbitPatches.length - 1];
           if (lastPatch && lastPatch.ApA !== undefined) {
             predElem.innerText = `PRED AP: ${(lastPatch.ApA / 1000).toFixed(1)}km | PE: ${(lastPatch.PeA / 1000).toFixed(1)}km`;
@@ -440,8 +459,8 @@ class SystemOrbitalMap {
     }
   }
 
-  updateReferenceBodyGeometry(formattedData) {
-    var bodies = formattedData.referenceBodies || [];
+  updateReferenceBodyGeometry(bodies) {
+    if (!bodies) return;
     for (var i = 0; i < bodies.length; i++) {
       var info = bodies[i];
       var name = info.name;
@@ -453,14 +472,14 @@ class SystemOrbitalMap {
         continue;
       }
 
-      var radius = (info.radius || 600000);
+      var radius = info.radius;
       if (name === "Sun") radius = 261600000;
       this.bodyRadii[name] = radius;
 
       let mesh = this.registry.bodies[name];
       if (!mesh) {
         var material = name === "Sun" ? new THREE.MeshBasicMaterial({ color: 'yellow' }) : new THREE.MeshPhongMaterial({
-          color: info.type === "targetBodyCurrentPosition" ? this.targetColor : info.color,
+          color: info.color,
           shininess: 30,
           map: (name !== "Sun") ? this.planetTexture : null
         });
@@ -472,10 +491,7 @@ class SystemOrbitalMap {
       if (info.truePosition) mesh.position.set(info.truePosition.x, info.truePosition.y, info.truePosition.z);
       if (name === "Sun") this.sunLight.position.set(info.truePosition.x, info.truePosition.y, info.truePosition.z);
 
-      // v21.8.75: Planet rotation includes initial offset (Prime Meridian alignment)
       mesh.rotation.y = ((info.rotationAngle || 0) + (info.initialRotation || 0)) * (Math.PI / 180);
-
-      // v21.8.15: Handle Celestial Orbit Rendering (Ellipse)
       this.updateCelestialOrbitGeometry(name, info);
     }
   }
@@ -501,13 +517,16 @@ class SystemOrbitalMap {
     }
   }
 
-  updateVesselGeometry(formattedData) {
-    var vessels = formattedData.vessels || [];
+  updateVesselGeometry(vesselData) {
+    var vessels = [vesselData.active];
+    if (vesselData.target) vessels.push(vesselData.target);
+
     var seenVessels = {};
     for (var i = 0; i < vessels.length; i++) {
       var info = vessels[i];
-      // v21.8.38: Stable Vessel ID (Active ship vs Named Target)
-      var id = (info.type === "currentVessel") ? "vessel-active" : "vessel-target-" + (info.name || i);
+      if (!info || !info.truePosition) continue;
+
+      var id = info.id;
       seenVessels[id] = true;
       let mesh = this.registry.vessels[id];
       if (!mesh) {
@@ -527,49 +546,43 @@ class SystemOrbitalMap {
     }
   }
 
-  updateOrbitPathGeometry(formattedData) {
-    var patches = formattedData.orbitPatches || [];
-    // v21.8.38: Post-Warp Telemetry Gap Protection
-    // If the server sends a valid 'orbit' packet but the trajectory solver is still 
-    // re-calculating (empty patches), we skip the update and KEEP the old geometry.
-    if (patches.length === 0) return;
+  updateOrbitPathGeometry(vesselData) {
+    const vessels = [vesselData.active];
+    if (vesselData.target) vessels.push(vesselData.target);
 
     var seenPatches = {};
-    var typeCounts = {}; // v21.8.38: Track active segments per entity type
-    for (var i = 0; i < patches.length; i++) {
-      var patch = patches[i];
-      var pType = patch.parentType || "vessel";
+    var typeCounts = {}; // v21.8.38: Track active segments per entity type independently
 
-      // v21.8.38: Identify the sliding patch for EACH entity type individually
-      if (!typeCounts[pType]) typeCounts[pType] = 0;
-      var isFirstForType = (typeCounts[pType] === 0);
-      typeCounts[pType]++;
+    vessels.forEach(vessel => {
+      const patches = vessel.orbitPatches || [];
+      const pType = vessel.type || "vessel";
 
-      var id = isFirstForType ? "patch-" + pType + "-active" : "patch-" + pType + "-" + Math.floor(patch.startUT || 0);
-      seenPatches[id] = true;
+      patches.forEach((patch, idx) => {
+        // v21.8.38: Identify the sliding patch for EACH entity type individually
+        if (!typeCounts[pType]) typeCounts[pType] = 0;
+        var isFirstForType = (typeCounts[pType] === 0);
+        typeCounts[pType]++;
 
-      var points = patch.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
-      let line = this.registry.orbits[id];
+        var id = isFirstForType ? "patch-" + pType + "-active" : "patch-" + pType + "-" + Math.floor(patch.startUT || 0);
+        seenPatches[id] = true;
 
-      // v21.8.38: Standardized Color Palette
-      // First patch of each type: Authoritative. Future patches: Palette-based.
-      let colorVal;
-      if (pType === "targetVessel") {
-        colorVal = this.targetColor;
-      } else {
-        colorVal = isFirstForType ? "#00f2ff" : this.orbitPathColors[i % 10];
-      }
+        var points = patch.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
+        let line = this.registry.orbits[id];
 
-      if (!line) {
-        var geometry = this.createGeometryFromPoints(points, 256);
-        line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: colorVal }));
-        this.group.add(line);
-        this.registry.orbits[id] = line;
-      } else {
-        line.material.color.set(colorVal);
-        this.updateLineGeometry(line, points);
-      }
-    }
+        let colorVal = (pType === "targetVessel") ? this.targetColor : (isFirstForType ? "#00f2ff" : this.orbitPathColors[(typeCounts[pType] - 1) % 10]);
+
+        if (!line) {
+          var geometry = this.createGeometryFromPoints(points, 256);
+          line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: colorVal }));
+          this.group.add(line);
+          this.registry.orbits[id] = line;
+        } else {
+          line.material.color.set(colorVal);
+          this.updateLineGeometry(line, points);
+        }
+      });
+    });
+
     // Cleanup
     for (var key in this.registry.orbits) {
       if (!seenPatches[key]) {
@@ -579,8 +592,8 @@ class SystemOrbitalMap {
     }
   }
 
-  updateManeuverNodeGeometry(formattedData) {
-    var nodes = formattedData.maneuverNodes || [];
+  updateManeuverNodeGeometry(activeVessel, currentUT) {
+    var nodes = activeVessel.maneuverNodes || [];
     var seenNodes = {};
     for (var i = 0; i < nodes.length; i++) {
       var node = nodes[i];
@@ -625,7 +638,7 @@ class SystemOrbitalMap {
     const utInput = document.getElementById('node-ut-offset');
     if (utInput) {
       const offset = parseFloat(utInput.value) || 0;
-      const targetUT = formattedData.currentUniversalTime + offset;
+      const targetUT = currentUT + offset;
       const ghostId = "ghost-node";
       let ghost = this.registry.nodes[ghostId];
 
@@ -636,9 +649,9 @@ class SystemOrbitalMap {
       }
 
       // Target the ACTIVE maneuver node's patches for stacked planning
-      let targetPatches = formattedData.orbitPatches || [];
-      if (formattedData.maneuverNodes && formattedData.maneuverNodes[this.activeNodeIndex]) {
-        const activeNode = formattedData.maneuverNodes[this.activeNodeIndex];
+      let targetPatches = activeVessel.orbitPatches || [];
+      if (nodes[this.activeNodeIndex]) {
+        const activeNode = nodes[this.activeNodeIndex];
         if (activeNode.orbitPatches && activeNode.orbitPatches.length > 0) {
           targetPatches = activeNode.orbitPatches;
         }
@@ -682,18 +695,20 @@ class SystemOrbitalMap {
     }
   }
 
-  updateReferenceBodyOrbitPaths(formattedData) {
-    var paths = formattedData.referenceBodyPaths || [];
+  updateReferenceBodyOrbitPaths(bodies) {
+    var paths = bodies || [];
     var seenPaths = {};
     for (var i = 0; i < paths.length; i++) {
-      var path = paths[i];
-      var name = path.referenceBodyName;
+        var path = paths[i];
+        var name = path.name;
       seenPaths[name] = true;
       if (this.bodyToggles[name] === false) {
         if (this.registry.paths[name]) { this.group.remove(this.registry.paths[name]); delete this.registry.paths[name]; }
         continue;
       }
-      var points = path.truePositions.map(p => new THREE.Vector3(p.x, p.y, p.z));
+      const pathPoints = path.truePositions || path.orbitPath;
+      if (!pathPoints || pathPoints.length < 2) continue;
+      var points = pathPoints.map(p => new THREE.Vector3(p.x, p.y, p.z));
       let line = this.registry.paths[name];
       if (!line) {
         var geometry = this.createGeometryFromPoints(points, 256);
@@ -763,8 +778,8 @@ class SystemOrbitalMap {
       if (this.GUIParameters.focusBody === 'current vessel') {
         localFocusRadius = 100000; // Small radius for precision around vessel
       } else {
-        const bodyInfo = (formattedData.referenceBodies || []).find(b => b.name === this.GUIParameters.focusBody);
-        localFocusRadius = (bodyInfo ? bodyInfo.radius : 600000) * 12; // 12x radius covers moons
+        const bodyInfo = (formattedData.bodies || []).find(b => b.name === this.GUIParameters.focusBody);
+        localFocusRadius = (bodyInfo ? bodyInfo.radius : 600000) * 12;
       }
 
       // v21.8.20: Pure Meter Scale (1:1). Precision is handled by rootOrigin subtraction.

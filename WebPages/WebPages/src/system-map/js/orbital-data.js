@@ -6,9 +6,6 @@
 class SystemOrbitalPositionData {
     constructor(datalink, options = {}) {
         this.datalink = datalink;
-        this.timeoutRate = 1000;
-        this.mutexTimestamp = null;
-        this.rootReferenceBody = null;
         this.options = Object.assign({
             numberOfSegments: 256,
             onRecalculate: null
@@ -22,56 +19,43 @@ class SystemOrbitalPositionData {
         this.initializeDatalink();
     }
 
-    isLocked() {
-        return this.mutexTimestamp && this.mutexTimestamp < ((Date.now() / 1000 | 0) + this.timeoutRate);
-    }
-
-    mutexLock() { this.mutexTimestamp = Date.now(); }
-    mutexUnlock() { this.mutexTimestamp = null; }
-
     recalculate(msg) {
-        if (this.isLocked() || !this.planetStaticOrbitsFetched) return;
-        this.mutexLock();
+        if (!this.planetStaticOrbitsFetched) return;
 
-        const data = msg.data;
+        const data = msg.data || {};
         const type = msg.type;
         const ut = msg.ut || data['t.universalTime'] || data['currentUniversalTime'];
 
-        // v21.8.4: Ensure structural integrity for formatter
-        data.referenceBodies = data.referenceBodies || (this.datalink.lastDatalinkData ? this.datalink.lastDatalinkData.referenceBodies : {});
+        // v21.8.135: Composite State Persistence (Rigor + Legacy compatibility)
+        const store = this.datalink.lastDatalinkData || {};
 
-        // v21.8.10: Preserve UT
-        if (ut) {
-            data["currentUniversalTime"] = ut;
-        } else if (this.datalink.lastDatalinkData && this.datalink.lastDatalinkData["currentUniversalTime"]) {
-            data["currentUniversalTime"] = this.datalink.lastDatalinkData["currentUniversalTime"];
+        if (ut) store["currentUniversalTime"] = ut;
+        
+        // Ensure reference bodies and legacy structures are always present
+        if (data.referenceBodies) {
+            store.referenceBodies = Object.assign(store.referenceBodies || {}, data.referenceBodies);
         }
 
-        // v21.8.20: Persistence-aware merge
-        data["vesselBody"] = data['vesselBody'] || data['v.body'] || (this.datalink.lastDatalinkData ? this.datalink.lastDatalinkData.vesselBody : null);
-        data["vesselCurrentPosition"] = data['vesselCurrentPosition'] || (this.datalink.lastDatalinkData ? this.datalink.lastDatalinkData.vesselCurrentPosition : { "relativePosition": null });
-        data["targetCurrentPosition"] = data['targetCurrentPosition'] || (this.datalink.lastDatalinkData ? this.datalink.lastDatalinkData.targetCurrentPosition : { "relativePosition": null });
-
-        this.getPositionsAndRecalculate(data);
+        // v21.8.135: Mapping dynamic keys that might be in standard telemetry
+        ["vesselBody", "vesselCurrentPosition", "targetCurrentPosition", "targetName", "targetBody"].forEach(key => {
+            if (data[key] !== undefined) store[key] = data[key];
+        });
 
         if (this.options.onRecalculate) {
             try {
-                this.options.onRecalculate({ type, ut, data });
+                this.options.onRecalculate({ 
+                    type: type, 
+                    ut: ut, 
+                    data: store // Pass authorized composite state
+                });
             } catch (e) {
-                if (data.referenceBodies && data.referenceBodies["Kerbin"]) {
-                    console.error("[SystemMap] Format Error:", e.message);
-                }
+                console.error(`[SystemMap] Recalculate Error (${type}):`, e.message);
             }
         }
     }
 
-    getPositionsAndRecalculate(positionData) {
-        // v21.8: Metadata is now pushed automatically via 'orbit_metadata' stream.
-        this.mutexUnlock();
-    }
-
     /**
-     * v21.8: Handles the automatic push of all celestial body metadata.
+     * v21.8: Handles the automatic push of all celestial body metadata and UI population.
      */
     handleOrbitMetadata(msg) {
         const manifest = msg.data;
@@ -79,19 +63,16 @@ class SystemOrbitalPositionData {
 
         console.log("[SystemMap] Processing Orbit Metadata Manifest...");
 
-        // v21.8.19: Sync the client's body registry with authoritative server data
         if (this.datalink.updateOrbitalBodies) {
             this.datalink.updateOrbitalBodies(manifest);
         }
 
-        // v21.8.20: Direct In-Place Update (Avoids 'only a getter' crash)
-        const positionData = this.datalink.lastDatalinkData;
+        const positionData = this.datalink.lastDatalinkData || {};
         positionData["referenceBodies"] = positionData["referenceBodies"] || {};
         const refBodies = positionData["referenceBodies"];
 
         Object.keys(manifest).forEach(bodyName => {
             const body = manifest[bodyName];
-            // v21.8.20: Additive Merge (keep currentTruePosition if already exists)
             const store = this.ensurePath(refBodies, body.name);
 
             store.radius = body.radius;
@@ -105,27 +86,23 @@ class SystemOrbitalPositionData {
             store.epoch = body.epoch;
             store.initialRotation = body.initialRotation || 0;
             store.parent = body.parent || null;
-
-            console.debug(`[SystemMap] Synced metadata for ${body.name} (parent: ${body.parent || 'root'})`);
+            store.color = body.color || null;
         });
 
-        // v21.8.19: Dynamic Hierarchical UI Population
+        // v21.8.19: Dynamic Hierarchical UI Population 
         const focusSelector = document.getElementById('focus-selector');
         const toggleContainer = document.getElementById('body-toggles');
 
-        // Build a tree: { parentName: [childName, ...] }
         const tree = {};
-        const roots = []; // bodies with no parent (the Sun)
+        const roots = [];
         Object.keys(manifest).forEach(name => {
             const p = manifest[name].parent;
             if (!p) { roots.push(name); return; }
-            // Use normalized parent name for tree mapping
             const parentKey = Object.keys(manifest).find(k => k.toLowerCase() === p.toLowerCase()) || p;
             if (!tree[parentKey]) tree[parentKey] = [];
             tree[parentKey].push(name);
         });
 
-        // Recursive helper to build ordered list for selectors
         const flatOrder = [];
         const walk = (name, depth) => {
             flatOrder.push({ name, depth });
@@ -134,9 +111,7 @@ class SystemOrbitalPositionData {
         roots.forEach(r => walk(r, 0));
 
         if (focusSelector) {
-            // Keep Vessel option, clear the rest
             while (focusSelector.options.length > 1) focusSelector.remove(1);
-
             flatOrder.forEach(({ name, depth }) => {
                 const opt = document.createElement('option');
                 opt.value = name;
@@ -154,7 +129,6 @@ class SystemOrbitalPositionData {
 
         if (toggleContainer) {
             toggleContainer.innerHTML = '';
-
             flatOrder.forEach(({ name, depth }) => {
                 if (name === 'Sun') return;
                 const row = document.createElement('div');
@@ -164,7 +138,6 @@ class SystemOrbitalPositionData {
                 row.innerHTML = `<label><input type="checkbox" checked data-body="${name}"> ${prefix}${name.toUpperCase()}</label>`;
                 toggleContainer.appendChild(row);
             });
-
             window.dispatchEvent(new CustomEvent('system-map-ui-ready'));
         }
 
@@ -173,7 +146,7 @@ class SystemOrbitalPositionData {
         }
 
         this.planetStaticOrbitsFetched = true;
-        console.log("[SystemMap] All celestial metadata live.");
+        console.log("[SystemMap] All celestial metadata and UI live.");
     }
 
     /**
@@ -185,7 +158,7 @@ class SystemOrbitalPositionData {
         if (!batch) return;
 
         // v21.8.20: Direct In-Place Update of the canonical store.
-        const positionData = this.datalink.lastDatalinkData;
+        const positionData = this.datalink.lastDatalinkData || {};
         positionData.referenceBodies = positionData.referenceBodies || {};
 
         if (batch.bodyPositions) {
@@ -208,13 +181,18 @@ class SystemOrbitalPositionData {
         }
 
         positionData["currentUniversalTime"] = msg.ut;
+        positionData["meridianOffset"] = batch.meridianOffset;
 
-        // 1. Map Vessel (Direct Array Storage)
+        // 1. Map Vessel (Direct Array Storage - Restored legacy keys for Rendezvous compat)
         if (batch.vessel) {
-            positionData["o.orbitPatches"] = batch.vessel;
+            positionData["o.orbitPatches"] = batch.vessel.patches;
+            positionData["vesselBody"] = batch.vessel.body;
+            positionData["v.body"] = batch.vessel.body;
+            positionData["vesselCurrentPosition"] = { relativePosition: batch.vessel.position };
 
-            if (batch.vessel.length > 0) {
-                const firstPatch = batch.vessel[0];
+            const patches = batch.vessel.patches || [];
+            if (patches.length > 0) {
+                const firstPatch = patches[0];
 
                 // v21.8.72: Mapping elements to legacy keys for Rendezvous logic
                 positionData['o.sma'] = firstPatch.sma;
@@ -224,24 +202,19 @@ class SystemOrbitalPositionData {
                 positionData['o.lan'] = firstPatch.lan;
                 positionData['o.argumentOfPeriapsis'] = firstPatch.argPe;
                 positionData['o.trueAnomaly'] = firstPatch.trueAnomaly || 0;
-
-                if (firstPatch.referenceBody) {
-                    positionData["vesselBody"] = firstPatch.referenceBody;
-                    positionData["v.body"] = firstPatch.referenceBody;
-                }
-                if (firstPatch.points && firstPatch.points.length > 0) {
-                    const pt = firstPatch.points[0];
-                    positionData["vesselCurrentPosition"] = { relativePosition: { x: pt.x, y: pt.y, z: pt.z } };
-                }
             }
         }
 
-        // 2. Map Target (Direct Array Storage)
-        if (batch.target && Array.isArray(batch.target)) {
-            positionData["tar.o.orbitPatches"] = batch.target;
+        // 2. Map Target (Restored legacy compatibility)
+        if (batch.target) {
+            positionData["targetCurrentPosition"] = { relativePosition: batch.target.position };
+            positionData["tar.o.orbitPatches"] = batch.target.patches;
+            positionData["targetBody"] = batch.target.body;
+            positionData["targetName"] = batch.target.name;
 
-            if (batch.target.length > 0) {
-                const firstPatch = batch.target[0];
+            const patches = batch.target.patches || [];
+            if (patches.length > 0) {
+                const firstPatch = patches[0];
 
                 // v21.8.72: Mapping target elements for Rendezvous logic
                 positionData['tar.o.sma'] = firstPatch.sma;
@@ -252,15 +225,10 @@ class SystemOrbitalPositionData {
                 positionData['tar.o.argumentOfPeriapsis'] = firstPatch.argPe;
                 positionData['tar.o.trueAnomaly'] = firstPatch.trueAnomaly || 0;
                 positionData['tar.o.orbitingBody'] = firstPatch.referenceBody;
-
-                if (firstPatch.points && firstPatch.points.length > 0) {
-                    const pt = firstPatch.points[0];
-                    positionData["targetCurrentPosition"] = { relativePosition: { x: pt.x, y: pt.y, z: pt.z } };
-                }
             }
         }
 
-        // 3. Map Maneuvers (Direct Array Storage)
+        // 3. Map Maneuvers
         if (batch.maneuvers) {
             positionData["o.maneuverNodes"] = batch.maneuvers;
         }
@@ -279,11 +247,6 @@ class SystemOrbitalPositionData {
         }
     }
 
-
-
-    /**
-     * Safe object path navigation utility.
-     */
     ensurePath(obj, ...parts) {
         let current = obj;
         for (const part of parts) {
@@ -296,19 +259,23 @@ class SystemOrbitalPositionData {
     }
 
     initializeDatalink() {
-        // v21.8.71: Merged with colleague subscriptions while keeping WebSocket architecture
         this.datalink.subscribeToData([
             't.universalTime', 'v.body', 'v.altitude',
             'tar.name', 'tar.type',
             'n.pitch', 'n.roll', 'n.heading',
             'o.ApA', 'o.PeA', 'o.encounterBody', 'o.encounterTime',
-            'astg.nextDestination', 'astg.nextBurnCountdown', 'astg.nextDeltaV', // Aggiunti dal collega
+            'astg.nextDestination', 'astg.nextBurnCountdown', 'astg.nextDeltaV',
             'pl.rotationX', 'pl.rotationY', 'pl.rotationZ', 'pl.meridianOffset', 'b.rotationAngle'
         ]);
 
         if (this.datalink.signalLink) {
             this.datalink.signalLink.on('orbit', (msg) => this.handleOrbitBatch(msg));
             this.datalink.signalLink.on('orbit_metadata', (msg) => this.handleOrbitMetadata(msg));
+            
+            // v21.8.140: Hook into smooth local extrapolation tick (60Hz)
+            this.datalink.signalLink.on('smooth_tick', (msg) => {
+                this.recalculate({ type: 'smooth_tick', ut: msg.ut, data: {} });
+            });
 
             const subscribe = () => {
                 this.datalink.signalLink.subscribeOrbit({ resolution: this.options.numberOfSegments });
@@ -321,9 +288,10 @@ class SystemOrbitalPositionData {
             }
         }
 
-        this.datalink.addReceiverFunction(this.recalculate.bind(this));
+        this.datalink.addReceiverFunction((data) => {
+            this.recalculate({ type: 'telemetry', data: data });
+        });
     }
-
 }
 
 window.SystemOrbitalPositionData = SystemOrbitalPositionData;
