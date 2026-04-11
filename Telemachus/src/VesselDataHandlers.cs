@@ -371,6 +371,9 @@ namespace Telemachus
         [TelemetryAPI("o.period", "Orbital Period", Units = APIEntry.UnitType.TIME, Category = "orbit", ReturnType = "double")]
         object Period(DataSources ds) => ds.vessel.orbit.period;
 
+        [TelemetryAPI("o.n", "Mean Motion", Category = "orbit", ReturnType = "double")]
+        object MeanMotion(DataSources ds) => ds.vessel.orbit.meanMotion;
+
         // --- Anomalies ---
 
         [TelemetryAPI("o.trueAnomaly", "True Anomaly", Units = APIEntry.UnitType.DEG, Category = "orbit", ReturnType = "double")]

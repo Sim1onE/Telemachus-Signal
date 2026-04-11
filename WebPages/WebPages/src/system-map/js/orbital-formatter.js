@@ -177,7 +177,7 @@ class SystemPositionDataFormatter {
       const vesselOrbit = {
         sma: positionData['o.sma'], ecc: positionData['o.eccentricity'], inc: positionData['o.inclination'],
         argPe: positionData['o.argumentOfPeriapsis'], lan: positionData['o.lan'], period: positionData['o.period'],
-        m0: positionData['o.m0'], epoch: positionData['o.epoch'],
+        m0: positionData['o.m0'], epoch: positionData['o.epoch'], n: positionData['o.n'],
         referenceBody: vesselBodyName // v21.8.188: Align rotation reference
       };
 
@@ -407,11 +407,15 @@ class SystemPositionDataFormatter {
     const period = orbit.period;
     const m0 = orbit.m0 || 0;
     const epoch = orbit.epoch || 0;
+    
+    // v24.1: Hyperbolic Support. n (mean motion) can be provided directly.
+    const n = orbit.n !== undefined ? orbit.n : (period > 0 ? (2 * Math.PI) / period : 0);
 
     // v21.8.160: Orbital Period & Stability Guard
     // A period < 10s is physically impossible in KSP and indicates corrupted data or SOI jump artifacts.
-    if (!sma || !period || period < 10 || ecc >= 1.0) {
-      if (period > 0 && period < 10) {
+    // Note: Hyperbolic orbits have 'Infinity' period or 0, so we check ecc.
+    if (!sma || (ecc < 1.0 && (!period || period < 10))) {
+      if (ecc < 1.0 && period > 0 && period < 10) {
         console.warn(`[SystemMap] Abnormal Orbit Period Detected: ${period}s. Analytical solver suspended.`);
       }
       return { x: 0, y: 0, z: 0 };
@@ -433,29 +437,60 @@ class SystemPositionDataFormatter {
 
     const lan = ((orbit.lan || 0) + offsetDeg) * Math.PI / 180;
 
-    // 1. Mean Anomaly at UT
-    const utOffset = (ut - epoch) % period;
-    const n = (2 * Math.PI) / period;
-    let M = m0 + n * utOffset;
-    // Normalize M to [0, 2π]
-    M = M % (2 * Math.PI);
-    if (M < 0) M += 2 * Math.PI;
+    const utOffset = ut - epoch;
+    let v = 0; // True anomaly
+    let r = 0; // Radial distance
 
-    // 2. Solve Kepler's Equation: M = E - e*sin(E) via Newton-Raphson
-    let E = M; // Initial guess
-    for (let i = 0; i < 15; i++) {
-      const dE = (M - E + ecc * Math.sin(E)) / (1 - ecc * Math.cos(E));
-      E += dE;
-      if (Math.abs(dE) < 1e-10) break;
+    if (ecc < 1.0) {
+      // --- Elliptical Orbit ---
+      if (period <= 0) return { x: 0, y: 0, z: 0 };
+      
+      let M = m0 + n * (utOffset % period);
+      // Normalize M to [0, 2π]
+      M = M % (2 * Math.PI);
+      if (M < 0) M += 2 * Math.PI;
+
+      // Solve Kepler's Equation: M = E - e*sin(E) via Newton-Raphson
+      let E = M; // Initial guess
+      for (let i = 0; i < 15; i++) {
+        const dE = (M - E + ecc * Math.sin(E)) / (1 - ecc * Math.cos(E));
+        E += dE;
+        if (Math.abs(dE) < 1e-10) break;
+      }
+
+      // True Anomaly from Eccentric Anomaly
+      const sinV = (Math.sqrt(1 - ecc * ecc) * Math.sin(E)) / (1 - ecc * Math.cos(E));
+      const cosV = (Math.cos(E) - ecc) / (1 - ecc * Math.cos(E));
+      v = Math.atan2(sinV, cosV);
+      
+      // Radial distance
+      r = sma * (1 - ecc * Math.cos(E));
+      
+    } else {
+      // --- Hyperbolic Orbit (Encounter/Escape) ---
+      let M = m0 + n * utOffset;
+      
+      // Solve Hyperbolic Kepler's Equation: M = e*sinh(H) - H via Newton-Raphson
+      let H = M; // Initial guess
+      for (let i = 0; i < 15; i++) {
+        const f = ecc * Math.sinh(H) - H - M;
+        const df = ecc * Math.cosh(H) - 1;
+        const dH = f / df;
+        H -= dH;
+        if (Math.abs(dH) < 1e-10) break;
+      }
+
+      // True Anomaly from Hyperbolic Anomaly
+      const coshH = Math.cosh(H);
+      const sinhH = Math.sinh(H);
+      
+      const cosV = (ecc - coshH) / (ecc * coshH - 1);
+      const sinV = (Math.sqrt(ecc * ecc - 1) * sinhH) / (ecc * coshH - 1);
+      v = Math.atan2(sinV, cosV);
+      
+      // Radial distance (sma is negative in KSP for hyperbolic orbits)
+      r = Math.abs(sma) * (ecc * coshH - 1);
     }
-
-    // 3. True Anomaly from Eccentric Anomaly
-    const sinV = (Math.sqrt(1 - ecc * ecc) * Math.sin(E)) / (1 - ecc * Math.cos(E));
-    const cosV = (Math.cos(E) - ecc) / (1 - ecc * Math.cos(E));
-    const v = Math.atan2(sinV, cosV); // True anomaly
-
-    // 4. Radial distance
-    const r = sma * (1 - ecc * Math.cos(E));
 
     // 5. Position in orbital plane
     const theta = argPe + v;
@@ -485,6 +520,24 @@ class SystemPositionDataFormatter {
     if (progress < 0) progress += 1;
     const index = Math.floor(progress * (points.length - 1));
     return points[index];
+  }
+
+  /**
+   * v24.1: High-Performance Path Generator
+   * Reconstructs an orbital segment (patch) analytically at 60Hz.
+   * Eliminates the need for 'points' arrays from the server.
+   */
+  generateOrbitSegment(orbit, startUT, endUT, segments = 256) {
+    const points = [];
+    const duration = endUT - startUT;
+    if (duration <= 0 || !orbit.sma) return points;
+
+    for (let i = 0; i <= segments; i++) {
+      const ut = startUT + (i / segments) * duration;
+      const pos = this.solveKeplerAnalytical(orbit, ut);
+      if (pos) points.push(pos);
+    }
+    return points;
   }
 
   formatCurrentVessel(positionData, formattedData) {
@@ -545,9 +598,9 @@ class SystemPositionDataFormatter {
 
     const formattedOrbitPatches = [];
     orbits.forEach(orbitPatch => {
-      // v21.8.30: Direct Array Ingestion (No Dictionary Mapping)
-      if (!orbitPatch.points || orbitPatch.points.length < 2) return;
-
+      // v24.1: Analytical Orbit Generation Bridge
+      // We no longer require the 'points' array from the server.
+      // If missing, we generate the segment ourselves using the Keplerian elements.
       const patch = {
         orbitPath: [],
         parentType: parentType,
@@ -560,13 +613,18 @@ class SystemPositionDataFormatter {
         elements: {
           sma: orbitPatch.sma, ecc: orbitPatch.ecc, inc: orbitPatch.inc,
           argPe: orbitPatch.argPe, lan: orbitPatch.lan, period: orbitPatch.period,
-          m0: orbitPatch.m0, epoch: orbitPatch.epoch
+          m0: orbitPatch.m0, epoch: orbitPatch.epoch, n: orbitPatch.n,
+          referenceBody: orbitPatch.referenceBody
         }
       };
 
       const patchBodyAbsolutePos = this.getAbsolutePos(orbitPatch.referenceBody || "Kerbin");
 
-      orbitPatch.points.forEach(rawPos => {
+      // v24.1 Logic: Generate path from elements instead of server points
+      const rawPoints = (orbitPatch.points && orbitPatch.points.length >= 2) ? 
+        orbitPatch.points : this.generateOrbitSegment(patch.elements, patch.startUT, patch.endUT, 128);
+
+      rawPoints.forEach(rawPos => {
         const absolutePatchPos = {
           x: patchBodyAbsolutePos.x + rawPos.x,
           y: patchBodyAbsolutePos.y + rawPos.y,
@@ -634,8 +692,6 @@ class SystemPositionDataFormatter {
 
     const formattedOrbitPatches = [];
     node.patches.forEach(orbitPatch => {
-      if (!orbitPatch.points || orbitPatch.points.length < 2) return;
-
       const patch = {
         orbitPath: [],
         referenceBody: orbitPatch.referenceBody,
@@ -647,13 +703,18 @@ class SystemPositionDataFormatter {
         elements: {
           sma: orbitPatch.sma, ecc: orbitPatch.ecc, inc: orbitPatch.inc,
           argPe: orbitPatch.argPe, lan: orbitPatch.lan, period: orbitPatch.period,
-          m0: orbitPatch.m0, epoch: orbitPatch.epoch
+          m0: orbitPatch.m0, epoch: orbitPatch.epoch, n: orbitPatch.n,
+          referenceBody: orbitPatch.referenceBody
         }
       };
 
       const patchBodyAbsolutePos = this.getAbsolutePos(orbitPatch.referenceBody || "Kerbin");
 
-      orbitPatch.points.forEach(rawPos => {
+      // v24.1 Logic: Generate path from elements instead of server points
+      const rawPoints = (orbitPatch.points && orbitPatch.points.length >= 2) ? 
+        orbitPatch.points : this.generateOrbitSegment(patch.elements, patch.startUT, patch.endUT, 128);
+
+      rawPoints.forEach(rawPos => {
         const absolutePatchPos = {
           x: patchBodyAbsolutePos.x + rawPos.x,
           y: patchBodyAbsolutePos.y + rawPos.y,

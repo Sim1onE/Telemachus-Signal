@@ -195,6 +195,7 @@ class SystemOrbitalPositionData {
                 positionData['o.trueAnomaly'] = firstPatch.trueAnomaly || 0;
                 positionData['o.m0'] = firstPatch.m0 || 0;
                 positionData['o.epoch'] = firstPatch.epoch || 0;
+                positionData['o.n'] = firstPatch.n || 0;
                 positionData['o.referenceBody'] = firstPatch.referenceBody;
             }
         }

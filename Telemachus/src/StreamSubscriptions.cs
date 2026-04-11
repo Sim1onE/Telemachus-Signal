@@ -553,18 +553,6 @@ namespace Telemachus
                     pEnd = pStart + patch.period;
                 }
 
-                var points = new List<object>();
-                double step = (pEnd - pStart) / Resolution;
-
-                for (int i = 0; i <= Resolution; i++)
-                {
-                    double ut = pStart + (step * i);
-
-                    // 1. Relative position in patch frame (Mandatory for all points)
-                    Vector3d pos = patch.getRelativePositionAtUT(ut);
-                    points.Add(new Dictionary<string, double> { { "x", pos.x }, { "y", pos.y }, { "z", pos.z } });
-                }
-
                 groups.Add(new Dictionary<string, object> {
                     { "patch", patches.IndexOf(patch) },
                     { "referenceBody", patch.referenceBody.name },
@@ -578,7 +566,7 @@ namespace Telemachus
                     { "period", patch.period },
                     { "m0", patch.meanAnomalyAtEpoch },
                     { "epoch", patch.epoch },
-                    { "points", points }
+                    { "n", patch.meanMotion }
                 });
             }
 
