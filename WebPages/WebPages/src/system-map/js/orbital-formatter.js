@@ -85,23 +85,19 @@ class SystemPositionDataFormatter {
 
     // v22.1: Analytical Rotation Solver
     // Calculates the rotation angle (degrees) for any celestial body at a given UT.
-    // v22.6: Performance-optimized Meridian Extrapolation
-    // We calculate the rotation angle analytically at 60Hz to eliminate stuttering between server ticks.
-    this.getInterpretedMeridianOffset = (ut) => {
-      const initial = positionData["initialMeridianOffset"];
-      if (initial === undefined) return positionData["meridianOffset"] || 0;
-      
-      const sampleUt = positionData["meridianSampleUt"] || 0;
-      const speed = positionData["meridianRotationSpeed"] || 0;
-      return (initial + (speed * (ut - sampleUt))) % 360;
-    };
-
     this.solveOrbitalRotation = (info, ut) => {
       if (!info || !info.rotates) return 0;
 
+      // v22.6: Performance-optimized Meridian Extrapolation
+      // We calculate the rotation angle analytically at 60Hz to eliminate stuttering between server ticks.
       const vesselBodyName = positionData["vesselBody"] || "Kerbin";
-      if (info.name === vesselBodyName) {
-        return this.getInterpretedMeridianOffset(ut);
+      if (info.name === vesselBodyName && positionData["initialMeridianOffset"] !== undefined) {
+        const sampleUt = positionData["meridianSampleUt"] || 0;
+        const initial = positionData["initialMeridianOffset"];
+        const speed = positionData["meridianRotationSpeed"] || 0;
+        
+        // Return interpolated meridian angle
+        return (initial + (speed * (ut - sampleUt))) % 360;
       }
 
       const initial = info.initialRotation || 0;
@@ -369,7 +365,14 @@ class SystemPositionDataFormatter {
     // v21.8.65: Dynamic Meridian Alignment
     // Instead of a hardcoded 75, we use the raw KSP Meridian Offset.
     // If the server data is not yet available, we use 61.64 (standard for UT=0).
-    let offset = (360 - this.getInterpretedMeridianOffset(positionData.currentUniversalTime)) % 360;
+    let offset = 0;
+    if (!skipFix) {
+      const lastData = this.datalink.lastDatalinkData || {};
+      if (lastData["pl.meridianOffset"] !== undefined) {
+        // The correction to align Inertial LAN to World View is (360 - offset)
+        offset = (360 - lastData["pl.meridianOffset"]) % 360;
+      }
+    }
 
     const radLan = ((lan + offset) * Math.PI / 180.0);
 
@@ -416,7 +419,18 @@ class SystemPositionDataFormatter {
 
     // v21.8.205: Robust Coordinate Alignment
     // Ensure we don't hit NaN if planetary data is missing during a smooth frame.
-    const offsetDeg = (360 - this.getInterpretedMeridianOffset(ut)) % 360;
+    let offsetDeg = 0;
+    const store = this.datalink.lastDatalinkData || {};
+
+    // Check for explicit orbital meridian offset or fallback to reference body metadata
+    // In our store, it's saved as "meridianOffset" or inside referenceBodies[name].meridianOffset
+    if (store["meridianOffset"] !== undefined) {
+      offsetDeg = (360 - store["meridianOffset"]) % 360;
+    } else if (orbit.referenceBody && store.referenceBodies && store.referenceBodies[orbit.referenceBody]) {
+      const body = store.referenceBodies[orbit.referenceBody];
+      offsetDeg = (360 - (body.meridianOffset || 0)) % 360;
+    }
+
     const lan = ((orbit.lan || 0) + offsetDeg) * Math.PI / 180;
 
     // 1. Mean Anomaly at UT
