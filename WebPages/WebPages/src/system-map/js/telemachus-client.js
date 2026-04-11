@@ -73,30 +73,14 @@ class Telemachus {
    * Command Bridge (SEND commands instead of polling data).
    */
   sendManeuverUpdate(index, ut, radial, normal, prograde) {
-    const cmd = `o.updateManeuverNode[${index},${ut},${radial},${normal},${prograde}]`;
-    this.sendMessage({ [cmd]: cmd });
+    this.sendMessage({ "o.updateManeuverNode": [index, ut, radial, normal, prograde] });
   }
 
-  sendNodeAction(action, nodeIndex = 0, utOffset = 1000) {
-    if (action === 'add') {
-      this.sendMessage({ "t.universalTime": "t.universalTime" }, (data) => {
-        const ut = data["t.universalTime"] + utOffset;
-        const cmd = `o.addManeuverNode[${ut},0,0,0]`;
-        this.sendMessage({ [cmd]: cmd });
-      });
-    } else {
-      const cmd = `o.removeManeuverNode[${nodeIndex}]`; 
-      this.sendMessage({ [cmd]: cmd });
+  sendNodeAction(action, nodeIndex = 0) {
+    if (action === 'del') {
+      this.sendMessage({ "o.removeManeuverNode": [nodeIndex] });
     }
-  }
-
-  convertData(rawData) {
-    const data = {};
-    Object.keys(rawData).forEach(key => {
-      const convertedFieldName = key.replace(/\{/g, "[").replace(/\}/g, "]");
-      data[convertedFieldName] = rawData[key];
-    });
-    return data;
+    // 'add' logic handled specifically in UI/OrbitalView to ensure correct UT calculation
   }
 
   dispatchMessages(msg) {

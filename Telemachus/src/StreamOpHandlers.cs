@@ -117,8 +117,22 @@ namespace Telemachus
                     {
                         try 
                         {
-                            // Fix: Evaluate Value, not Key. 
-                            string apiString = kvp.Value.ToString();
+                            // v23.4: Structured Command Protocol { "cmd": [arg1, arg2] }
+                            // Reconstruct legacy bracket syntax from structured JSON value
+                            string apiString = kvp.Key;
+                            if (kvp.Value is System.Collections.IList args)
+                            {
+                                var argList = new List<string>();
+                                foreach (var arg in args) argList.Add(arg.ToString());
+                                apiString += "[" + string.Join(",", argList.ToArray()) + "]";
+                            }
+                            else
+                            {
+                                // If not a list, enforce empty bracket for consistency if it's a known command, 
+                                // or just use as is for simple GETs (though they are being phased out).
+                                apiString += "[]"; 
+                            }
+
                             results[kvp.Key] = controller.Socket.ProcessAPI(apiString); 
                         }
                         catch { results[kvp.Key] = null; }

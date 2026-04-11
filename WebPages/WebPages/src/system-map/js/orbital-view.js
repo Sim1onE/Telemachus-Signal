@@ -192,8 +192,7 @@ class SystemOrbitalMap {
 
       // Confirm with user
       if (confirm(`BEST ENCOUNTER FOUND (Window #${result.window + 1})\n\nBurn in: ${Math.floor(result.waitTime / 3600)}h ${Math.floor((result.waitTime % 3600) / 60)}m\nPredicted Separation: ${distStr}m\nDelta-V: ${dvStr} m/s\n\nCreate maneuver node?`)) {
-        const cmd = `o.addManeuverNode[${result.ut},0,0,${result.dv}]`;
-        this.datalink.sendMessage({ [cmd]: cmd });
+        this.datalink.sendMessage({ "o.addManeuverNode": [result.ut, 0, 0, result.dv] });
       }
     } else {
       alert("ERROR: COULD NOT CALCULATE RENDEZVOUS. CHECK RELATIVE INCLINATION.");
@@ -216,8 +215,7 @@ class SystemOrbitalMap {
       targetUT = lastNode.UT + offset;
     }
 
-    const cmd = `o.addManeuverNode[${targetUT},0,0,0]`;
-    this.datalink.sendMessage({ [cmd]: cmd });
+    this.datalink.sendMessage({ "o.addManeuverNode": [targetUT, 0, 0, 0] });
 
     // Auto-Select Logic
     const currentNodes = d['o.maneuverNodes'] || [];
