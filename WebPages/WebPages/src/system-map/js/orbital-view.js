@@ -479,7 +479,7 @@ class SystemOrbitalMap {
           if (info.truePosition) this.sunLight.position.set(info.truePosition.x, info.truePosition.y, info.truePosition.z);
       }
 
-      mesh.rotation.y = ((info.rotationAngle || 0) + (info.initialRotation || 0)) * (Math.PI / 180);
+      mesh.rotation.y = (info.rotationAngle || 0) * (Math.PI / 180);
       this.updateCelestialOrbitGeometry(name, info);
     }
   }

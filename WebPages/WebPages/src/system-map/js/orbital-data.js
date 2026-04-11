@@ -63,13 +63,17 @@ class SystemOrbitalPositionData {
         const manifest = data.bodies;
         console.log("[SystemMap] Processing Orbit Metadata Manifest...", data);
 
-        if (this.datalink.updateOrbitalBodies) {
-            this.datalink.updateOrbitalBodies(manifest);
-        }
-
         const positionData = this.datalink.lastDatalinkData || {};
         positionData["referenceBodies"] = positionData["referenceBodies"] || {};
         const refBodies = positionData["referenceBodies"];
+
+        // v22.6: Capture Master Meridian Metadata for 60Hz Analytical Alignment
+        // This allows the formatter to extrapolate house-of-cards rotations between server ticks.
+        if (data.initialMeridianOffset !== undefined) {
+            positionData["initialMeridianOffset"] = data.initialMeridianOffset;
+            positionData["meridianRotationSpeed"] = data.meridianRotationSpeed || 0;
+            positionData["meridianSampleUt"] = msg.ut || 0;
+        }
 
         Object.keys(manifest).forEach(bodyName => {
             const body = manifest[bodyName];
