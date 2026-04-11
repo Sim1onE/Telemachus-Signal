@@ -112,7 +112,6 @@ namespace Telemachus
                 var values = payload.ContainsKey("values") ? payload["values"] as Dictionary<string, object> : null;
                 if (values != null)
                 {
-                    var results = new Dictionary<string, object>();
                     foreach (var kvp in values)
                     {
                         try 
@@ -128,22 +127,17 @@ namespace Telemachus
                             }
                             else
                             {
-                                // If not a list, enforce empty bracket for consistency if it's a known command, 
-                                // or just use as is for simple GETs (though they are being phased out).
                                 apiString += "[]"; 
                             }
 
-                            results[kvp.Key] = controller.Socket.ProcessAPI(apiString); 
+                            // v24.1: Execute command; discarding return value (asynchronous Zero-Legacy model)
+                            controller.Socket.ProcessAPI(apiString); 
                         }
-                        catch { results[kvp.Key] = null; }
+                        catch (Exception ex) 
+                        { 
+                            PluginLogger.print($"[CommandOp] Error processing command {kvp.Key}: {ex.Message}");
+                        }
                     }
-
-                    var response = new Dictionary<string, object> {
-                        { "type", "telemetry_response" },
-                        { "data", results }
-                    };
-                    if (payload.ContainsKey("id")) response["id"] = payload["id"];
-                    controller.SendUnified(response);
                 }
             }
         }

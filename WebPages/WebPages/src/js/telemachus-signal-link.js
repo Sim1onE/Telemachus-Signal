@@ -200,20 +200,19 @@ class TelemachusSignalLink {
         if (idx !== -1) list.splice(idx, 1);
     }
 
+    // Generic send for hierarchical actions with specific targets (v21.5)
     sendRequest(action, target, payload, callback) {
         const id = Math.random().toString(36).substr(2, 9);
         payload.id = id;
 
-        const responseType = target + "_response";
-        const handler = (msg) => {
-            if (msg.id === id || (msg.data && msg.data.id === id)) {
-                this.off(responseType, handler);
-                callback(msg.data);
-            }
-        };
-
-        this.on(responseType, handler);
+        // v24.1: Synchronous response (ACK) logic entirely removed. 
+        // Zero-Legacy relies on asynchronous telemetry/orbit streams for state updates.
         this.send(action, target, payload);
+
+        // Execute callback immediately if provided (maintains API compatibility)
+        if (callback) {
+            callback({});
+        }
     }
 
     connect() {
